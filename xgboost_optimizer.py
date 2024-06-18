@@ -7,6 +7,8 @@ import xgboost as xgb
 from sklearn.metrics import accuracy_score
 from sklearn.feature_selection import SelectFromModel
 from optuna.pruners import MedianPruner
+from optuna.integration import XGBoostPruningCallback
+
 
 best_accuracy = 0
 best_model_state = None
@@ -29,44 +31,29 @@ def objective(trial):
         "subsample": trial.suggest_float("subsample", 0.1, 1.0, log=True),
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.1, 1.0, log=True),
         "gamma": trial.suggest_float("gamma", .01, 0.4, log=True),
-        "n_estimators": trial.suggest_int("n_estimators", 100, 10000),
+        "n_estimators": trial.suggest_int("n_estimators", 100, 5000),
         "eta": trial.suggest_float("eta", 0.1, 0.2, log=True),
-        "seed": trial.suggest_int("seed", 1, 100)
+        "seed": trial.suggest_int("seed", 1, 100),
+        "early_stopping_rounds": 10
     }
-
-    model = xgb.XGBClassifier(**search_space)
-
-    early_stopping_rounds = 10
-    model.set_params(early_stopping_rounds=early_stopping_rounds)
 
     X_train, X_test, y_train, y_test = get_train_test_data()
 
-    best_score = -np.inf
-    best_iteration = 0
-
-    for epoch in range(100):
-        model.fit(X_train, y_train, eval_set=[(X_test, y_test)], verbose=False)
-        y_pred = model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-
-        if accuracy > best_score:
-            best_score = accuracy
-            best_iteration = model.best_iteration
-
-        trial.report(accuracy, epoch)
-
-        if trial.should_prune():
-            raise optuna.TrialPruned()
-
-        if model.best_iteration >= early_stopping_rounds:
-            break
+    model = xgb.XGBClassifier(**search_space)
+    model.fit(
+        X_train, y_train,
+        eval_set=[(X_test, y_test)],
+        verbose=False
+    )
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
 
     # Update the global best model if the current one is better
-    if best_score > best_accuracy:
-        best_accuracy = best_score
+    if accuracy > best_accuracy:
+        best_accuracy = accuracy
         best_model_state = model  # Save the best model
 
-    return best_score
+    return accuracy
 
 
 def get_train_test_data():
@@ -146,7 +133,7 @@ def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rou
                 gamma=0.017109525533870292,
                 n_estimators=7295,
                 eta=0.12635351933273808,
-                random_state=46
+                random_state=42
             )
             # Set early stopping rounds
             model.set_params(early_stopping_rounds=early_stopping_rounds)

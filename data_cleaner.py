@@ -11,8 +11,9 @@ def combine_rounds_stats(file_path):
 
     # Drop 'round', 'location', and 'event' columns
     ufc_stats = ufc_stats.drop(['round', 'location', 'event'], axis=1)
+    ufc_stats = ufc_stats[~ufc_stats['winner'].isin(['NC', 'D'])]
 
-    # Drop fights with "Women's" in the weight_class column and fights by split decision and DQs
+    # Drop fights with "Women's" in the weight_class column
     ufc_stats = ufc_stats[~ufc_stats['weight_class'].str.contains("Women's")]
 
     # Identify numeric columns
@@ -25,8 +26,7 @@ def combine_rounds_stats(file_path):
     fighter_identifier = 'fighter'
 
     # Convert 'time' column from minutes:seconds format to seconds
-    ufc_stats['time'] = pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.second + pd.to_datetime(ufc_stats['time'],
-                                                                                                     format='%M:%S').dt.minute * 60
+    ufc_stats['time'] = pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.second + pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.minute * 60
 
     # Find the highest round and time for each fight ID
     max_round_time = ufc_stats.groupby('id').agg({'last_round': 'max', 'time': 'max'}).reset_index()
@@ -36,9 +36,9 @@ def combine_rounds_stats(file_path):
 
     # Recalculate percentage columns based on the provided formulas
     aggregated_stats['significant_strikes_rate'] = (
-            aggregated_stats['significant_strikes_landed'] / aggregated_stats['significant_strikes_attempted'])
+        aggregated_stats['significant_strikes_landed'] / aggregated_stats['significant_strikes_attempted'])
     aggregated_stats['takedown_rate'] = (
-            aggregated_stats['takedown_successful'] / aggregated_stats['takedown_attempted'])
+        aggregated_stats['takedown_successful'] / aggregated_stats['takedown_attempted'])
 
     # Handle potential division by zero issues by replacing NaN values with zeros
     aggregated_stats['significant_strikes_rate'] = aggregated_stats['significant_strikes_rate'].fillna(0)
@@ -55,75 +55,7 @@ def combine_rounds_stats(file_path):
     # Merge the highest round and time data with merged_stats
     merged_stats = pd.merge(merged_stats, max_round_time, on='id', how='left')
 
-    # Convert unique strings to integers and create dictionary mappings
-    for column in ['result', 'winner', 'weight_class', 'scheduled_rounds']:
-        merged_stats[column], unique = pd.factorize(merged_stats[column])
-        mapping = {index: label for index, label in enumerate(unique)}
-        print(f"Mapping for {column}: {mapping}")
-
-    # Read the fighter_stats file
-    fighter_stats = pd.read_csv('data/fighter_stats.csv')
-
-    # Rename columns to match the naming convention
-    fighter_stats.columns = fighter_stats.columns.str.lower()
-
-    # Preprocess fighter names in merged_stats
-    merged_stats['fighter'] = merged_stats['fighter'].str.lower().str.strip()
-
-    # Preprocess fighter names in fighter_stats
-    fighter_stats['name'] = fighter_stats['name'].str.lower().str.strip()
-
-    # Replace '--' with NaN in the 'height' column
-    fighter_stats['height'] = fighter_stats['height'].replace('--', np.nan)
-
-    # Convert height to inches
-    fighter_stats['height'] = fighter_stats['height'].apply(
-        lambda x: int(x.split("'")[0]) * 12 + int(x.split("'")[1].replace('"', '')) if pd.notna(x) else x)
-
-    # Fill NaN values in the 'height' column with the median
-    fighter_stats['height'] = fighter_stats['height'].fillna(fighter_stats['height'].median())
-
-    # Replace '--' with NaN in the 'reach' column
-    fighter_stats['reach'] = fighter_stats['reach'].replace('--', np.nan)
-
-    # Convert reach to inches
-    fighter_stats['reach'] = fighter_stats['reach'].str.replace('"', '').astype(float)
-
-    # Fill NaN values in the 'reach' column with the median
-    fighter_stats['reach'] = fighter_stats['reach'].fillna(fighter_stats['reach'].median())
-
-    # Encode stance column
-    stance_mapping = {'Orthodox': 1, 'Southpaw': 2, 'Switch': 3}
-    fighter_stats['stance'] = fighter_stats['stance'].map(stance_mapping)
-
-    # Replace NaN values in the 'stance' column with 1
-    fighter_stats['stance'] = fighter_stats['stance'].fillna(1)
-
-    # Merge fighter_stats with merged_stats based on the fighter name
-    merged_stats = pd.merge(merged_stats, fighter_stats, left_on='fighter', right_on='name', how='left')
-
-    # Drop the 'name' column since it's redundant with 'fighter'
-    merged_stats = merged_stats.drop('name', axis=1)
-
-    # Replace '--' with NaN in the 'dob' column
-    merged_stats['dob'] = merged_stats['dob'].replace('--', np.nan)
-
-    # Convert 'dob' to datetime format
-    merged_stats['dob'] = pd.to_datetime(merged_stats['dob'])
-
-    # Fill NaN values in the 'dob' column with the median
-    merged_stats['dob'] = merged_stats['dob'].fillna(merged_stats['dob'].median())
-
-    # Calculate the age of the fighter at the time of each fight
-    merged_stats['age'] = (merged_stats['fight_date'] - merged_stats['dob']).dt.days / 365.25
-
-    # Replace NaN values in the 'age' column with a default value
-    merged_stats['age'] = merged_stats['age'].fillna(30)
-
-    # Round the age to the nearest integer
-    merged_stats['age'] = merged_stats['age'].round().astype(int)
-
-    # Function to cumulatively sum numeric stats, create career stats columns, and calculate average age
+    # Function to cumulatively sum numeric stats and create career stats columns
     def aggregate_up_to_date(group):
         group = group.sort_values('fight_date')
         cumulative_stats = group[numeric_columns].cumsum(skipna=True)
@@ -139,43 +71,37 @@ def combine_rounds_stats(file_path):
 
         # Calculate rates and add as new columns
         group['significant_strikes_rate_career'] = (
-                group['significant_strikes_landed_career'] / group['significant_strikes_attempted_career']).fillna(0)
+            group['significant_strikes_landed_career'] / group['significant_strikes_attempted_career']).fillna(0)
         group['takedown_rate_career'] = (
-                group['takedown_successful_career'] / group['takedown_attempted_career']).fillna(0)
-
-        # Calculate cumulative sum of ages
-        cumulative_age = group['age'].cumsum()
-
-        # Calculate average age by dividing the cumulative sum of ages by the fight count
-        group['age_avg'] = cumulative_age / fight_count
+            group['takedown_successful_career'] / group['takedown_attempted_career']).fillna(0)
 
         return group
 
     # Apply the aggregation function for each fighter up to each fight date
     final_stats = merged_stats.groupby(fighter_identifier, group_keys=False).apply(aggregate_up_to_date)
 
-    # Reorder columns to ensure the desired column order
-    column_order = [
-                       'fighter', 'height', 'reach', 'stance', 'age', 'age_avg'
-                   ] + [col for col in final_stats.columns if
-                        col not in ['fighter', 'height', 'reach', 'stance', 'dob', 'age', 'age_avg']]
-    final_stats = final_stats[column_order]
+    # Convert unique strings to integers and create dictionary mappings
+    for column in ['result', 'winner', 'weight_class', 'scheduled_rounds']:
+        final_stats[column], unique = pd.factorize(final_stats[column])
+        mapping = {index: label for index, label in enumerate(unique)}
+        print(f"Mapping for {column}: {mapping}")
 
-    # Drop specified columns
-    columns_to_drop = ['height', 'age', 'reach', 'age_avg', 'stance', 'dob', 'url', 'slpm', 'str_acc', 'sapm', 'str_def', 'td_avg', 'td_acc', 'td_def', 'sub_avg',
-                       'num_fights']
-    final_stats = final_stats.drop(columns=columns_to_drop, errors='ignore')
+    # Get the common columns between ufc_stats and final_stats
+    common_columns = ufc_stats.columns.intersection(final_stats.columns)
 
-    # Convert 'result' and 'winner' columns to string before filtering
-    final_stats['result'] = final_stats['result'].astype(str)
-    final_stats['winner'] = final_stats['winner'].astype(str)
+    # Reorder columns to ensure the final DataFrame has the same column order as the original
+    # Add the fighter_identifier to the ordering if it's not already included in common_columns
+    if fighter_identifier not in common_columns:
+        final_columns = [fighter_identifier] + list(common_columns) + [col for col in final_stats.columns if
+                                                                       col.endswith('_career') or col.endswith('_career_avg')]
+    else:
+        final_columns = list(common_columns) + [col for col in final_stats.columns if
+                                                col.endswith('_career') or col.endswith('_career_avg')]
 
-    # Drop fights before 2014 and fights with specific numeric conditions in the 'result' and 'winner' columns
-    final_stats = final_stats[(final_stats['fight_date'] >= '2014-01-01') &
-                              (~final_stats['result'].str.contains('5', case=False)) &
-                              (~final_stats['result'].str.contains('6', case=False)) &
-                              (~final_stats['winner'].str.contains('2', case=False)) &
-                              (~final_stats['winner'].str.contains('3', case=False))]
+    final_stats = final_stats[final_columns]
+
+    # Drop fights before 2014
+    final_stats = final_stats[final_stats['fight_date'] >= '2014-01-01']
 
     # Save to new CSV
     final_stats.to_csv('data/combined_rounds.csv', index=False)
@@ -214,61 +140,22 @@ def combine_fighters_stats(file_path):
     final_combined_df = pd.concat([combined_df, mirrored_combined_df], ignore_index=True)
 
     # Define the columns to differentiate
-    # 'height', 'age', 'reach', 'age_avg',
     columns_to_diff = [
-                       'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted',
-                       'significant_strikes_rate',
-                       'total_strikes_landed', 'total_strikes_attempted', 'takedown_successful', 'takedown_attempted',
-                       'takedown_rate',
-                       'submission_attempt', 'reversals', 'head_landed', 'head_attempted', 'body_landed',
-                       'body_attempted',
-                       'leg_landed',
-                       'leg_attempted', 'distance_landed', 'distance_attempted', 'clinch_landed', 'clinch_attempted',
-                       'ground_landed',
-                       'ground_attempted', 'body_attempted_career', 'body_landed_career', 'clinch_attempted_career',
-                       'clinch_landed_career',
-                       'distance_attempted_career', 'distance_landed_career', 'ground_attempted_career',
-                       'ground_landed_career',
-                       'head_attempted_career', 'head_landed_career', 'knockdowns_career', 'leg_attempted_career',
-                       'leg_landed_career', 'reversals_career', 'significant_strikes_attempted_career',
-                       'significant_strikes_landed_career',
-                       'significant_strikes_rate_career', 'submission_attempt_career', 'takedown_attempted_career',
-                       'takedown_rate_career',
-                       'takedown_successful_career', 'total_strikes_attempted_career', 'total_strikes_landed_career'
-                       ]
-
-    # columns_to_diff = ['height', 'age', 'reach', 'knockdowns_career_avg', 'significant_strikes_landed_career_avg',
-    #                    'significant_strikes_attempted_career_avg', 'age_avg',
-    #                    'significant_strikes_rate_career_avg', 'total_strikes_landed_career_avg',
-    #                    'total_strikes_attempted_career_avg',
-    #                    'takedown_successful_career_avg', 'takedown_attempted_career_avg', 'takedown_rate_career_avg',
-    #                    'submission_attempt_career_avg', 'reversals_career_avg',
-    #                    'head_landed_career_avg', 'head_attempted_career_avg', 'body_landed_career_avg',
-    #                    'body_attempted_career_avg',
-    #                    'leg_landed_career_avg', 'leg_attempted_career_avg', 'distance_landed_career_avg',
-    #                    'distance_attempted_career_avg',
-    #                    'clinch_landed_career_avg', 'clinch_attempted_career_avg', 'ground_landed_career_avg',
-    #                    'ground_attempted_career_avg',
-    #                    'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted',
-    #                    'significant_strikes_rate',
-    #                    'total_strikes_landed', 'total_strikes_attempted', 'takedown_successful', 'takedown_attempted',
-    #                    'takedown_rate',
-    #                    'submission_attempt', 'reversals', 'head_landed', 'head_attempted', 'body_landed',
-    #                    'body_attempted',
-    #                    'leg_landed',
-    #                    'leg_attempted', 'distance_landed', 'distance_attempted', 'clinch_landed', 'clinch_attempted',
-    #                    'ground_landed',
-    #                    'ground_attempted', 'body_attempted_career', 'body_landed_career', 'clinch_attempted_career',
-    #                    'clinch_landed_career',
-    #                    'distance_attempted_career', 'distance_landed_career', 'ground_attempted_career',
-    #                    'ground_landed_career',
-    #                    'head_attempted_career', 'head_landed_career', 'knockdowns_career', 'leg_attempted_career',
-    #                    'leg_landed_career', 'reversals_career', 'significant_strikes_attempted_career',
-    #                    'significant_strikes_landed_career',
-    #                    'significant_strikes_rate_career', 'submission_attempt_career', 'takedown_attempted_career',
-    #                    'takedown_rate_career',
-    #                    'takedown_successful_career', 'total_strikes_attempted_career', 'total_strikes_landed_career'
-    #                    ]
+        'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted', 'significant_strikes_rate',
+        'total_strikes_landed', 'total_strikes_attempted', 'takedown_successful', 'takedown_attempted', 'takedown_rate',
+        'submission_attempt', 'reversals', 'head_landed', 'head_attempted', 'body_landed', 'body_attempted',
+        'leg_landed',
+        'leg_attempted', 'distance_landed', 'distance_attempted', 'clinch_landed', 'clinch_attempted', 'ground_landed',
+        'ground_attempted', 'body_attempted_career', 'body_landed_career', 'clinch_attempted_career',
+        'clinch_landed_career',
+        'distance_attempted_career', 'distance_landed_career', 'ground_attempted_career', 'ground_landed_career',
+        'head_attempted_career', 'head_landed_career', 'knockdowns_career', 'leg_attempted_career',
+        'leg_landed_career', 'reversals_career', 'significant_strikes_attempted_career',
+        'significant_strikes_landed_career',
+        'significant_strikes_rate_career', 'submission_attempt_career', 'takedown_attempted_career',
+        'takedown_rate_career',
+        'takedown_successful_career', 'total_strikes_attempted_career', 'total_strikes_landed_career'
+    ]
 
     # Calculate the differential for each column and add it as a new column
     for col in columns_to_diff:
@@ -406,6 +293,7 @@ def split_train_test(matchup_data_file, test):
         # Apply abs() to the entire DataFrame
         train_data = train_data.abs()
         test_data = test_data.abs()
+
 
     if not test:
         # Save the train and test data to CSV files
