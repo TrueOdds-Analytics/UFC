@@ -11,9 +11,8 @@ def combine_rounds_stats(file_path):
 
     # Drop 'round', 'location', and 'event' columns
     ufc_stats = ufc_stats.drop(['round', 'location', 'event'], axis=1)
-    ufc_stats = ufc_stats[~ufc_stats['winner'].isin(['NC', 'D'])]
 
-    # Drop fights with "Women's" in the weight_class column
+    # Drop fights with "Women's" in the weight_class column and fights by split decision and DQs
     ufc_stats = ufc_stats[~ufc_stats['weight_class'].str.contains("Women's")]
 
     # Identify numeric columns
@@ -163,12 +162,20 @@ def combine_rounds_stats(file_path):
     final_stats = final_stats[column_order]
 
     # Drop specified columns
-    columns_to_drop = ['dob', 'url', 'slpm', 'str_acc', 'sapm', 'str_def', 'td_avg', 'td_acc', 'td_def', 'sub_avg',
+    columns_to_drop = ['height', 'age', 'reach', 'age_avg', 'stance', 'dob', 'url', 'slpm', 'str_acc', 'sapm', 'str_def', 'td_avg', 'td_acc', 'td_def', 'sub_avg',
                        'num_fights']
     final_stats = final_stats.drop(columns=columns_to_drop, errors='ignore')
 
-    # Drop fights before 2014
-    final_stats = final_stats[final_stats['fight_date'] >= '2014-01-01']
+    # Convert 'result' and 'winner' columns to string before filtering
+    final_stats['result'] = final_stats['result'].astype(str)
+    final_stats['winner'] = final_stats['winner'].astype(str)
+
+    # Drop fights before 2014 and fights with specific numeric conditions in the 'result' and 'winner' columns
+    final_stats = final_stats[(final_stats['fight_date'] >= '2014-01-01') &
+                              (~final_stats['result'].str.contains('5', case=False)) &
+                              (~final_stats['result'].str.contains('6', case=False)) &
+                              (~final_stats['winner'].str.contains('2', case=False)) &
+                              (~final_stats['winner'].str.contains('3', case=False))]
 
     # Save to new CSV
     final_stats.to_csv('data/combined_rounds.csv', index=False)
@@ -207,7 +214,8 @@ def combine_fighters_stats(file_path):
     final_combined_df = pd.concat([combined_df, mirrored_combined_df], ignore_index=True)
 
     # Define the columns to differentiate
-    columns_to_diff = ['height', 'age', 'reach', 'age_avg',
+    # 'height', 'age', 'reach', 'age_avg',
+    columns_to_diff = [
                        'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted',
                        'significant_strikes_rate',
                        'total_strikes_landed', 'total_strikes_attempted', 'takedown_successful', 'takedown_attempted',
