@@ -44,6 +44,22 @@ def combine_rounds_stats(file_path):
     aggregated_stats['significant_strikes_rate'] = aggregated_stats['significant_strikes_rate'].fillna(0)
     aggregated_stats['takedown_rate'] = aggregated_stats['takedown_rate'].fillna(0)
 
+    # Create new columns for opponent strikes absorbed
+    strike_columns = [
+        ('significant_strikes_landed', 'significant_strikes_attempted'),
+        ('total_strikes_landed', 'total_strikes_attempted'),
+        ('takedown_successful', 'takedown_attempted'),
+        ('head_landed', 'head_attempted'),
+        ('body_landed', 'body_attempted'),
+        ('leg_landed', 'leg_attempted'),
+        ('distance_landed', 'distance_attempted'),
+        ('clinch_landed', 'clinch_attempted'),
+        ('ground_landed', 'ground_attempted')
+    ]
+
+    for landed_col, attempted_col in strike_columns:
+        aggregated_stats[f'opponent_{landed_col}_absorbed'] = aggregated_stats[attempted_col] - aggregated_stats[landed_col]
+
     # Extract non-numeric columns (excluding 'id' and fighter_identifier) and find unique rows
     non_numeric_columns = ufc_stats.select_dtypes(exclude='number').columns.difference(['id', fighter_identifier])
     non_numeric_data = ufc_stats.drop_duplicates(subset=['id', fighter_identifier])[
@@ -93,10 +109,10 @@ def combine_rounds_stats(file_path):
     # Add the fighter_identifier to the ordering if it's not already included in common_columns
     if fighter_identifier not in common_columns:
         final_columns = [fighter_identifier] + list(common_columns) + [col for col in final_stats.columns if
-                                                                       col.endswith('_career') or col.endswith('_career_avg')]
+                                                                       col.endswith('_career') or col.endswith('_career_avg') or col.startswith('opponent_')]
     else:
         final_columns = list(common_columns) + [col for col in final_stats.columns if
-                                                col.endswith('_career') or col.endswith('_career_avg')]
+                                                col.endswith('_career') or col.endswith('_career_avg') or col.startswith('opponent_')]
 
     final_stats = final_stats[final_columns]
 
@@ -139,23 +155,38 @@ def combine_fighters_stats(file_path):
     # Concatenate both the original and mirrored DataFrames
     final_combined_df = pd.concat([combined_df, mirrored_combined_df], ignore_index=True)
 
-    # Define the columns to differentiate
-    columns_to_diff = [
-        'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted', 'significant_strikes_rate',
-        'total_strikes_landed', 'total_strikes_attempted', 'takedown_successful', 'takedown_attempted', 'takedown_rate',
-        'submission_attempt', 'reversals', 'head_landed', 'head_attempted', 'body_landed', 'body_attempted',
-        'leg_landed',
-        'leg_attempted', 'distance_landed', 'distance_attempted', 'clinch_landed', 'clinch_attempted', 'ground_landed',
-        'ground_attempted', 'body_attempted_career', 'body_landed_career', 'clinch_attempted_career',
-        'clinch_landed_career',
-        'distance_attempted_career', 'distance_landed_career', 'ground_attempted_career', 'ground_landed_career',
-        'head_attempted_career', 'head_landed_career', 'knockdowns_career', 'leg_attempted_career',
-        'leg_landed_career', 'reversals_career', 'significant_strikes_attempted_career',
-        'significant_strikes_landed_career',
-        'significant_strikes_rate_career', 'submission_attempt_career', 'takedown_attempted_career',
-        'takedown_rate_career',
-        'takedown_successful_career', 'total_strikes_attempted_career', 'total_strikes_landed_career'
-    ]
+    columns_to_diff = ['knockdowns_career_avg', 'significant_strikes_landed_career_avg',
+                       'significant_strikes_attempted_career_avg',
+                       'significant_strikes_rate_career_avg', 'total_strikes_landed_career_avg',
+                       'total_strikes_attempted_career_avg',
+                       'takedown_successful_career_avg', 'takedown_attempted_career_avg', 'takedown_rate_career_avg',
+                       'submission_attempt_career_avg', 'reversals_career_avg',
+                       'head_landed_career_avg', 'head_attempted_career_avg', 'body_landed_career_avg',
+                       'body_attempted_career_avg',
+                       'leg_landed_career_avg', 'leg_attempted_career_avg', 'distance_landed_career_avg',
+                       'distance_attempted_career_avg',
+                       'clinch_landed_career_avg', 'clinch_attempted_career_avg', 'ground_landed_career_avg',
+                       'ground_attempted_career_avg',
+                       'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted',
+                       'significant_strikes_rate',
+                       'total_strikes_landed', 'total_strikes_attempted', 'takedown_successful', 'takedown_attempted',
+                       'takedown_rate',
+                       'submission_attempt', 'reversals', 'head_landed', 'head_attempted', 'body_landed',
+                       'body_attempted',
+                       'leg_landed',
+                       'leg_attempted', 'distance_landed', 'distance_attempted', 'clinch_landed', 'clinch_attempted',
+                       'ground_landed',
+                       'ground_attempted', 'body_attempted_career', 'body_landed_career', 'clinch_attempted_career',
+                       'clinch_landed_career',
+                       'distance_attempted_career', 'distance_landed_career', 'ground_attempted_career',
+                       'ground_landed_career',
+                       'head_attempted_career', 'head_landed_career', 'knockdowns_career', 'leg_attempted_career',
+                       'leg_landed_career', 'reversals_career', 'significant_strikes_attempted_career',
+                       'significant_strikes_landed_career',
+                       'significant_strikes_rate_career', 'submission_attempt_career', 'takedown_attempted_career',
+                       'takedown_rate_career',
+                       'takedown_successful_career', 'total_strikes_attempted_career', 'total_strikes_landed_career'
+                       ]
 
     # Calculate the differential for each column and add it as a new column
     for col in columns_to_diff:

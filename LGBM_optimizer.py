@@ -16,56 +16,39 @@ def objective(trial):
 
     search_space = {
         "verbosity": -1,
-        'lambda_l1': trial.suggest_float('lambda_l1', 1e-8, 10.0, log=True),
-        'lambda_l2': trial.suggest_float('lambda_l2', 1e-8, 10.0, log=True),
-        'device': trial.suggest_categorical('device', ['gpu']),
+        'lambda_l1': trial.suggest_float('lambda_l1', 1e-3, 10.0, log=True),
+        'lambda_l2': trial.suggest_float('lambda_l2', 1e-3, 10.0, log=True),
+        'device_type': trial.suggest_categorical('device_type', ['gpu']),
         "objective": trial.suggest_categorical("objective", ["binary"]),
         "num_threads": trial.suggest_categorical("num_threads", [-1]),
         "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
         "min_child_samples": trial.suggest_int("min_child_samples", 1, 100),
-        "max_depth": trial.suggest_int("max_depth", 1, 30),
+        "max_depth": trial.suggest_int("max_depth", 1, 20),
         "num_leaves": trial.suggest_int("num_leaves", 2, 256),
         "subsample": trial.suggest_float("subsample", 0.1, 1.0, log=True),
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.1, 1.0, log=True),
         "min_child_weight": trial.suggest_float("min_child_weight", 1e-8, 10.0, log=True),
         "n_estimators": trial.suggest_int("n_estimators", 100, 500),
         "boost_from_average": trial.suggest_categorical("boost_from_average", [False]),
-        "random_state": trial.suggest_int("random_state", 1, 100)
+        "random_state": trial.suggest_int("random_state", 1, 1000),
     }
-
-    model = lgb.LGBMClassifier(**search_space)
-
-    early_stopping_rounds = 10
-    model.set_params(early_stopping_rounds=early_stopping_rounds)
 
     X_train, X_test, y_train, y_test = get_train_test_data()
 
-    best_score = -np.inf
-    best_iteration = 0
-
-    for epoch in range(100):
-        model.fit(X_train, y_train, eval_set=[(X_test, y_test)])
-        y_pred = model.predict(X_test)
-        accuracy = accuracy_score(y_test, y_pred)
-
-        if accuracy > best_score:
-            best_score = accuracy
-            best_iteration = model.best_iteration_
-
-        trial.report(accuracy, epoch)
-
-        if trial.should_prune():
-            raise optuna.TrialPruned()
-
-        if model.best_iteration_ >= early_stopping_rounds:
-            break
+    model = lgb.LGBMClassifier(**search_space)
+    model.fit(
+        X_train, y_train,
+        eval_set=[(X_test, y_test)]
+    )
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
 
     # Update the global best model if the current one is better
-    if best_score > best_accuracy:
-        best_accuracy = best_score
+    if accuracy > best_accuracy:
+        best_accuracy = accuracy
         best_model_state = model  # Save the best model
 
-    return best_score
+    return accuracy
 
 
 def get_train_test_data():
@@ -95,61 +78,89 @@ def get_train_test_data():
 
     return X_train, X_test, y_train, y_test
 
-def threshold_selector(clf, X_train, y_train, X_test, y_test):
+def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rounds=10):
     X_train = X_train.values
     X_test = X_test.values
-    thresholds = np.arange(.1, 5, .05)
+    thresholds = np.arange(0.0, 1.0, 0.0001)
     avgs = []
-    loopavg = []
-    count = 1
+
+    # Ensure clf is prefit and has feature importances
+    if hasattr(clf, 'feature_importances_'):
+        importances = clf.feature_importances_
+        sorted_indices = np.argsort(importances)[::-1]  # Sort in descending order
+        sorted_importances = importances[sorted_indices]
+
+        print("Feature importances (sorted):")
+        for idx in sorted_indices:
+            print(f"Feature {idx}: {importances[idx]}")
+
+        print(f"Sum of feature importances: {np.sum(importances)}")
+    else:
+        print("The classifier does not have feature importances.")
 
     for thresh in thresholds:
-        # Run each threshold 10x for the avg
-        for x in range(0, 10):
-            selection = SelectFromModel(clf, threshold=f'{thresh}*median', prefit=True)
+        loopavg = []
+        # Run each threshold 1x for the avg
+        for x in range(1):
+            selection = SelectFromModel(clf, threshold=thresh, prefit=True)
             select_X_train = selection.transform(X_train)
-            model = lgb.LGBMClassifier(lambda_l1=0.024029166453171127,
-                                       lambda_l2=0.6297819805077854,
-                                       device="gpu",
-                                       objective="binary",
-                                       num_threads=-1,
-                                       learning_rate=0.008244181542067349,
-                                       min_child_samples=15,
-                                       max_depth=13,
-                                       num_leaves=31,
-                                       subsample=0.5361122651825095,
-                                       colsample_bytree=0.7225143130683623,
-                                       min_child_weight=0.018882987701220703,
-                                       n_estimators=183,
-                                       boost_from_average=False,
-                                       random_state=46)
-            count += 1
-            model.fit(select_X_train, y_train.values.ravel())
             select_X_test = selection.transform(X_test)
+            n_selected_features = select_X_train.shape[1]
+
+            if n_selected_features < 10:
+                print(f"Stopping as n_selected_features < 10 (n={n_selected_features})")
+                break
+
+            model = lgb.LGBMClassifier(
+                verbosity=0,
+                reg_lambda=0.06149361099544647,
+                reg_alpha=0.045998526993829864,
+                tree_method="gpu_hist",
+                objective="binary:logistic",
+                n_jobs=-1,
+                learning_rate=0.02920212897819158,
+                min_child_weight=5,
+                max_depth=18,
+                max_delta_step=3,
+                subsample=0.2705154119188745,
+                colsample_bytree=0.7402834256314674,
+                gamma=0.017109525533870292,
+                n_estimators=7295,
+                eta=0.12635351933273808,
+                random_state=42
+            )
+            # Set early stopping rounds
+            model.set_params(early_stopping_rounds=early_stopping_rounds)
+
+            model.fit(select_X_train, y_train.values.ravel(), eval_set=[(select_X_test, y_test)], verbose=False)
             ypred = model.predict(select_X_test)
             accuracy = accuracy_score(y_test, ypred)
-            msg = f"Thresh={thresh}, n={select_X_train.shape[1]}, Accuracy: {accuracy * 100.0}"
-            print(msg)
+            print(f"Thresh={thresh:.4f}, n={n_selected_features}, Accuracy: {accuracy * 100.0:.2f}")
             loopavg.append(accuracy)
 
+        if n_selected_features < 10:
+            break
+
         avgs.append((thresh, np.mean(loopavg)))
-        loopavg = []
 
     best_thresh, best_accuracy = max(avgs, key=lambda x: x[1])
-    print(f"Best threshold: {best_thresh}, Best accuracy: {best_accuracy}")
+    print(f"Best threshold: {best_thresh:.4f}, Best accuracy: {best_accuracy:.4f}")
 
-    selection = SelectFromModel(clf, threshold=f'{best_thresh}*median', prefit=True)
+    selection = SelectFromModel(clf, threshold=best_thresh, prefit=True)
     select_X_train = selection.transform(X_train)
+    select_X_test = selection.transform(X_test)
     selected_model = lgb.LGBMClassifier(**clf.get_params())
-    selected_model.fit(select_X_train, y_train.values.ravel())
-    return selected_model
+    selected_model.set_params(early_stopping_rounds=early_stopping_rounds)
+    selected_model.fit(select_X_train, y_train.values.ravel(), eval_set=[(select_X_test, y_test)], verbose=False)
+
+    return selected_model, best_accuracy
 
 
 if __name__ == "__main__":
     sampler = TPESampler()
     study = optuna.create_study(direction="maximize", sampler=sampler, pruner=MedianPruner())
     try:
-        study.optimize(objective, n_trials=2500)
+        study.optimize(objective, n_trials=2000)
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
 

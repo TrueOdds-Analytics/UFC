@@ -7,7 +7,6 @@ import xgboost as xgb
 from sklearn.metrics import accuracy_score
 from sklearn.feature_selection import SelectFromModel
 from optuna.pruners import MedianPruner
-from optuna.integration import XGBoostPruningCallback
 
 
 best_accuracy = 0
@@ -31,7 +30,7 @@ def objective(trial):
         "subsample": trial.suggest_float("subsample", 0.1, 1.0, log=True),
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.1, 1.0, log=True),
         "gamma": trial.suggest_float("gamma", .01, 0.4, log=True),
-        "n_estimators": trial.suggest_int("n_estimators", 100, 5000),
+        "n_estimators": trial.suggest_int("n_estimators", 100, 1000),
         "eta": trial.suggest_float("eta", 0.1, 0.2, log=True),
         "seed": trial.suggest_int("seed", 1, 100),
         "early_stopping_rounds": 10
@@ -87,7 +86,7 @@ def get_train_test_data():
 def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rounds=10):
     X_train = X_train.values
     X_test = X_test.values
-    thresholds = np.arange(0.0, 1.0, 0.0001)
+    thresholds = np.arange(0.0, 1.0, 0.00001)
     avgs = []
 
     # Ensure clf is prefit and has feature importances
@@ -119,21 +118,21 @@ def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rou
 
             model = xgb.XGBClassifier(
                 verbosity=0,
-                reg_lambda=0.06149361099544647,
-                reg_alpha=0.045998526993829864,
+                reg_lambda=0.009878643031227997,
+                reg_alpha=0.002279217346860389,
                 tree_method="gpu_hist",
                 objective="binary:logistic",
                 n_jobs=-1,
-                learning_rate=0.02920212897819158,
-                min_child_weight=5,
-                max_depth=18,
-                max_delta_step=3,
-                subsample=0.2705154119188745,
-                colsample_bytree=0.7402834256314674,
-                gamma=0.017109525533870292,
-                n_estimators=7295,
-                eta=0.12635351933273808,
-                random_state=42
+                learning_rate=0.013702222609706494,
+                min_child_weight=9,
+                max_depth=4,
+                max_delta_step=9,
+                subsample=0.21774543845476743,
+                colsample_bytree=0.1541140831249018,
+                gamma=0.13796094440436682,
+                n_estimators=914,
+                eta=0.16571212210903133,
+                random_state=46
             )
             # Set early stopping rounds
             model.set_params(early_stopping_rounds=early_stopping_rounds)
@@ -165,7 +164,7 @@ def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rou
 if __name__ == "__main__":
     sampler = TPESampler()
     study = optuna.create_study(direction="maximize", sampler=sampler, pruner=MedianPruner(),
-                                study_name="Base")
+                                study_name="ABSORPTION")
     try:
         study.optimize(objective, n_trials=2000)
     except KeyboardInterrupt:
@@ -180,7 +179,7 @@ if __name__ == "__main__":
 
     # Save the best model as a file
     joblib.dump(best_model, f'models/best_model_{best_accuracy}.pkl')
-    loaded_model = joblib.load(f'models/best_model_0.6633165829145728.pkl')
+    loaded_model = joblib.load(f'models/best_model_0.6395348837209303.pkl')
     # Run threshold selector using the best model
     X_train, X_test, y_train, y_test = get_train_test_data()
     selected_model, best_accuracy_final = threshold_selector(loaded_model, X_train, y_train, X_test, y_test)
