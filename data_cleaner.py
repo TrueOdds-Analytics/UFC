@@ -44,22 +44,6 @@ def combine_rounds_stats(file_path):
     aggregated_stats['significant_strikes_rate'] = aggregated_stats['significant_strikes_rate'].fillna(0)
     aggregated_stats['takedown_rate'] = aggregated_stats['takedown_rate'].fillna(0)
 
-    # Create new columns for opponent strikes absorbed
-    strike_columns = [
-        ('significant_strikes_landed', 'significant_strikes_attempted'),
-        ('total_strikes_landed', 'total_strikes_attempted'),
-        ('takedown_successful', 'takedown_attempted'),
-        ('head_landed', 'head_attempted'),
-        ('body_landed', 'body_attempted'),
-        ('leg_landed', 'leg_attempted'),
-        ('distance_landed', 'distance_attempted'),
-        ('clinch_landed', 'clinch_attempted'),
-        ('ground_landed', 'ground_attempted')
-    ]
-
-    for landed_col, attempted_col in strike_columns:
-        aggregated_stats[f'opponent_{landed_col}_absorbed'] = aggregated_stats[attempted_col] - aggregated_stats[landed_col]
-
     # Extract non-numeric columns (excluding 'id' and fighter_identifier) and find unique rows
     non_numeric_columns = ufc_stats.select_dtypes(exclude='number').columns.difference(['id', fighter_identifier])
     non_numeric_data = ufc_stats.drop_duplicates(subset=['id', fighter_identifier])[
@@ -109,10 +93,10 @@ def combine_rounds_stats(file_path):
     # Add the fighter_identifier to the ordering if it's not already included in common_columns
     if fighter_identifier not in common_columns:
         final_columns = [fighter_identifier] + list(common_columns) + [col for col in final_stats.columns if
-                                                                       col.endswith('_career') or col.endswith('_career_avg') or col.startswith('opponent_')]
+                                                                       col.endswith('_career') or col.endswith('_career_avg')]
     else:
         final_columns = list(common_columns) + [col for col in final_stats.columns if
-                                                col.endswith('_career') or col.endswith('_career_avg') or col.startswith('opponent_')]
+                                                col.endswith('_career') or col.endswith('_career_avg')]
 
     final_stats = final_stats[final_columns]
 
@@ -155,6 +139,7 @@ def combine_fighters_stats(file_path):
     # Concatenate both the original and mirrored DataFrames
     final_combined_df = pd.concat([combined_df, mirrored_combined_df], ignore_index=True)
 
+    # Define the columns to differentiate
     columns_to_diff = ['knockdowns_career_avg', 'significant_strikes_landed_career_avg',
                        'significant_strikes_attempted_career_avg',
                        'significant_strikes_rate_career_avg', 'total_strikes_landed_career_avg',
@@ -335,6 +320,231 @@ def split_train_test(matchup_data_file, test):
         test_data.to_csv('data/test_data_test.csv', index=False)
 
     print(f"Train and test data saved successfully. {num_removed_features} correlated features were removed.")
+
+
+def create_matchup_data_history(file_path, name):
+    df = pd.read_csv(file_path)
+
+    # Define the features to include, excluding identifiers and non-numeric features
+    # Define the features to include, excluding identifiers and non-numeric features
+    if not name:
+        features_to_include = [col for col in df.columns if
+                               col not in ['round', 'time', 'attendance', 'id', 'round_opponent',
+                                           'time_opponent', 'event_opponent', 'event', 'fight_date',
+                                           'location_opponent', 'attendance_opponent',
+                                           'id.1', 'location', 'last_round', 'scheduled_rounds', 'weight_class',
+                                           'last_round_opponent', 'scheduled_rounds_opponent',
+                                           'weight_class_opponent', 'fight_date_opponent', 'fighter', 'fighter.1']]
+    else:
+        features_to_include = [col for col in df.columns if
+                               col not in ['round', 'time', 'attendance', 'id', 'round_opponent',
+                                           'time_opponent', 'event_opponent', 'event', 'fight_date',
+                                           'location_opponent', 'attendance_opponent',
+                                           'id.1', 'location', 'last_round', 'scheduled_rounds', 'weight_class',
+                                           'last_round_opponent', 'scheduled_rounds_opponent',
+                                           'weight_class_opponent', 'fight_date_opponent']]
+
+    method_columns = ['winner']
+
+    matchup_data = []
+    labels_data = []
+
+    # Iterate through the DataFrame
+    for index, current_fight in df.iterrows():
+        fighter_name = current_fight['fighter']
+        opponent_name = current_fight['fighter.1']
+
+        # Get the last fights for Fighter A and Fighter B before the current fight
+        fighter_df = df[(df['fighter'] == fighter_name) & (df['fight_date'] < current_fight['fight_date'])].sort_values(
+            by='fight_date', ascending=False)
+        opponent_df = df[
+            (df['fighter'] == opponent_name) & (df['fight_date'] < current_fight['fight_date'])].sort_values(
+            by='fight_date', ascending=False)
+
+        if len(fighter_df) < 2 or len(opponent_df) < 1:
+            continue
+
+        # Ensure only the last 3 fights are used for features and the 4th (most recent) for labeling
+        feature_fights_fighter = fighter_df
+        feature_fights_opponent = opponent_df
+
+        combined_features = np.array([])
+
+        # Loop through each of the last fights to alternate between Fighter A and Fighter B
+        max_fights = max(len(feature_fights_fighter), len(feature_fights_opponent))
+        for i in range(max_fights):
+            try:
+                fighter_features = feature_fights_fighter.iloc[i][features_to_include].values
+            except IndexError:
+                fighter_features = np.zeros(len(features_to_include))
+
+            try:
+                opponent_features = feature_fights_opponent.iloc[i][features_to_include].values
+            except IndexError:
+                opponent_features = np.zeros(len(features_to_include))
+
+            combined_features = np.concatenate([combined_features, fighter_features, opponent_features])
+
+        # Extract the labels for the current fight
+        labels = current_fight[method_columns].values
+
+        # Add the combined features and labels to the respective lists
+        matchup_data.append(combined_features)
+        labels_data.append(labels)
+
+    # Define column names for the new DataFrame
+    column_names = []
+    for i in range(1, 42):
+        column_names += [f"{feature}_fighter_fight{i}" for feature in features_to_include]
+        column_names += [f"{feature}_opponent_fight{i}" for feature in features_to_include]
+
+    # Convert the matchup data and labels data into DataFrames
+    matchup_df = pd.DataFrame(matchup_data, columns=column_names)
+    labels_df = pd.DataFrame(labels_data, columns=method_columns)
+
+    # Concatenate the matchup DataFrame and labels DataFrame horizontally
+    final_matchup_df = pd.concat([matchup_df, labels_df], axis=1)
+
+    keywords = [
+        'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted',
+        'significant_strikes_rate', 'total_strikes_landed', 'total_strikes_attempted',
+        'takedown_successful', 'takedown_attempted', 'takedown_rate', 'submission_attempt',
+        'reversals', 'head_landed', 'head_attempted', 'body_landed', 'body_attempted',
+        'leg_landed', 'leg_attempted', 'distance_landed', 'distance_attempted',
+        'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
+    ]
+
+    feature_means = {}
+    feature_stds = {}
+
+    for col in final_matchup_df.columns:
+        for keyword in keywords:
+            if keyword in col:
+                final_matchup_df[col] = final_matchup_df[col].astype(float)
+                break
+
+    for col in final_matchup_df.columns:
+        if any(keyword in col for keyword in keywords):
+            feature_data = final_matchup_df[col].replace(0, np.nan)
+            feature_mean = feature_data.mean()
+            feature_std = feature_data.std()
+
+            feature_means[col] = feature_mean
+            feature_stds[col] = feature_std
+
+            final_matchup_df.loc[final_matchup_df[col] != 0, col] = (feature_data - feature_mean) / feature_std
+
+    # Fill NaN cells with 0
+    final_matchup_df.fillna(0, inplace=True)
+
+    # Flip the DataFrame while keeping each sequence of 128 rows intact and preserving the order within the sequence
+
+    flipped_df = pd.DataFrame()
+    if name:
+        num_sequences = len(final_matchup_df) // 128
+        for i in range(num_sequences):
+            start_index = i * 128
+            end_index = (i + 1) * 128
+            sequence_df = final_matchup_df.iloc[start_index:end_index]
+            sequence_columns = sequence_df.columns[:-7]  # Exclude the last 7 label columns
+            flipped_sequence_df = sequence_df[sequence_columns[::-1]]
+            flipped_sequence_df = pd.concat([flipped_sequence_df, sequence_df.iloc[:, -7:]], axis=1)
+            flipped_df = pd.concat([flipped_df, flipped_sequence_df])
+    else:
+        num_sequences = len(final_matchup_df) // 124
+        for i in range(num_sequences):
+            start_index = i * 124
+            end_index = (i + 1) * 124
+            sequence_df = final_matchup_df.iloc[start_index:end_index]
+            sequence_columns = sequence_df.columns[:-7]  # Exclude the last 7 label columns
+            flipped_sequence_df = sequence_df[sequence_columns[::-1]]
+            flipped_sequence_df = pd.concat([flipped_sequence_df, sequence_df.iloc[:, -7:]], axis=1)
+            flipped_df = pd.concat([flipped_df, flipped_sequence_df])
+
+    final_matchup_df = flipped_df
+
+    if not name:
+        final_matchup_df.to_csv(f'data/matchup data/matchup_data_history_sequence_ndc.csv', index=False)
+    else:
+        final_matchup_df.to_csv(f'data/matchup data/matchup_data_name_history_sequence_ndc.csv',
+                                index=False)
+
+    # Save the mean and standard deviation dictionaries to files
+    pd.to_pickle(feature_means, 'data/feature_means.pkl')
+    pd.to_pickle(feature_stds, 'data/feature_stds.pkl')
+
+    return final_matchup_df
+
+
+def create_specific_matchup_data(file_path, fighter_a, fighter_b, tester):
+    CRED = '\33[31m'
+    CGREEN = '\33[32m'
+    CEND = '\33[0m'
+    df = pd.read_csv(file_path)
+
+    # Define the features to include, excluding identifiers and non-numeric features
+    features_to_include = [col for col in df.columns if
+                           col not in ['round', 'time', 'attendance', 'id', 'round_opponent',
+                                       'time_opponent', 'event_opponent', 'event',
+                                       'location_opponent', 'attendance_opponent',
+                                       'id.1', 'location', 'last_round', 'scheduled_rounds', 'weight_class',
+                                       'fight_date', 'last_round_opponent', 'scheduled_rounds_opponent',
+                                       'weight_class_opponent', 'fight_date_opponent', 'fighter', 'fighter.1']]
+
+    # Retrieve the last 3 fights for both fighters
+    fighter_df = df[df['fighter'] == fighter_a].sort_values(by='fight_date', ascending=False).head(3)
+    opponent_df = df[df['fighter'] == fighter_b].sort_values(by='fight_date', ascending=False).head(3)
+
+    if len(fighter_df) < (3 - tester) or len(opponent_df) < (3 - tester):
+        print(CRED + "Not enough historical data for one of the fighters" + CEND)
+        return None
+
+    combined_features = np.array([])
+
+    # Loop through each of the last 3 fights to alternate between Fighter A and Fighter B
+    for i in range(3 - tester):
+        fighter_features = fighter_df.iloc[i][features_to_include].values
+        opponent_features = opponent_df.iloc[i][features_to_include].values
+        combined_features = np.concatenate([combined_features, fighter_features, opponent_features])
+
+    # Prepare for DataFrame creation
+    matchup_data = [combined_features]  # Wrap in a list to create a single-row DataFrame
+
+    # Define column names for the new DataFrame
+    column_names = []
+    for i in range(1, 4 - tester):  # Matches the range 1 to 3 for 3 past fights
+        column_names += [f"{feature}_fighter_fight{i}" for feature in features_to_include]
+        column_names += [f"{feature}_opponent_fight{i}" for feature in features_to_include]
+
+    # Create DataFrame
+    matchup_df = pd.DataFrame(matchup_data, columns=column_names)
+
+    # Define keywords to apply Z-scoring
+    keywords = [
+        'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted',
+        'significant_strikes_rate', 'total_strikes_landed', 'total_strikes_attempted',
+        'takedown_successful', 'takedown_attempted', 'takedown_rate', 'submission_attempt',
+        'reversals', 'head_landed', 'head_attempted', 'body_landed', 'body_attempted',
+        'leg_landed', 'leg_attempted', 'distance_landed', 'distance_attempted',
+        'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
+    ]
+
+    # Load the mean and standard deviation dictionaries from pickle files
+    feature_means = pd.read_pickle('data/feature_means.pkl')
+    feature_stds = pd.read_pickle('data/feature_stds.pkl')
+
+    # Apply z-scoring to columns containing the specified keywords
+    for col in matchup_df.columns:
+        if any(keyword in col for keyword in keywords):
+            if col in feature_means and col in feature_stds:
+                matchup_df[col] = (matchup_df[col].fillna(0) - feature_means[col]) / feature_stds[col]
+            else:
+                print(f"Warning: Mean and standard deviation not found for column '{col}'. Skipping z-scoring.")
+
+    # Save to CSV
+    matchup_df.to_csv('data/matchup data/specific_matchup_data.csv', index=False)
+    print(CGREEN + "Matchup created successfully." + CEND)
+    return matchup_df
 
 
 if __name__ == "__main__":

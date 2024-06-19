@@ -164,9 +164,9 @@ def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rou
 if __name__ == "__main__":
     sampler = TPESampler()
     study = optuna.create_study(direction="maximize", sampler=sampler, pruner=MedianPruner(),
-                                study_name="ABSORPTION")
+                                study_name="Best Accuracy Pre Sequence Combination")
     try:
-        study.optimize(objective, n_trials=2000)
+        study.optimize(objective, n_trials=100000)
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
 
