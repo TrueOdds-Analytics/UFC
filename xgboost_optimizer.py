@@ -7,13 +7,16 @@ import xgboost as xgb
 from sklearn.metrics import accuracy_score
 from sklearn.feature_selection import SelectFromModel
 from optuna.pruners import MedianPruner
-
+import matplotlib.pyplot as plt
 
 best_accuracy = 0
 best_model_state = None
+best_train_losses = []
+best_test_losses = []
+
 
 def objective(trial):
-    global best_accuracy, best_model_state, best_train_accuracy, best_train_losses, best_test_accuracy, best_test_losses
+    global best_accuracy, best_model_state, best_train_losses, best_test_losses
 
     search_space = {
         'lambda': trial.suggest_float('lambda', 1e-3, 10.0, log=True),
@@ -33,24 +36,31 @@ def objective(trial):
         "n_estimators": trial.suggest_int("n_estimators", 100, 1000),
         "eta": trial.suggest_float("eta", 0.1, 0.2, log=True),
         "seed": trial.suggest_int("seed", 1, 100),
-        "early_stopping_rounds": 10
+        "early_stopping_rounds": 10,
+        "eval_metric": "logloss"
     }
 
     X_train, X_test, y_train, y_test = get_train_test_data()
 
     model = xgb.XGBClassifier(**search_space)
-    model.fit(
-        X_train, y_train,
-        eval_set=[(X_test, y_test)],
-        verbose=False
-    )
+    eval_set = [(X_train, y_train), (X_test, y_test)]
+    model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
+
+    eval_results = model.evals_result()
+
+    train_losses = eval_results['validation_0']['logloss']
+    test_losses = eval_results['validation_1']['logloss']
+
     y_pred = model.predict(X_test)
     accuracy = accuracy_score(y_test, y_pred)
 
-    # Update the global best model if the current one is better
     if accuracy > best_accuracy:
         best_accuracy = accuracy
-        best_model_state = model  # Save the best model
+        best_model_state = model
+        best_train_losses = train_losses
+        best_test_losses = test_losses
+
+        plot_losses(best_train_losses, best_test_losses, trial.number, best_accuracy)
 
     return accuracy
 
@@ -89,10 +99,9 @@ def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rou
     thresholds = np.arange(0.0, 1.0, 0.00001)
     avgs = []
 
-    # Ensure clf is prefit and has feature importances
     if hasattr(clf, 'feature_importances_'):
         importances = clf.feature_importances_
-        sorted_indices = np.argsort(importances)[::-1]  # Sort in descending order
+        sorted_indices = np.argsort(importances)[::-1]
         sorted_importances = importances[sorted_indices]
 
         print("Feature importances (sorted):")
@@ -105,7 +114,6 @@ def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rou
 
     for thresh in thresholds:
         loopavg = []
-        # Run each threshold 1x for the avg
         for x in range(1):
             selection = SelectFromModel(clf, threshold=thresh, prefit=True)
             select_X_train = selection.transform(X_train)
@@ -118,23 +126,22 @@ def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rou
 
             model = xgb.XGBClassifier(
                 verbosity=0,
-                reg_lambda=0.009878643031227997,
-                reg_alpha=0.002279217346860389,
+                reg_lambda=2.2251244020055068,
+                reg_alpha=0.12599370580364663,
                 tree_method="gpu_hist",
                 objective="binary:logistic",
                 n_jobs=-1,
-                learning_rate=0.013702222609706494,
-                min_child_weight=9,
-                max_depth=4,
-                max_delta_step=9,
-                subsample=0.21774543845476743,
-                colsample_bytree=0.1541140831249018,
-                gamma=0.13796094440436682,
-                n_estimators=914,
-                eta=0.16571212210903133,
-                random_state=46
+                learning_rate=0.0048697574253707306,
+                min_child_weight=17,
+                max_depth=3,
+                max_delta_step=0,
+                subsample=0.6982893260507582,
+                colsample_bytree=0.4639609815677423,
+                gamma=0.08907431463881274,
+                n_estimators=933,
+                eta=0.12072853862369459,
+                random_state=4
             )
-            # Set early stopping rounds
             model.set_params(early_stopping_rounds=early_stopping_rounds)
 
             model.fit(select_X_train, y_train.values.ravel(), eval_set=[(select_X_test, y_test)], verbose=False)
@@ -161,12 +168,25 @@ def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rou
     return selected_model, best_accuracy
 
 
+def plot_losses(train_losses, test_losses, trial_number, accuracy):
+    plt.figure(figsize=(8, 5))
+    plt.plot(train_losses, label='Train Loss')
+    plt.plot(test_losses, label='Test Loss')
+    plt.xlabel('Number of iterations')
+    plt.ylabel('Log Loss')
+    plt.title(f'Learning Curves - Log Loss (Trial {trial_number}, Acc: {accuracy:.4f})')
+    plt.legend()
+    plt.grid()
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == "__main__":
     sampler = TPESampler()
     study = optuna.create_study(direction="maximize", sampler=sampler, pruner=MedianPruner(),
-                                study_name="Best Accuracy Pre Sequence Combination")
+                                study_name="Post Sequence Combination")
     try:
-        study.optimize(objective, n_trials=100000)
+        study.optimize(objective, n_trials=10000)
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
 
@@ -177,10 +197,9 @@ if __name__ == "__main__":
     best_model = best_model_state
     print(f"Best model accuracy: {best_accuracy}")
 
-    # Save the best model as a file
     joblib.dump(best_model, f'models/best_model_{best_accuracy}.pkl')
-    loaded_model = joblib.load(f'models/best_model_0.6395348837209303.pkl')
-    # Run threshold selector using the best model
+    loaded_model = joblib.load(f'models/best_model_{best_accuracy}.pkl')
+
     X_train, X_test, y_train, y_test = get_train_test_data()
     selected_model, best_accuracy_final = threshold_selector(loaded_model, X_train, y_train, X_test, y_test)
     joblib.dump(selected_model, f'models/best_model_final_{best_accuracy_final}.pkl')

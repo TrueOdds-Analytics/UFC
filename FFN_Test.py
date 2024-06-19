@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 import torch
 from torch import nn
-from sklearn.model_selection import train_test_split
 from torch.utils.data import TensorDataset, DataLoader
 from datetime import datetime
 import torch.nn.functional as F
@@ -47,7 +46,7 @@ class FFNnet(nn.Module):
 
 
 def define_model(trial):
-    input_size = 531
+    input_size = 292
     output_size = 1
     num_epochs = 500
 

@@ -58,8 +58,8 @@ def get_train_test_data():
     train_data = train_data.drop(['winner'], axis=1)
 
     # Shuffle train data
-    train_data = train_data.sample(frac=1, random_state=42).reset_index(drop=True)
-    train_labels = train_labels.sample(frac=1, random_state=42).reset_index(drop=True)
+    train_data = train_data.sample(frac=1, random_state=20).reset_index(drop=True)
+    train_labels = train_labels.sample(frac=1, random_state=20).reset_index(drop=True)
 
     # Load test data from CSV
     test_data = pd.read_csv('data/test_data.csv')
@@ -67,8 +67,8 @@ def get_train_test_data():
     test_data = test_data.drop(['winner'], axis=1)
 
     # Shuffle test data
-    test_data = test_data.sample(frac=1, random_state=42).reset_index(drop=True)
-    test_labels = test_labels.sample(frac=1, random_state=42).reset_index(drop=True)
+    test_data = test_data.sample(frac=1, random_state=20).reset_index(drop=True)
+    test_labels = test_labels.sample(frac=1, random_state=20).reset_index(drop=True)
 
     X_train = train_data
     y_train = train_labels
@@ -160,7 +160,7 @@ if __name__ == "__main__":
     sampler = TPESampler()
     study = optuna.create_study(direction="maximize", sampler=sampler, pruner=MedianPruner())
     try:
-        study.optimize(objective, n_trials=2000)
+        study.optimize(objective, n_trials=100000)
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
 
