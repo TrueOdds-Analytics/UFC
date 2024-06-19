@@ -80,21 +80,21 @@ def combine_rounds_stats(file_path):
     # Drop rows with 'DQ' and 'Decision - Split' in the 'result' column
     final_stats = final_stats[~final_stats['result'].isin(['DQ', 'Decision - Split'])]
 
-    # # Consolidate weight classes
-    # weight_class_mapping = {
-    #     'Flyweight': 'Flyweight',
-    #     'Bantamweight': 'Bantamweight',
-    #     'Featherweight': 'Featherweight',
-    #     'Lightweight': 'Lightweight',
-    #     'Welterweight': 'Welterweight',
-    #     'Middleweight': 'Middleweight',
-    #     'Light Heavyweight': 'Light Heavyweight',
-    #     'Heavyweight': 'Heavyweight',
-    #     'Tournament': 'Tournament'
-    # }
-    #
-    # final_stats['weight_class'] = final_stats['weight_class'].apply(
-    #     lambda x: next((v for k, v in weight_class_mapping.items() if k in x), x))
+    # Consolidate weight classes
+    weight_class_mapping = {
+        'Flyweight': 'Flyweight',
+        'Bantamweight': 'Bantamweight',
+        'Featherweight': 'Featherweight',
+        'Lightweight': 'Lightweight',
+        'Welterweight': 'Welterweight',
+        'Middleweight': 'Middleweight',
+        'Light Heavyweight': 'Light Heavyweight',
+        'Heavyweight': 'Heavyweight',
+        'Tournament': 'Tournament'
+    }
+
+    final_stats['weight_class'] = final_stats['weight_class'].apply(
+        lambda x: next((v for k, v in weight_class_mapping.items() if k in x), x))
 
     # Convert unique strings to integers and create dictionary mappings
     for column in ['result', 'winner', 'weight_class', 'scheduled_rounds']:
@@ -199,8 +199,11 @@ def remove_correlated_features(matchup_df, correlation_threshold=0.95):
 def create_matchup_data(file_path, tester, name):
     df = pd.read_csv(file_path)
 
-    # Define the features to include, excluding identifiers and non-numeric features
-    features_to_include = [col for col in df.columns if col not in ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b']]
+    # Define the features to include for averaging, excluding identifiers and non-numeric features
+    columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
+                          'result', 'winner', 'weight_class', 'scheduled_rounds',
+                          'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
+    features_to_include = [col for col in df.columns if col not in columns_to_exclude]
 
     method_columns = ['winner']
 
@@ -227,9 +230,13 @@ def create_matchup_data(file_path, tester, name):
         fighter_features = fighter_df[features_to_include].mean().values
         opponent_features = opponent_df[features_to_include].mean().values
 
+        # Create new columns for the specified features for each of the last three fights
+        results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
+        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(3).values.flatten()
+
         labels = current_fight[method_columns].values
 
-        combined_features = np.concatenate([fighter_features, opponent_features])
+        combined_features = np.concatenate([fighter_features, opponent_features, results_fighter, results_opponent])
         combined_row = np.concatenate([combined_features, labels])
 
         # Get the most recent fight date among the averaged fights
@@ -242,14 +249,19 @@ def create_matchup_data(file_path, tester, name):
             matchup_data.append([fighter_name, opponent_name, most_recent_date] + combined_row.tolist())
 
     # Define column names for the new DataFrame
+    results_columns = []
+    for i in range(1, 4):
+        results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}", f"scheduled_rounds_fight_{i}"]
+        results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}", f"scheduled_rounds_b_fight_{i}"]
+
     if not name:
         column_names = ['fight_date'] + [f"{feature}_fighter_avg" for feature in features_to_include] + \
                        [f"{feature}_opponent_avg" for feature in features_to_include] + \
-                       [f"{method}" for method in method_columns]
+                       results_columns + [f"{method}" for method in method_columns]
     else:
         column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg" for feature in features_to_include] + \
                        [f"{feature}_opponent_avg" for feature in features_to_include] + \
-                       [f"{method}" for method in method_columns]
+                       results_columns + [f"{method}" for method in method_columns]
 
     # Convert the matchup data into a DataFrame
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)

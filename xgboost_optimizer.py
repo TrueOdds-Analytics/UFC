@@ -26,18 +26,18 @@ def objective(trial):
         "objective": trial.suggest_categorical("objective", ["binary:logistic"]),
         "verbosity": trial.suggest_categorical("verbosity", [0]),
         "n_jobs": trial.suggest_categorical("n_jobs", [-1]),
-        "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
         "min_child_weight": trial.suggest_int("min_child_weight", 0, 20),
-        "max_depth": trial.suggest_int("max_depth", 1, 20),
+        "max_depth": trial.suggest_int("max_depth", 1, 10),
         "max_delta_step": trial.suggest_int("max_delta_step", 0, 10),
         "subsample": trial.suggest_float("subsample", 0.1, 1.0, log=True),
         "colsample_bytree": trial.suggest_float("colsample_bytree", 0.1, 1.0, log=True),
         "gamma": trial.suggest_float("gamma", .01, 0.4, log=True),
-        "n_estimators": trial.suggest_int("n_estimators", 100, 1000),
-        "eta": trial.suggest_float("eta", 0.1, 0.2, log=True),
+        "eta": trial.suggest_float("eta", 0.001, 0.1, log=True),
         "seed": trial.suggest_int("seed", 1, 100),
-        "early_stopping_rounds": 10,
-        "eval_metric": "logloss"
+        "n_estimators": 10000,
+        "early_stopping_rounds": 100,
+        "eval_metric": "logloss",
+        "enable_categorical": True,
     }
 
     X_train, X_test, y_train, y_test = get_train_test_data()
@@ -75,6 +75,18 @@ def get_train_test_data():
     train_data = train_data.sample(frac=1, random_state=42).reset_index(drop=True)
     train_labels = train_labels.sample(frac=1, random_state=42).reset_index(drop=True)
 
+    # Convert specified columns to category type
+    category_columns = [
+        'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
+        'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
+        'result_fight_2', 'winner_fight_2', 'weight_class_fight_2', 'scheduled_rounds_fight_2',
+        'result_b_fight_2', 'winner_b_fight_2', 'weight_class_b_fight_2', 'scheduled_rounds_b_fight_2',
+        'result_fight_3', 'winner_fight_3', 'weight_class_fight_3', 'scheduled_rounds_fight_3',
+        'result_b_fight_3', 'winner_b_fight_3', 'weight_class_b_fight_3', 'scheduled_rounds_b_fight_3'
+    ]
+
+    train_data[category_columns] = train_data[category_columns].astype("category")
+
     # Load test data from CSV
     test_data = pd.read_csv('data/test_data.csv')
     test_labels = test_data['winner']
@@ -83,6 +95,9 @@ def get_train_test_data():
     # Shuffle test data
     test_data = test_data.sample(frac=1, random_state=42).reset_index(drop=True)
     test_labels = test_labels.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    # Convert specified columns to category type
+    test_data[category_columns] = test_data[category_columns].astype("category")
 
     X_train = train_data
     y_train = train_labels
@@ -93,7 +108,7 @@ def get_train_test_data():
     return X_train, X_test, y_train, y_test
 
 
-def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rounds=10):
+def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rounds=100):
     X_train = X_train.values
     X_test = X_test.values
     thresholds = np.arange(0.0, 1.0, 0.00001)
@@ -184,7 +199,7 @@ def plot_losses(train_losses, test_losses, trial_number, accuracy):
 if __name__ == "__main__":
     sampler = TPESampler()
     study = optuna.create_study(direction="maximize", sampler=sampler, pruner=MedianPruner(),
-                                study_name="Post Sequence Combination")
+                                study_name="Post categorical")
     try:
         study.optimize(objective, n_trials=10000)
     except KeyboardInterrupt:
