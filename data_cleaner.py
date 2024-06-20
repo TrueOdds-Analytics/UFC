@@ -8,7 +8,6 @@ def combine_rounds_stats(file_path):
     ufc_stats['fight_date'] = pd.to_datetime(ufc_stats['fight_date'])
 
     # Drop unnecessary columns and rows
-    # Drop unnecessary columns and rows
     ufc_stats = ufc_stats.drop(['round', 'location', 'event'], axis=1)
     ufc_stats = ufc_stats[~ufc_stats['weight_class'].str.contains("Women's")]
 
@@ -150,10 +149,12 @@ def combine_fighters_stats(file_path):
     ]
 
     # Generate the columns to differentiate using list comprehension
-    columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in base_columns]
+    columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in
+                                                                                  base_columns]
 
     # Calculate the differential for each column and store in a new DataFrame
-    diff_df = pd.DataFrame({f"{col}_diff": final_combined_df[col] - final_combined_df[f"{col}_b"] for col in columns_to_diff})
+    diff_df = pd.DataFrame(
+        {f"{col}_diff": final_combined_df[col] - final_combined_df[f"{col}_b"] for col in columns_to_diff})
 
     # Concatenate the differential DataFrame with the final_combined_df
     final_combined_df = pd.concat([final_combined_df, diff_df], axis=1)
@@ -190,10 +191,52 @@ def remove_correlated_features(matchup_df, correlation_threshold=0.95):
     # Drop the highly correlated columns
     matchup_df = matchup_df.drop(columns=columns_to_drop)
 
-    # Get the number of removed features
-    num_removed_features = len(columns_to_drop)
+    return matchup_df, columns_to_drop
 
-    return matchup_df, num_removed_features
+def split_train_test(matchup_data_file, test):
+    # Load the matchup data
+    matchup_df = pd.read_csv(matchup_data_file)
+
+    # Remove correlated features
+    matchup_df, removed_features = remove_correlated_features(matchup_df)
+
+    # Create a separate DataFrame with fight dates
+    fight_dates_df = matchup_df[['fight_date']]
+    fight_dates_df = fight_dates_df.sort_values(by='fight_date', ascending=True)
+
+    # Calculate the indices to split the data into train, validation, and test sets
+    train_split_index = int(len(fight_dates_df) * 0.80)
+    val_split_index = int(len(fight_dates_df) * 0.90)
+
+    # Get the date thresholds for splitting the data
+    train_split_date = fight_dates_df.iloc[train_split_index]['fight_date']
+    val_split_date = fight_dates_df.iloc[val_split_index]['fight_date']
+
+    # Split the data into train, validation, and test sets based on the fight date
+    train_data = matchup_df[matchup_df['fight_date'] < train_split_date]
+    val_data = matchup_df[(matchup_df['fight_date'] >= train_split_date) & (matchup_df['fight_date'] < val_split_date)]
+    test_data = matchup_df[matchup_df['fight_date'] >= val_split_date]
+
+    # Drop the fight_date column after using it for splitting
+    train_data = train_data.drop(columns=['fight_date'])
+    val_data = val_data.drop(columns=['fight_date'])
+    test_data = test_data.drop(columns=['fight_date'])
+
+    if not test:
+        # Save the train, validation, and test data to CSV files
+        train_data.to_csv('data/train_data.csv', index=False)
+        val_data.to_csv('data/val_data.csv', index=False)
+        test_data.to_csv('data/test_data.csv', index=False)
+    else:
+        train_data.to_csv('data/train_data_test.csv', index=False)
+        val_data.to_csv('data/val_data_test.csv', index=False)
+        test_data.to_csv('data/test_data_test.csv', index=False)
+
+    # Save the removed features to a file
+    with open('data/removed_features.txt', 'w') as file:
+        file.write(','.join(removed_features))
+
+    print(f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
 
 
 def create_matchup_data(file_path, tester, name):
@@ -232,7 +275,8 @@ def create_matchup_data(file_path, tester, name):
 
         # Create new columns for the specified features for each of the last three fights
         results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
-        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(3).values.flatten()
+        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
+            3).values.flatten()
 
         labels = current_fight[method_columns].values
 
@@ -251,67 +295,105 @@ def create_matchup_data(file_path, tester, name):
     # Define column names for the new DataFrame
     results_columns = []
     for i in range(1, 4):
-        results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}", f"scheduled_rounds_fight_{i}"]
-        results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}", f"scheduled_rounds_b_fight_{i}"]
+        results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}",
+                            f"scheduled_rounds_fight_{i}"]
+        results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}",
+                            f"scheduled_rounds_b_fight_{i}"]
 
     if not name:
-        column_names = ['fight_date'] + [f"{feature}_fighter_avg" for feature in features_to_include] + \
-                       [f"{feature}_opponent_avg" for feature in features_to_include] + \
+        column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in
+                                         features_to_include] + \
+                       [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
                        results_columns + [f"{method}" for method in method_columns]
     else:
-        column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg" for feature in features_to_include] + \
-                       [f"{feature}_opponent_avg" for feature in features_to_include] + \
+        column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for
+                                                                 feature in features_to_include] + \
+                       [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
                        results_columns + [f"{method}" for method in method_columns]
 
     # Convert the matchup data into a DataFrame
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
 
     if not name:
-        matchup_df.to_csv(f'data/matchup_data_{n_past_fights-1}_avg.csv', index=False)
+        matchup_df.to_csv(f'data/matchup_data_{n_past_fights - 1}_avg.csv', index=False)
     else:
-        matchup_df.to_csv(f'data/matchup_data_{n_past_fights-1}_avg_name.csv', index=False)
+        matchup_df.to_csv(f'data/matchup_data_{n_past_fights - 1}_avg_name.csv', index=False)
 
     return matchup_df
 
-def split_train_test(matchup_data_file, test):
-    # Load the matchup data
-    matchup_df = pd.read_csv(matchup_data_file)
 
-    # Remove correlated features
-    matchup_df, num_removed_features = remove_correlated_features(matchup_df)
+def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_fights, csv_name=None):
+    df = pd.read_csv(file_path)
 
-    # Create a separate DataFrame with fight dates
-    fight_dates_df = matchup_df[['fight_date']]
-    fight_dates_df = fight_dates_df.sort_values(by='fight_date', ascending=True)
+    # Convert fighter names to lowercase
+    fighter_name = fighter_name.lower()
+    opponent_name = opponent_name.lower()
+    df['fighter'] = df['fighter'].str.lower()
+    df['fighter_b'] = df['fighter_b'].str.lower()
 
-    # Calculate the index to split the data into train and test sets
-    split_index = int(len(fight_dates_df) * 0.9)
+    # Load the removed features from the file
+    with open('data/removed_features.txt', 'r') as file:
+        removed_features = file.read().split(',')
 
-    # Get the date threshold for splitting the data
-    split_date = fight_dates_df.iloc[split_index]['fight_date']
+    # Define the features to include for averaging, excluding identifiers, non-numeric features, and removed features
+    columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
+                          'result', 'winner', 'weight_class', 'scheduled_rounds',
+                          'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
+    features_to_include = [col for col in df.columns if col not in columns_to_exclude and col not in removed_features]
 
-    # Split the data into train and test sets based on the fight date
-    train_data = matchup_df[matchup_df['fight_date'] < split_date]
-    test_data = matchup_df[matchup_df['fight_date'] >= split_date]
+    matchup_data = []
 
-    # Drop the fight_date column after using it for splitting
-    train_data = train_data.drop(columns=['fight_date'])
-    test_data = test_data.drop(columns=['fight_date'])
+    # Get the last 'n' fights for Fighter A and Fighter B before the specified matchup
+    fighter_df = df[(df['fighter'] == fighter_name)].sort_values(by='fight_date', ascending=False).head(n_past_fights)
+    opponent_df = df[(df['fighter'] == opponent_name)].sort_values(by='fight_date', ascending=False).head(n_past_fights)
 
-    if not test:
-        # Apply abs() to the entire DataFrame
-        train_data = train_data.abs()
-        test_data = test_data.abs()
+    # Check if either fighter doesn't have enough fights
+    if len(fighter_df) < n_past_fights or len(opponent_df) < n_past_fights:
+        print("Specific matchup failure: One of the fighters doesn't have enough fights.")
+        return None
 
-    if not test:
-        # Save the train and test data to CSV files
-        train_data.to_csv('data/train_data.csv', index=False)
-        test_data.to_csv('data/test_data.csv', index=False)
-    else:
-        train_data.to_csv('data/train_data_test.csv', index=False)
-        test_data.to_csv('data/test_data_test.csv', index=False)
+    # Calculate the average of the relevant columns over the past 'n' fights
+    fighter_features = fighter_df[features_to_include].mean().values
+    opponent_features = opponent_df[features_to_include].mean().values
 
-    print(f"Train and test data saved successfully. {num_removed_features} correlated features were removed.")
+    # Create new columns for the specified features for each of the last three fights
+    results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
+    results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(3).values.flatten()
+
+    combined_features = np.concatenate([fighter_features, opponent_features, results_fighter, results_opponent])
+
+    # Get the most recent fight date among the averaged fights
+    most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
+
+    # Add the combined features, most recent fight date, and fighter names to the dataset
+    matchup_data.append([fighter_name, opponent_name, most_recent_date] + combined_features.tolist())
+
+    # Define column names for the new DataFrame
+    results_columns = []
+    for i in range(1, 4):
+        results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}", f"scheduled_rounds_fight_{i}"]
+        results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}", f"scheduled_rounds_b_fight_{i}"]
+
+    column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in features_to_include] + \
+                   [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include] + \
+                   results_columns
+
+    # Convert the matchup data into a DataFrame
+    matchup_df = pd.DataFrame(matchup_data, columns=column_names)
+
+    # Drop the specified columns from the removed features
+    matchup_df = matchup_df.drop(columns=[col for col in removed_features if col in matchup_df.columns], axis=1)
+
+    # Drop the 'fight_date' column
+    matchup_df = matchup_df.drop(['fight_date'], axis=1)
+
+    # Save the specific matchup data to a CSV file
+    if csv_name is None:
+        csv_name = f'specific_matchup.csv'
+    matchup_df.to_csv(f'data/{csv_name}', index=False)
+
+    print("Specific matchup success. Data saved to CSV.")
+    return matchup_df
 
 
 if __name__ == "__main__":
