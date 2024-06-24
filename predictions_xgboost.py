@@ -22,7 +22,7 @@ def preprocess_data(data):
 
 
 def load_model(model_path):
-    model = xgb.XGBClassifier()
+    model = xgb.XGBClassifier(enable_categorical=True)
     model.load_model(model_path)
     return model
 
@@ -46,7 +46,7 @@ def predict_outcome(model, specific_data, fighter_name, opponent_name):
 
 if __name__ == "__main__":
     # Load the trained model
-    model_path = 'models/model_0.698019801980198.json'  # Replace with the actual model file path
+    model_path = 'models/model_0.6831683168316832.json'  # Replace with the actual model file path
     model = load_model(model_path)
 
     while True:
