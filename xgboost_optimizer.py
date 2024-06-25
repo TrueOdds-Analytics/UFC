@@ -272,7 +272,7 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
     def callback(study, trial):
         trial_accuracies.append(trial.value)
 
-    study.optimize(objective, n_trials=10000, callbacks=[callback])
+    study.optimize(objective, n_trials=100, callbacks=[callback])
 
     # Print the average accuracy at the end of the study
     avg_accuracy = sum(trial_accuracies) / len(trial_accuracies)

@@ -233,7 +233,7 @@ def combine_fighters_stats(file_path):
     return final_combined_df
 
 
-def remove_multicollinear_features(matchup_df, vif_threshold=5):
+def remove_multicollinear_features(matchup_df, vif_threshold=10):
     numeric_columns = matchup_df.select_dtypes(include=[np.number]).columns
     numeric_df = matchup_df[numeric_columns]
 
