@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import optuna
 from optuna.samplers import TPESampler
@@ -98,16 +99,104 @@ def create_shap_graph(model_path):
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_train)
 
-    # Create and save the SHAP summary plot
+    # Create and display the SHAP summary plot
     plt.figure(figsize=(10, 12))
     shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
     plt.title(f"SHAP Values for model: {model_path}")
     plt.tight_layout()
-    plt.savefig(f"shap_summary_{model_path.split('/')[-1].split('.')[0]}.png")
-    plt.close()
+    plt.show()  # Display the plot
 
-    print(f"SHAP summary plot saved as shap_summary_{model_path.split('/')[-1].split('.')[0]}.png")
+    print(f"SHAP summary plot displayed for model: {model_path}")
 
+
+def feature_removal_process(X_train, X_val, y_train, y_val, original_model_path):
+    original_model = xgb.XGBClassifier(enable_categorical=True)
+    original_model.load_model(original_model_path)
+
+    initial_feature_count = X_train.shape[1]
+    best_accuracy = 0
+    best_auc = 0
+
+    accuracies = []
+    aucs = []
+    features_removed_list = []
+    all_removed_features = []
+
+    # Calculate SHAP values
+    explainer = shap.TreeExplainer(original_model)
+    shap_values = explainer.shap_values(X_train)
+
+    original_feature_names = X_train.columns.tolist()
+
+    mean_shap_values = np.abs(shap_values).mean(axis=0)
+    feature_importance = sorted(zip(original_feature_names, mean_shap_values), key=lambda x: x[1])
+
+    print("Original SHAP value importances (sorted from least to most important):")
+    for feature, importance in feature_importance:
+        print(f"{feature}: {importance}")
+    print("--------------------")
+
+    print(f"Original number of features: {initial_feature_count}")
+
+    try:
+        while len(feature_importance) >= 10:
+            while should_pause:
+                time.sleep(1)
+
+            features_to_remove = [feature for feature, _ in feature_importance[:10]]
+            existing_features_to_remove = list(set(features_to_remove) & set(X_train.columns))
+
+            X_train = X_train.drop(columns=existing_features_to_remove)
+            X_val = X_val.drop(columns=existing_features_to_remove)
+
+            features_removed = initial_feature_count - X_train.shape[1]
+            features_removed_list.append(features_removed)
+            all_removed_features.extend(existing_features_to_remove)
+            print(f"Current number of features: {X_train.shape[1]}")
+            print(f"Removed features: {existing_features_to_remove}")
+
+            new_model, new_accuracy, new_auc, new_best_params, _, _, _, _, best_accuracy, best_auc = train_and_evaluate_model(
+                X_train, X_val, y_train, y_val, features_removed, all_removed_features, best_accuracy, best_auc)
+
+            accuracies.append(new_accuracy)
+            aucs.append(new_auc)
+
+            print(f"Current validation accuracy: {new_accuracy:.4f}, Current validation AUC: {new_auc:.4f}")
+            print(f"Best accuracy: {best_accuracy:.4f}, Best AUC: {best_auc:.4f}")
+            print(f"Best parameters: {new_best_params}")
+            print("--------------------")
+
+            feature_importance = [item for item in feature_importance if item[0] not in existing_features_to_remove]
+
+        if feature_importance:
+            while should_pause:
+                time.sleep(1)
+
+            remaining_features = [feature for feature, _ in feature_importance]
+            existing_remaining_features = list(set(remaining_features) & set(X_train.columns))
+
+            X_train = X_train.drop(columns=existing_remaining_features)
+            X_val = X_val.drop(columns=existing_remaining_features)
+
+            all_removed_features.extend(existing_remaining_features)
+            print(f"Removed remaining features: {existing_remaining_features}")
+            print(f"Final number of features: {X_train.shape[1]}")
+
+            final_model, final_accuracy, final_auc, final_best_params, _, _, _, _, best_accuracy, best_auc = train_and_evaluate_model(
+                X_train, X_val, y_train, y_val, initial_feature_count - X_train.shape[1], all_removed_features,
+                best_accuracy, best_auc)
+
+            print(f"Final model performance:")
+            print(f"Validation Accuracy: {final_accuracy:.4f}, Validation AUC: {final_auc:.4f}")
+            print(f"Best overall accuracy: {best_accuracy:.4f}, Best overall AUC: {best_auc:.4f}")
+            print(f"Best parameters: {final_best_params}")
+
+    except KeyboardInterrupt:
+        print("\nProcess interrupted by user. Exiting...")
+
+    print("Feature removal process completed.")
+
+    return best_accuracy, best_auc, accuracies, aucs, features_removed_list, all_removed_features
 
 def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, all_removed_features, best_accuracy, best_auc):
     global should_pause
@@ -176,7 +265,7 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
         return accuracy
 
     study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
-    study.optimize(objective, n_trials=10)
+    study.optimize(objective, n_trials=25000)
 
     best_params = study.best_params
     best_params.update({
@@ -218,93 +307,25 @@ if __name__ == "__main__":
     print("--------------------")
 
     # Create SHAP graph for the best model
-    best_model_path = f'models/xgboost/model_{best_accuracy:.4f}_0_features_removed.json'
-    print(f"Creating SHAP graph for the best model: {best_model_path}")
-    create_shap_graph(best_model_path)
-    print("SHAP graph creation completed.")
-    print("--------------------")
-
-    # model_path = 'models/model_0.7079_0_features_removed.json'
-    # original_model = xgb.XGBClassifier(enable_categorical=True)
-    # original_model.load_model(model_path)
-    #
-    # X_train, X_val, y_train, y_val = get_train_val_data()
-    #
-    # initial_feature_count = X_train.shape[1]
-    # best_accuracy = 0
-    # best_auc = 0
-    #
-    # accuracies = []
-    # aucs = []
-    # features_removed_list = []
-    # all_removed_features = []
-    #
-    # original_shap_values, original_feature_names = calculate_shap_values(original_model, X_train)
-    #
-    # mean_shap_values = np.abs(original_shap_values).mean(axis=0)
-    # feature_importance = sorted(zip(original_feature_names, mean_shap_values), key=lambda x: x[1])
-    #
-    # print("Original SHAP value importances (sorted from least to most important):")
-    # for feature, importance in feature_importance:
-    #     print(f"{feature}: {importance}")
+    # best_model_path = f'models/xgboost/model_0.6980_0_features_removed.json'
+    # print(f"Creating SHAP graph for the best model: {best_model_path}")
+    # create_shap_graph(best_model_path)
+    # print("SHAP graph creation completed.")
     # print("--------------------")
     #
-    # print(f"Original number of features: {initial_feature_count}")
+    # best_model_path = f'models/xgboost/model_{best_accuracy:.4f}_0_features_removed.json'
+    # print(f"Creating SHAP graph for the best model: {best_model_path}")
+    # create_shap_graph(best_model_path)
+    # print("SHAP graph creation completed.")
+    # print("--------------------")
     #
-    # try:
-    #     while len(feature_importance) >= 10:
-    #         while should_pause:
-    #             time.sleep(1)
-    #
-    #         features_to_remove = [feature for feature, _ in feature_importance[:10]]
-    #         existing_features_to_remove = list(set(features_to_remove) & set(X_train.columns))
-    #
-    #         X_train = X_train.drop(columns=existing_features_to_remove)
-    #         X_val = X_val.drop(columns=existing_features_to_remove)
-    #
-    #         features_removed = initial_feature_count - X_train.shape[1]
-    #         features_removed_list.append(features_removed)
-    #         all_removed_features.extend(existing_features_to_remove)
-    #         print(f"Current number of features: {X_train.shape[1]}")
-    #         print(f"Removed features: {existing_features_to_remove}")
-    #
-    #         new_model, new_accuracy, new_auc, new_best_params, _, _, _, _, best_accuracy, best_auc = train_and_evaluate_model(
-    #             X_train, X_val, y_train, y_val, features_removed, all_removed_features, best_accuracy, best_auc)
-    #
-    #         accuracies.append(new_accuracy)
-    #         aucs.append(new_auc)
-    #
-    #         print(f"Current validation accuracy: {new_accuracy:.4f}, Current validation AUC: {new_auc:.4f}")
-    #         print(f"Best accuracy: {best_accuracy:.4f}, Best AUC: {best_auc:.4f}")
-    #         print(f"Best parameters: {new_best_params}")
-    #         print("--------------------")
-    #
-    #         feature_importance = [item for item in feature_importance if item[0] not in existing_features_to_remove]
-    #
-    #     if feature_importance:
-    #         while should_pause:
-    #             time.sleep(1)
-    #
-    #         remaining_features = [feature for feature, _ in feature_importance]
-    #         existing_remaining_features = list(set(remaining_features) & set(X_train.columns))
-    #
-    #         X_train = X_train.drop(columns=existing_remaining_features)
-    #         X_val = X_val.drop(columns=existing_remaining_features)
-    #
-    #         all_removed_features.extend(existing_remaining_features)
-    #         print(f"Removed remaining features: {existing_remaining_features}")
-    #         print(f"Final number of features: {X_train.shape[1]}")
-    #
-    #         final_model, final_accuracy, final_auc, final_best_params, _, _, _, _, best_accuracy, best_auc = train_and_evaluate_model(
-    #             X_train, X_val, y_train, y_val, initial_feature_count - X_train.shape[1], all_removed_features,
-    #             best_accuracy, best_auc)
-    #
-    #         print(f"Final model performance:")
-    #         print(f"Validation Accuracy: {final_accuracy:.4f}, Validation AUC: {final_auc:.4f}")
-    #         print(f"Best overall accuracy: {best_accuracy:.4f}, Best overall AUC: {best_auc:.4f}")
-    #         print(f"Best parameters: {final_best_params}")
-    #
-    # except KeyboardInterrupt:
-    #     print("\nProcess interrupted by user. Exiting...")
+    # # Start feature removal process
+    # print("Starting feature removal process...")
+    # best_accuracy, best_auc, accuracies, aucs, features_removed_list, all_removed_features = feature_removal_process(
+    #     X_train, X_val, y_train, y_val, best_model_path
+    # )
     #
     # print("Feature removal process completed.")
+    # print(f"Final best accuracy: {best_accuracy:.4f}")
+    # print(f"Final best AUC: {best_auc:.4f}")
+    # print(f"Total features removed: {len(all_removed_features)}")
