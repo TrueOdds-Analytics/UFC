@@ -128,10 +128,60 @@ class BestFightOddsScraperSelenium:
         return df
 
 
+def clean_fight_odds_from_csv(input_csv_path, output_csv_path):
+    # Read the CSV file
+    fight_odds_df = pd.read_csv(input_csv_path)
+
+    # Remove rows where Event doesn't contain 'UFC'
+    fight_odds_df = fight_odds_df[
+        fight_odds_df['Event'].str.contains('UFC', case=False, na=False) | fight_odds_df['Event'].isna()]
+
+    # Create a list to store the modified rows
+    modified_rows = []
+
+    # Iterate through the DataFrame
+    i = 0
+    while i < len(fight_odds_df):
+        row1 = fight_odds_df.iloc[i].copy()
+
+        if pd.notna(row1['Event']):
+            # This is a row with Event information
+            modified_rows.append(row1)
+
+            # Check if there's a next row
+            if i + 1 < len(fight_odds_df):
+                row2 = fight_odds_df.iloc[i + 1].copy()
+                # Carry over Movement and Event from row1 to row2
+                row2['Movement'] = row1['Movement']
+                row2['Event'] = row1['Event']
+                modified_rows.append(row2)
+                i += 2  # Move to the next pair
+            else:
+                i += 1  # Move to the next row if there's no pair
+        else:
+            # This is a row without Event information, skip it
+            i += 1
+
+    # Create the modified DataFrame
+    modified_df = pd.DataFrame(modified_rows, columns=fight_odds_df.columns)
+
+    # Save the cleaned and modified DataFrame to a new CSV file
+    modified_df.to_csv(output_csv_path, index=False)
+
+    return modified_df
+
+
 if __name__ == "__main__":
-    combined_rounds_df = pd.read_csv("data/combined_rounds.csv")
-    fighters = combined_rounds_df["fighter"].unique().tolist()
-    fighters = list(set(fighters))
-    scraper = BestFightOddsScraperSelenium(fighters)
-    odds_df = scraper.scrape()
-    print(odds_df)
+    # combined_rounds_df = pd.read_csv("data/combined_rounds.csv")
+    # fighters = combined_rounds_df["fighter"].unique().tolist()
+    # fighters = list(set(fighters))
+    # scraper = BestFightOddsScraperSelenium(fighters)
+    # odds_df = scraper.scrape()
+    # print(odds_df)
+
+    # Clean the fight odds data
+    input_file = "data/odds data/fight_odds.csv"
+    output_file = "data/odds data/cleaned_fight_odds.csv"
+    cleaned_odds_df = clean_fight_odds_from_csv(input_file, output_file)
+
+    print(cleaned_odds_df)

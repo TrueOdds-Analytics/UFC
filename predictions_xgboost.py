@@ -46,7 +46,7 @@ def predict_outcome(model, specific_data, fighter_name, opponent_name):
 
 if __name__ == "__main__":
     # Load the trained model
-    model_path = 'models/model_0.6831683168316832.json'  # Replace with the actual model file path
+    model_path = 'models/model_0.7079_0_features_removed.json'  # Replace with the actual model file path
     model = load_model(model_path)
 
     while True:

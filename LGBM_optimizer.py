@@ -53,7 +53,7 @@ def objective(trial):
 
 def get_train_test_data():
     # Load train data from CSV
-    train_data = pd.read_csv('data/train_data.csv')
+    train_data = pd.read_csv('data/train test data/train_data.csv')
     train_labels = train_data['winner']
     train_data = train_data.drop(['winner'], axis=1)
 
@@ -62,7 +62,7 @@ def get_train_test_data():
     train_labels = train_labels.sample(frac=1, random_state=20).reset_index(drop=True)
 
     # Load test data from CSV
-    test_data = pd.read_csv('data/test_data.csv')
+    test_data = pd.read_csv('data/train test data/test_data.csv')
     test_labels = test_data['winner']
     test_data = test_data.drop(['winner'], axis=1)
 
