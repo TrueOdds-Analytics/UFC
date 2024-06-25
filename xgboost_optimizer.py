@@ -272,11 +272,10 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
     def callback(study, trial):
         trial_accuracies.append(trial.value)
 
-    study.optimize(objective, n_trials=25000, callbacks=[callback])
+    study.optimize(objective, n_trials=10000, callbacks=[callback])
 
     # Print the average accuracy at the end of the study
     avg_accuracy = sum(trial_accuracies) / len(trial_accuracies)
-    print(f"Average trial accuracy: {avg_accuracy:.4f}")
 
     best_params = study.best_params
     best_params.update({
@@ -292,7 +291,7 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
     })
 
     best_model, best_accuracy, best_auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(best_params)
-
+    print(f"Average trial accuracy: {avg_accuracy:.4f}")
     return best_model, best_accuracy, best_auc, best_params, train_losses, val_losses, train_auc, val_auc, best_accuracy, best_auc
 
 
@@ -317,8 +316,8 @@ if __name__ == "__main__":
     print("Best parameters:", initial_best_params)
     print("--------------------")
 
-    # Create SHAP graph for the best model
-    # best_model_path = f'models/xgboost/model_0.6584_0_features_removed.json'
+    # # Create SHAP graph for the best model
+    # best_model_path = f'models/xgboost/model_0.6931_0_features_removed.json'
     # print(f"Creating SHAP graph for the best model: {best_model_path}")
     # create_shap_graph(best_model_path)
     # print("SHAP graph creation completed.")

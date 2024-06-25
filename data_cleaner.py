@@ -290,10 +290,10 @@ def split_train_val(matchup_data_file):
 def create_matchup_data(file_path, tester, name):
     df = pd.read_csv(file_path)
 
-    # Define the features to include for averaging, excluding identifiers and non-numeric features
     columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
                           'result', 'winner', 'weight_class', 'scheduled_rounds',
-                          'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
+                          'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b',
+                          'open_odds', 'open_odds_b']  # Exclude odds from features to average
     features_to_include = [col for col in df.columns if col not in columns_to_exclude]
 
     method_columns = ['winner']
@@ -301,46 +301,39 @@ def create_matchup_data(file_path, tester, name):
     matchup_data = []
     n_past_fights = 6 - tester
 
-    # Iterate through the DataFrame
     for index, current_fight in df.iterrows():
         fighter_name = current_fight['fighter']
         opponent_name = current_fight['fighter_b']
 
-        # Get the last 'n' fights for Fighter A and Fighter B before the current fight,
-        # where 'n' is determined by the 'tester' parameter
         fighter_df = df[(df['fighter'] == fighter_name) & (df['fight_date'] < current_fight['fight_date'])] \
             .sort_values(by='fight_date', ascending=False).head(n_past_fights)
         opponent_df = df[(df['fighter'] == opponent_name) & (df['fight_date'] < current_fight['fight_date'])] \
             .sort_values(by='fight_date', ascending=False).head(n_past_fights)
 
-        # Skip if either fighter does not have enough past fights
         if len(fighter_df) < n_past_fights or len(opponent_df) < n_past_fights:
             continue
 
-        # Calculate the average of the relevant columns over the past 'n' fights
         fighter_features = fighter_df[features_to_include].mean().values
         opponent_features = opponent_df[features_to_include].mean().values
 
-        # Create new columns for the specified features for each of the last three fights
         results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
-        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
-            3).values.flatten()
+        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(3).values.flatten()
 
         labels = current_fight[method_columns].values
 
-        combined_features = np.concatenate([fighter_features, opponent_features, results_fighter, results_opponent])
+        # Get current fight odds
+        current_fight_odds = [current_fight['open_odds'], current_fight['open_odds_b']]
+
+        combined_features = np.concatenate([fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds])
         combined_row = np.concatenate([combined_features, labels])
 
-        # Get the most recent fight date among the averaged fights
         most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
 
-        # Add the combined row, most recent fight date, and correct fighter names to the dataset
         if not name:
             matchup_data.append([most_recent_date] + combined_row.tolist())
         else:
             matchup_data.append([fighter_name, opponent_name, most_recent_date] + combined_row.tolist())
 
-    # Define column names for the new DataFrame
     results_columns = []
     for i in range(1, 4):
         results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}",
@@ -349,17 +342,16 @@ def create_matchup_data(file_path, tester, name):
                             f"scheduled_rounds_b_fight_{i}"]
 
     if not name:
-        column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in
-                                         features_to_include] + \
+        column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
-                       results_columns + [f"{method}" for method in method_columns]
+                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b'] + \
+                       [f"{method}" for method in method_columns]
     else:
-        column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for
-                                                                 feature in features_to_include] + \
+        column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
-                       results_columns + [f"{method}" for method in method_columns]
+                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b'] + \
+                       [f"{method}" for method in method_columns]
 
-    # Convert the matchup data into a DataFrame
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
 
     if not name:
