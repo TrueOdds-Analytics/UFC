@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 from fuzzywuzzy import fuzz
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+import warnings
 
 
 def combine_rounds_stats(file_path):
@@ -230,21 +232,35 @@ def combine_fighters_stats(file_path):
 
     return final_combined_df
 
-def remove_correlated_features(matchup_df, correlation_threshold=0.95):
-    # Select only the numeric columns
+
+def remove_multicollinear_features(matchup_df, vif_threshold=5):
     numeric_columns = matchup_df.select_dtypes(include=[np.number]).columns
     numeric_df = matchup_df[numeric_columns]
 
-    # Calculate the correlation matrix
-    corr_matrix = numeric_df.corr().abs()
+    # Create a temporary DataFrame for VIF calculation
+    temp_df = numeric_df.copy()
 
-    # Select the upper triangle of the correlation matrix
-    upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+    # Handle missing values and infinity values in the temporary DataFrame
+    temp_df = temp_df.replace([np.inf, -np.inf], np.nan)
+    temp_df = temp_df.dropna()
 
-    # Find the columns to drop
-    columns_to_drop = [column for column in upper_tri.columns if any(upper_tri[column] > correlation_threshold)]
+    vif_data = pd.DataFrame()
+    vif_data["feature"] = temp_df.columns
 
-    # Drop the highly correlated columns
+    # Catch the runtime warning and set a default value for VIF
+    vif_values = []
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        for i in range(len(temp_df.columns)):
+            try:
+                vif = variance_inflation_factor(temp_df.values, i)
+            except RuntimeWarning:
+                vif = np.inf  # Set a default value of infinity for VIF
+            vif_values.append(vif)
+
+    vif_data["VIF"] = vif_values
+
+    columns_to_drop = vif_data[vif_data["VIF"] > vif_threshold]["feature"].tolist()
     matchup_df = matchup_df.drop(columns=columns_to_drop)
 
     return matchup_df, columns_to_drop
@@ -255,7 +271,7 @@ def split_train_val(matchup_data_file):
     matchup_df = pd.read_csv(matchup_data_file)
 
     # Remove correlated features
-    matchup_df, removed_features = remove_correlated_features(matchup_df)
+    matchup_df, removed_features = remove_multicollinear_features(matchup_df)
 
     # Create a separate DataFrame with fight dates
     fight_dates_df = matchup_df[['fight_date']]

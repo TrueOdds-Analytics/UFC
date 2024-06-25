@@ -48,12 +48,12 @@ def get_train_val_data():
 
     # Convert specified columns to category type
     category_columns = [
-        'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
-        'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
-        'result_fight_2', 'winner_fight_2', 'weight_class_fight_2', 'scheduled_rounds_fight_2',
-        'result_b_fight_2', 'winner_b_fight_2', 'weight_class_b_fight_2', 'scheduled_rounds_b_fight_2',
-        'result_fight_3', 'winner_fight_3', 'weight_class_fight_3', 'scheduled_rounds_fight_3',
-        'result_b_fight_3', 'winner_b_fight_3', 'weight_class_b_fight_3', 'scheduled_rounds_b_fight_3'
+        'result_fight_1', 'scheduled_rounds_fight_1',
+        'result_b_fight_1', 'scheduled_rounds_b_fight_1',
+        'result_fight_2', 'winner_fight_2', 'scheduled_rounds_fight_2',
+        'result_b_fight_2', 'winner_b_fight_2', 'scheduled_rounds_b_fight_2',
+        'result_fight_3', 'winner_fight_3', 'scheduled_rounds_fight_3',
+        'result_b_fight_3', 'winner_b_fight_3', 'scheduled_rounds_b_fight_3'
     ]
 
     for df in [train_data, val_data]:
@@ -272,11 +272,10 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
     def callback(study, trial):
         trial_accuracies.append(trial.value)
 
-    study.optimize(objective, n_trials=10, callbacks=[callback])
+    study.optimize(objective, n_trials=10000, callbacks=[callback])
 
     # Print the average accuracy at the end of the study
     avg_accuracy = sum(trial_accuracies) / len(trial_accuracies)
-    print(f"Average trial accuracy: {avg_accuracy:.4f}")
 
     best_params = study.best_params
     best_params.update({
@@ -292,7 +291,7 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
     })
 
     best_model, best_accuracy, best_auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(best_params)
-
+    print(f"Average trial accuracy: {avg_accuracy:.4f}")
     return best_model, best_accuracy, best_auc, best_params, train_losses, val_losses, train_auc, val_auc, best_accuracy, best_auc
 
 
