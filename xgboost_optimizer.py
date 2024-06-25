@@ -265,7 +265,18 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
         return accuracy
 
     study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
-    study.optimize(objective, n_trials=25000)
+
+    # Keep track of trial accuracies
+    trial_accuracies = []
+
+    def callback(study, trial):
+        trial_accuracies.append(trial.value)
+
+    study.optimize(objective, n_trials=10, callbacks=[callback])
+
+    # Print the average accuracy at the end of the study
+    avg_accuracy = sum(trial_accuracies) / len(trial_accuracies)
+    print(f"Average trial accuracy: {avg_accuracy:.4f}")
 
     best_params = study.best_params
     best_params.update({
@@ -307,7 +318,7 @@ if __name__ == "__main__":
     print("--------------------")
 
     # Create SHAP graph for the best model
-    # best_model_path = f'models/xgboost/model_0.6980_0_features_removed.json'
+    # best_model_path = f'models/xgboost/model_0.6584_0_features_removed.json'
     # print(f"Creating SHAP graph for the best model: {best_model_path}")
     # create_shap_graph(best_model_path)
     # print("SHAP graph creation completed.")
