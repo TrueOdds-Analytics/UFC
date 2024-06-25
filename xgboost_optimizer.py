@@ -83,8 +83,7 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, 
     ax2.grid()
 
     plt.tight_layout()
-    plt.savefig(f'learning_curves_{features_removed}_features_removed.png')
-    plt.close()
+    plt.show()  # This will display the plot in the IDE
 
 
 def create_shap_graph(model_path):
@@ -110,9 +109,25 @@ def create_shap_graph(model_path):
     print(f"SHAP summary plot saved as shap_summary_{model_path.split('/')[-1].split('.')[0]}.png")
 
 
-def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, all_removed_features, best_accuracy,
-                             best_auc):
+def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, all_removed_features, best_accuracy, best_auc):
     global should_pause
+
+    def create_fit_and_evaluate_model(params):
+        model = xgb.XGBClassifier(**params)
+        eval_set = [(X_train, y_train), (X_val, y_val)]
+        model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
+
+        results = model.evals_result()
+        train_losses = results['validation_0']['logloss']
+        val_losses = results['validation_1']['logloss']
+        train_auc = results['validation_0']['auc']
+        val_auc = results['validation_1']['auc']
+
+        y_val_pred = model.predict(X_val)
+        accuracy = accuracy_score(y_val, y_val_pred)
+        auc = roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])
+
+        return model, accuracy, auc, train_losses, val_losses, train_auc, val_auc
 
     def objective(trial):
         global should_pause, best_accuracy, best_auc
@@ -141,37 +156,22 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
             'enable_categorical': True
         }
 
-        model = xgb.XGBClassifier(**params)
-        eval_set = [(X_train, y_train), (X_val, y_val)]
-        model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
-
-        results = model.evals_result()
-        train_losses = results['validation_0']['logloss']
-        val_losses = results['validation_1']['logloss']
-        train_auc = results['validation_0']['auc']
-        val_auc = results['validation_1']['auc']
-
-        y_val_pred = model.predict(X_val)
-        accuracy = accuracy_score(y_val, y_val_pred)
-        auc = roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])
+        model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params)
 
         if accuracy > best_accuracy or (accuracy == best_accuracy and auc > best_auc):
             best_accuracy = accuracy
             best_auc = auc
             model_filename = f'models/xgboost/model_{accuracy:.4f}_{features_removed}_features_removed.json'
             model.save_model(model_filename)
-            print(f"New best model saved: {model_filename}")
 
             plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, accuracy, auc)
-            print(f"Learning curves saved as learning_curves_{features_removed}_features_removed.png")
 
-            features_removed_filename = f'removed_features_{accuracy:.4f}_{features_removed}_features.txt'
+            features_removed_filename = f'removed features/removed_features_{accuracy:.4f}_{features_removed}_features.txt'
             with open(features_removed_filename, 'w') as f:
                 f.write(f"Total features removed: {features_removed}\n\n")
                 f.write("Removed features:\n")
                 for feature in all_removed_features:
                     f.write(f"{feature}\n")
-            print(f"Updated list of removed features saved to {features_removed_filename}")
 
         return accuracy
 
@@ -191,15 +191,7 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
         'enable_categorical': True
     })
 
-    best_model = xgb.XGBClassifier(**best_params)
-    eval_set = [(X_train, y_train), (X_val, y_val)]
-    best_model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
-
-    results = best_model.evals_result()
-    train_losses = results['validation_0']['logloss']
-    val_losses = results['validation_1']['logloss']
-    train_auc = results['validation_0']['auc']
-    val_auc = results['validation_1']['auc']
+    best_model, best_accuracy, best_auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(best_params)
 
     return best_model, best_accuracy, best_auc, best_params, train_losses, val_losses, train_auc, val_auc, best_accuracy, best_auc
 

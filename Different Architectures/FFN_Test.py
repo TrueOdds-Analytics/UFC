@@ -46,7 +46,7 @@ class FFNnet(nn.Module):
 
 
 def define_model(trial):
-    input_size = 292
+    input_size = 312
     output_size = 1
     num_epochs = 500
 
@@ -185,7 +185,7 @@ def trainModel(num_epochs, net, optimizer, loss_function, train_data, test_data,
 
 def get_loaders(batch_size):
     # Load train data from CSV
-    train_data = pd.read_csv('data/train test data/train_data.csv')
+    train_data = pd.read_csv('../data/train test data/train_data.csv')
     train_labels = train_data['winner']
     train_data = train_data.drop(['winner'], axis=1)
 
@@ -194,7 +194,7 @@ def get_loaders(batch_size):
     train_labels = train_labels.sample(frac=1).reset_index(drop=True)
 
     # Load test data from CSV
-    test_data = pd.read_csv('data/train test data/test_data.csv')
+    test_data = pd.read_csv('../data/train test data/val_data.csv')
     test_labels = test_data['winner']
     test_data = test_data.drop(['winner'], axis=1)
 
