@@ -105,9 +105,9 @@ SHAP values are used to determine the most influential features in predicting fi
 
 ## Copyright and License
 
-Copyright (c) 2024 William Shen. All rights reserved.
+Copyright (c) 2024 William Qin Shen. All rights reserved.
 
-This software and associated documentation files (Fight Forecaster AI) are the exclusive property of William Shen. The Software is protected by copyright laws and international copyright treaties, as well as other intellectual property laws and treaties.
+This software and associated documentation files (Fight Forecaster AI) are the exclusive property of William Qin Shen. The Software is protected by copyright laws and international copyright treaties, as well as other intellectual property laws and treaties.
 
 No part of this Software may be reproduced, distributed, or transmitted in any form or by any means, including photocopying, recording, or other electronic or mechanical methods, without the prior written permission of the copyright owner, except in the case of brief quotations embodied in critical reviews and certain other noncommercial uses permitted by copyright law.
 
@@ -119,6 +119,6 @@ Unauthorized use, reproduction, or distribution of this Software, or any portion
 
 ## Contact
 
-William Shen
+William Qin Shen
 
 williambillqinshen@gmail.com
