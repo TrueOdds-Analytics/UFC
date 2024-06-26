@@ -1,6 +1,9 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 from fuzzywuzzy import fuzz
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 
 def combine_rounds_stats(file_path):
@@ -108,54 +111,73 @@ def combine_rounds_stats(file_path):
     # Load the cleaned fight odds data
     cleaned_odds_df = pd.read_csv('data/odds data/cleaned_fight_odds.csv')
 
-    # Create a mapping dictionary from Matchup and Event to Open odds
-    odds_mapping = cleaned_odds_df.set_index(['Matchup', 'Event'])['Open'].to_dict()
+    # Create mapping dictionaries for each odds column
+    odds_columns = ['Open', 'Closing Range Start', 'Closing Range End', 'Movement']
+    odds_mappings = {col: cleaned_odds_df.set_index(['Matchup', 'Event'])[col].to_dict() for col in odds_columns}
 
     def get_odds(row):
         fighter = row['fighter'].lower()
         event = row['event'].lower()
 
-        for (matchup, event_name), odds in odds_mapping.items():
-            matchup_lower = matchup.lower()
-            event_name_lower = event_name.lower()
+        odds_values = {}
 
-            if fighter in matchup_lower:
-                # Step 1: Direct comparison
-                if event == event_name_lower:
-                    return odds
+        for odds_type in odds_columns:
+            for (matchup, event_name), odds in odds_mappings[odds_type].items():
+                matchup_lower = matchup.lower()
+                event_name_lower = event_name.lower()
 
-                # Step 2: Compare first and last words
-                event_words = event.split()
-                event_name_words = event_name_lower.split()
-                if len(event_words) > 1 and len(event_name_words) > 1:
-                    if event_words[0] == event_name_words[0] and event_words[-1] == event_name_words[-1]:
-                        return odds
+                if fighter in matchup_lower:
+                    # Step 1: Direct comparison
+                    if event == event_name_lower:
+                        odds_values[odds_type] = odds
+                        break
 
-                # Step 3: Levenshtein distance
-                similarity_score = fuzz.ratio(event, event_name_lower)
-                if similarity_score >= 80:  # 80% similarity threshold
-                    return odds
+                    # Step 2: Compare first and last words
+                    event_words = event.split()
+                    event_name_words = event_name_lower.split()
+                    if len(event_words) > 1 and len(event_name_words) > 1:
+                        if event_words[0] == event_name_words[0] and event_words[-1] == event_name_words[-1]:
+                            odds_values[odds_type] = odds
+                            break
 
-        return None
+                    # Step 3: Levenshtein distance
+                    similarity_score = fuzz.ratio(event, event_name_lower)
+                    if similarity_score >= 80:  # 80% similarity threshold
+                        odds_values[odds_type] = odds
+                        break
+
+            if odds_type not in odds_values:
+                odds_values[odds_type] = None
+
+        return pd.Series(odds_values)
 
     # Apply the function to get odds for each fighter
-    final_stats['new_open_odds'] = final_stats.apply(get_odds, axis=1)
+    new_odds = final_stats.apply(get_odds, axis=1)
+
+    # Add the new columns to final_stats
+    for col in odds_columns:
+        final_stats[f'new_{col}'] = new_odds[col]
 
     # Compare new odds with original odds if they existed
     if 'open_odds' in final_stats.columns:
         final_stats['original_open_odds'] = final_stats['open_odds']
-        odds_diff = final_stats[final_stats['original_open_odds'] != final_stats['new_open_odds']]
+        odds_diff = final_stats[final_stats['original_open_odds'] != final_stats['new_Open']]
         print(f"Number of rows with different odds: {len(odds_diff)}")
-        print(odds_diff[['fighter', 'event', 'original_open_odds', 'new_open_odds']])
+        print(odds_diff[['fighter', 'event', 'original_open_odds', 'new_Open']])
     else:
         print("No original odds to compare with. New odds have been added.")
 
-    # Update the 'open_odds' column with the new odds
-    final_stats['open_odds'] = final_stats['new_open_odds']
-    final_stats = final_stats.drop(columns=['new_open_odds'])
+    # Update the 'open_odds' column with the new odds and add new columns
+    final_stats['open_odds'] = final_stats['new_Open']
+    final_stats['closing_range_start'] = final_stats['new_Closing Range Start']
+    final_stats['closing_range_end'] = final_stats['new_Closing Range End']
+    final_stats['movement'] = final_stats['new_Movement']
 
+    # Drop temporary columns
+    columns_to_drop = ['new_Open', 'new_Closing Range Start', 'new_Closing Range End', 'new_Movement']
     if 'original_open_odds' in final_stats.columns:
-        final_stats = final_stats.drop(columns=['original_open_odds'])
+        columns_to_drop.append('original_open_odds')
+    final_stats = final_stats.drop(columns=columns_to_drop)
 
     # Save to new CSV
     final_stats.to_csv('data/combined_rounds.csv', index=False)
@@ -207,7 +229,8 @@ def combine_fighters_stats(file_path):
     ]
 
     # Generate the columns to differentiate using list comprehension
-    columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in base_columns]
+    columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in
+                                                                                  base_columns] + ['open_odds']
 
     # Calculate the differential for each column and store in a new DataFrame
     diff_df = pd.DataFrame(
@@ -229,6 +252,7 @@ def combine_fighters_stats(file_path):
     final_combined_df.to_csv('data/combined_sorted_fighter_stats.csv', index=False)
 
     return final_combined_df
+
 
 def remove_correlated_features(matchup_df, correlation_threshold=0.95):
     # Select only the numeric columns
@@ -292,8 +316,8 @@ def create_matchup_data(file_path, tester, name):
 
     columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
                           'result', 'winner', 'weight_class', 'scheduled_rounds',
-                          'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b',
-                          'open_odds', 'open_odds_b']  # Exclude odds from features to average
+                          'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
+
     features_to_include = [col for col in df.columns if col not in columns_to_exclude]
 
     method_columns = ['winner']
@@ -317,14 +341,17 @@ def create_matchup_data(file_path, tester, name):
         opponent_features = opponent_df[features_to_include].mean().values
 
         results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
-        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(3).values.flatten()
+        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
+            3).values.flatten()
 
         labels = current_fight[method_columns].values
 
-        # Get current fight odds
+        # Get current fight odds and calculate the difference
         current_fight_odds = [current_fight['open_odds'], current_fight['open_odds_b']]
+        current_fight_odds_diff = current_fight['open_odds'] - current_fight['open_odds_b']
 
-        combined_features = np.concatenate([fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds])
+        combined_features = np.concatenate(
+            [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds, [current_fight_odds_diff]])
         combined_row = np.concatenate([combined_features, labels])
 
         most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
@@ -342,14 +369,16 @@ def create_matchup_data(file_path, tester, name):
                             f"scheduled_rounds_b_fight_{i}"]
 
     if not name:
-        column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
+        column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in
+                                         features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
-                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b'] + \
+                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff'] + \
                        [f"{method}" for method in method_columns]
     else:
-        column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
+        column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for
+                                                                 feature in features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
-                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b'] + \
+                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff'] + \
                        [f"{method}" for method in method_columns]
 
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
@@ -397,8 +426,10 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     opponent_features = opponent_df[features_to_include].mean().values
 
     # Create new columns for the specified features for each of the last three fights
-    results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds', 'open_odds']].head(3).values.flatten()
-    results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b', 'open_odds_b']].head(
+    results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds', 'open_odds']].head(
+        3).values.flatten()
+    results_opponent = opponent_df[
+        ['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b', 'open_odds_b']].head(
         3).values.flatten()
 
     combined_features = np.concatenate([fighter_features, opponent_features, results_fighter, results_opponent])
@@ -440,8 +471,58 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     return matchup_df
 
 
+def remove_multicollinear_features(file_path, thresh=10):
+    matchup_df = pd.read_csv(file_path)
+    numeric_columns = matchup_df.select_dtypes(include=[np.number]).columns
+    numeric_df = matchup_df[numeric_columns]
+
+    # Create a temporary DataFrame for VIF calculation
+    temp_df = numeric_df.copy()
+
+    # Handle missing values and infinity values in the temporary DataFrame
+    temp_df = temp_df.replace([np.inf, -np.inf], np.nan)
+    temp_df = temp_df.dropna()
+
+    columns_to_drop = []
+
+    while True:
+        vif_data = pd.DataFrame()
+        vif_data["feature"] = temp_df.columns
+
+        # Calculate VIF
+        vif_values = []
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+            for i in range(len(temp_df.columns)):
+                try:
+                    vif = variance_inflation_factor(temp_df.values, i)
+                except (RuntimeWarning, np.linalg.LinAlgError):
+                    vif = np.inf
+                vif_values.append(vif)
+
+        vif_data["VIF"] = vif_values
+
+        # Find the feature with the highest VIF
+        max_vif = vif_data["VIF"].max()
+        if max_vif > thresh:
+            feature_to_drop = vif_data.loc[vif_data["VIF"].idxmax(), "feature"]
+            columns_to_drop.append(feature_to_drop)
+            temp_df = temp_df.drop(columns=[feature_to_drop])
+            print(f"Dropped {feature_to_drop} with VIF {max_vif}")
+        else:
+            break
+
+    matchup_df = matchup_df.drop(columns=columns_to_drop)
+
+    print(f"Columns dropped due to high VIF: {columns_to_drop}")
+    print(f"Number of columns dropped: {len(columns_to_drop)}")
+
+    return matchup_df, columns_to_drop
+
+
 if __name__ == "__main__":
     combine_rounds_stats('data/UFC_STATS_ORIGINAL.csv')
     combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
     split_train_val('data/matchup data/matchup_data_3_avg.csv')
+    # remove_multicollinear_features('data/matchup data/matchup_data_3_avg.csv')

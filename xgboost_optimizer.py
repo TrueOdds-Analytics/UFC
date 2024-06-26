@@ -49,11 +49,11 @@ def get_train_val_data():
     # Convert specified columns to category type
     category_columns = [
         'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
-        'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
-        'result_fight_2', 'winner_fight_2', 'weight_class_fight_2', 'scheduled_rounds_fight_2',
-        'result_b_fight_2', 'winner_b_fight_2', 'weight_class_b_fight_2', 'scheduled_rounds_b_fight_2',
-        'result_fight_3', 'winner_fight_3', 'weight_class_fight_3', 'scheduled_rounds_fight_3',
-        'result_b_fight_3', 'winner_b_fight_3', 'weight_class_b_fight_3', 'scheduled_rounds_b_fight_3'
+        'result_b_fight_1', 'winner_b_fight_1', 'scheduled_rounds_b_fight_1',
+        'result_fight_2', 'winner_fight_2', 'scheduled_rounds_fight_2',
+        'result_b_fight_2', 'winner_b_fight_2', 'scheduled_rounds_b_fight_2',
+        'result_fight_3', 'winner_fight_3', 'scheduled_rounds_fight_3',
+        'result_b_fight_3', 'winner_b_fight_3', 'scheduled_rounds_b_fight_3'
     ]
 
     for df in [train_data, val_data]:
@@ -99,106 +99,34 @@ def create_shap_graph(model_path):
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_train)
 
-    # Create and display the SHAP summary plot
-    plt.figure(figsize=(10, 12))
-    shap.summary_plot(shap_values, X_train, plot_type="bar", show=False)
+    # Calculate mean absolute SHAP values
+    mean_abs_shap_values = np.abs(shap_values).mean(axis=0)
+    feature_importance = sorted(zip(X_train.columns, mean_abs_shap_values), key=lambda x: x[1], reverse=True)
+
+    # Print the most influential 150 features
+    top_150_features = feature_importance[:50]
+    print("Most influential features:")
+    for feature, importance in top_150_features:
+        print(f"{feature}: {importance}")
+
+    # Create a DataFrame for the top 150 features
+    top_150_df = pd.DataFrame(top_150_features, columns=["Feature", "Importance"])
+
+    # Create a vertical bar plot
+    plt.figure(figsize=(12, 20))  # Adjust the figure size as needed
+    plt.barh(top_150_df["Feature"], top_150_df["Importance"], color='blue')
+    plt.xlabel('Mean Absolute SHAP Value')
+    plt.ylabel('Features')
     plt.title(f"SHAP Values for model: {model_path}")
+    plt.gca().invert_yaxis()  # Invert y-axis to have the highest importance at the top
     plt.tight_layout()
     plt.show()  # Display the plot
 
     print(f"SHAP summary plot displayed for model: {model_path}")
 
 
-def feature_removal_process(X_train, X_val, y_train, y_val, original_model_path):
-    original_model = xgb.XGBClassifier(enable_categorical=True)
-    original_model.load_model(original_model_path)
-
-    initial_feature_count = X_train.shape[1]
-    best_accuracy = 0
-    best_auc = 0
-
-    accuracies = []
-    aucs = []
-    features_removed_list = []
-    all_removed_features = []
-
-    # Calculate SHAP values
-    explainer = shap.TreeExplainer(original_model)
-    shap_values = explainer.shap_values(X_train)
-
-    original_feature_names = X_train.columns.tolist()
-
-    mean_shap_values = np.abs(shap_values).mean(axis=0)
-    feature_importance = sorted(zip(original_feature_names, mean_shap_values), key=lambda x: x[1])
-
-    print("Original SHAP value importances (sorted from least to most important):")
-    for feature, importance in feature_importance:
-        print(f"{feature}: {importance}")
-    print("--------------------")
-
-    print(f"Original number of features: {initial_feature_count}")
-
-    try:
-        while len(feature_importance) >= 10:
-            while should_pause:
-                time.sleep(1)
-
-            features_to_remove = [feature for feature, _ in feature_importance[:10]]
-            existing_features_to_remove = list(set(features_to_remove) & set(X_train.columns))
-
-            X_train = X_train.drop(columns=existing_features_to_remove)
-            X_val = X_val.drop(columns=existing_features_to_remove)
-
-            features_removed = initial_feature_count - X_train.shape[1]
-            features_removed_list.append(features_removed)
-            all_removed_features.extend(existing_features_to_remove)
-            print(f"Current number of features: {X_train.shape[1]}")
-            print(f"Removed features: {existing_features_to_remove}")
-
-            new_model, new_accuracy, new_auc, new_best_params, _, _, _, _, best_accuracy, best_auc = train_and_evaluate_model(
-                X_train, X_val, y_train, y_val, features_removed, all_removed_features, best_accuracy, best_auc)
-
-            accuracies.append(new_accuracy)
-            aucs.append(new_auc)
-
-            print(f"Current validation accuracy: {new_accuracy:.4f}, Current validation AUC: {new_auc:.4f}")
-            print(f"Best accuracy: {best_accuracy:.4f}, Best AUC: {best_auc:.4f}")
-            print(f"Best parameters: {new_best_params}")
-            print("--------------------")
-
-            feature_importance = [item for item in feature_importance if item[0] not in existing_features_to_remove]
-
-        if feature_importance:
-            while should_pause:
-                time.sleep(1)
-
-            remaining_features = [feature for feature, _ in feature_importance]
-            existing_remaining_features = list(set(remaining_features) & set(X_train.columns))
-
-            X_train = X_train.drop(columns=existing_remaining_features)
-            X_val = X_val.drop(columns=existing_remaining_features)
-
-            all_removed_features.extend(existing_remaining_features)
-            print(f"Removed remaining features: {existing_remaining_features}")
-            print(f"Final number of features: {X_train.shape[1]}")
-
-            final_model, final_accuracy, final_auc, final_best_params, _, _, _, _, best_accuracy, best_auc = train_and_evaluate_model(
-                X_train, X_val, y_train, y_val, initial_feature_count - X_train.shape[1], all_removed_features,
-                best_accuracy, best_auc)
-
-            print(f"Final model performance:")
-            print(f"Validation Accuracy: {final_accuracy:.4f}, Validation AUC: {final_auc:.4f}")
-            print(f"Best overall accuracy: {best_accuracy:.4f}, Best overall AUC: {best_auc:.4f}")
-            print(f"Best parameters: {final_best_params}")
-
-    except KeyboardInterrupt:
-        print("\nProcess interrupted by user. Exiting...")
-
-    print("Feature removal process completed.")
-
-    return best_accuracy, best_auc, accuracies, aucs, features_removed_list, all_removed_features
-
-def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, all_removed_features, best_accuracy, best_auc):
+def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, all_removed_features, best_accuracy,
+                             best_auc):
     global should_pause
 
     def create_fit_and_evaluate_model(params):
@@ -224,22 +152,22 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
             time.sleep(1)
 
         params = {
-            'lambda': trial.suggest_float('lambda', 1e-3, 100.0, log=True),
-            'alpha': trial.suggest_float('alpha', 1e-3, 100.0, log=True),
+            'lambda': trial.suggest_float('lambda', 0.1, 100.0, log=True),  # Increased lower bound
+            'alpha': trial.suggest_float('alpha', 0.1, 100.0, log=True),  # Increased lower bound
             'tree_method': 'hist',
             'device': 'cuda',
             'objective': 'binary:logistic',
             'verbosity': 0,
             'n_jobs': -1,
-            'min_child_weight': trial.suggest_float('min_child_weight', 0.1, 20.0, log=True),
-            'max_depth': trial.suggest_int('max_depth', 3, 15),
+            'min_child_weight': trial.suggest_float('min_child_weight', 1.0, 20.0, log=True),  # Increased lower bound
+            'max_depth': trial.suggest_int('max_depth', 3, 10),  # Reduced upper bound
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
-            'subsample': trial.suggest_float('subsample', 0.3, 1.0),
-            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.3, 1.0),
-            'gamma': trial.suggest_float('gamma', 0.0, 5.0),
-            'eta': trial.suggest_float('eta', 0.001, 0.5, log=True),
+            'subsample': trial.suggest_float('subsample', 0.5, 0.8),  # Reduced upper bound
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 0.8),  # Reduced upper bound
+            'gamma': trial.suggest_float('gamma', 0.1, 5.0),  # Increased lower bound
+            'eta': trial.suggest_float('eta', 0.0001, 0.1, log=True),  # Reduced upper bound
             'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
-            'n_estimators': 10000,
+            'n_estimators': 1000,
             'early_stopping_rounds': 50,
             'eval_metric': ['logloss', 'auc'],
             'enable_categorical': True
@@ -290,9 +218,44 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
         'enable_categorical': True
     })
 
-    best_model, best_accuracy, best_auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(best_params)
+    best_model, best_accuracy, best_auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(
+        best_params)
     print(f"Average trial accuracy: {avg_accuracy:.4f}")
     return best_model, best_accuracy, best_auc, best_params, train_losses, val_losses, train_auc, val_auc, best_accuracy, best_auc
+
+
+def get_top_features_and_retrain(model_path, n_features, X_train, X_val, y_train, y_val):
+    # Load the model
+    model = xgb.XGBClassifier(enable_categorical=True)
+    model.load_model(model_path)
+
+    # Calculate SHAP values
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_train)
+
+    # Calculate mean absolute SHAP values
+    mean_abs_shap_values = np.abs(shap_values).mean(axis=0)
+    feature_importance = sorted(zip(X_train.columns, mean_abs_shap_values), key=lambda x: x[1], reverse=True)
+
+    # Get top N features
+    top_n_features = [feature for feature, _ in feature_importance[:n_features]]
+
+    print(f"Top {n_features} features:")
+    for feature, importance in feature_importance[:n_features]:
+        print(f"{feature}: {importance}")
+
+    # Filter data to include only top N features
+    X_train_filtered = X_train[top_n_features]
+    X_val_filtered = X_val[top_n_features]
+
+    # Retrain the model with top N features
+    print(f"\nRetraining model with top {n_features} features...")
+    removed_features = [col for col in X_train.columns if col not in top_n_features]
+    retrained_model, retrained_accuracy, retrained_auc, retrained_best_params, train_losses, val_losses, train_auc, val_auc, best_accuracy, best_auc = train_and_evaluate_model(
+        X_train_filtered, X_val_filtered, y_train, y_val, len(removed_features), removed_features, 0, 0
+    )
+
+    return retrained_model, best_accuracy, best_auc, retrained_best_params
 
 
 if __name__ == "__main__":
@@ -317,25 +280,20 @@ if __name__ == "__main__":
     print("--------------------")
 
     # # Create SHAP graph for the best model
-    # best_model_path = f'models/xgboost/model_0.6931_0_features_removed.json'
+    # best_model_path = f'models/xgboost/model_0.7079_0_features_removed.json'
     # print(f"Creating SHAP graph for the best model: {best_model_path}")
     # create_shap_graph(best_model_path)
     # print("SHAP graph creation completed.")
     # print("--------------------")
     #
-    # best_model_path = f'models/xgboost/model_{best_accuracy:.4f}_0_features_removed.json'
-    # print(f"Creating SHAP graph for the best model: {best_model_path}")
-    # create_shap_graph(best_model_path)
-    # print("SHAP graph creation completed.")
-    # print("--------------------")
-    #
-    # # Start feature removal process
-    # print("Starting feature removal process...")
-    # best_accuracy, best_auc, accuracies, aucs, features_removed_list, all_removed_features = feature_removal_process(
-    #     X_train, X_val, y_train, y_val, best_model_path
+    # X_train, X_val, y_train, y_val = get_train_val_data()
+    # n_features = 50  # You can change this to any number you want
+    # retrained_model, retrained_accuracy, retrained_auc, retrained_best_params = get_top_features_and_retrain(
+    #     best_model_path, n_features, X_train, X_val, y_train, y_val
     # )
     #
-    # print("Feature removal process completed.")
-    # print(f"Final best accuracy: {best_accuracy:.4f}")
-    # print(f"Final best AUC: {best_auc:.4f}")
-    # print(f"Total features removed: {len(all_removed_features)}")
+    # print("--------------------")
+    # print("Retraining with top features completed.")
+    # print(f"Retrained model validation accuracy: {retrained_accuracy:.4f}")
+    # print(f"Retrained model validation AUC: {retrained_auc:.4f}")
+    # print("Retrained model best parameters:", retrained_best_params)
