@@ -1,4 +1,4 @@
-# UFC Fight Prediction Model
+# Fight Forecaster AI
 
 This project aims to predict the outcomes of UFC fights using machine learning techniques, specifically XGBoost.
 
