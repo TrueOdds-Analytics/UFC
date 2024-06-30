@@ -16,7 +16,6 @@ def combine_rounds_stats(file_path):
     fighter_stats['dob'] = fighter_stats['dob'].replace(['--', '', 'NA', 'N/A'], np.nan)
     fighter_stats['dob'] = pd.to_datetime(fighter_stats['dob'], format='%b %d, %Y', errors='coerce')
 
-
     # Merge other fighter stats (excluding dob) with UFC stats
     ufc_stats = pd.merge(ufc_stats, fighter_stats[['name', 'dob']],
                          left_on='fighter', right_on='name', how='left')
@@ -48,7 +47,8 @@ def combine_rounds_stats(file_path):
 
     # Recalculate percentage columns
     aggregated_stats['significant_strikes_rate'] = (
-            aggregated_stats['significant_strikes_landed'] / aggregated_stats['significant_strikes_attempted']).fillna(0)
+            aggregated_stats['significant_strikes_landed'] / aggregated_stats['significant_strikes_attempted']).fillna(
+        0)
     aggregated_stats['takedown_rate'] = (
             aggregated_stats['takedown_successful'] / aggregated_stats['takedown_attempted']).fillna(0)
 
@@ -371,7 +371,8 @@ def create_matchup_data(file_path, tester, name):
         current_fight_odds_diff = current_fight['open_odds'] - current_fight['open_odds_b']
 
         combined_features = np.concatenate(
-            [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds, [current_fight_odds_diff]])
+            [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds,
+             [current_fight_odds_diff]])
         combined_row = np.concatenate([combined_features, labels])
 
         most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
@@ -392,13 +393,15 @@ def create_matchup_data(file_path, tester, name):
         column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in
                                          features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
-                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff'] + \
+                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
+                                          'current_fight_open_odds_diff'] + \
                        [f"{method}" for method in method_columns]
     else:
         column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for
                                                                  feature in features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
-                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff'] + \
+                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
+                                          'current_fight_open_odds_diff'] + \
                        [f"{method}" for method in method_columns]
 
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
