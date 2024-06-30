@@ -152,19 +152,19 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
             time.sleep(1)
 
         params = {
-            'lambda': trial.suggest_float('lambda', 0.1, 100.0, log=True),  # Increased lower bound
-            'alpha': trial.suggest_float('alpha', 0.1, 100.0, log=True),  # Increased lower bound
+            'lambda': trial.suggest_float('lambda', 0.1, 150.0, log=True),  # Increased lower bound
+            'alpha': trial.suggest_float('alpha', 0.1, 150.0, log=True),  # Increased lower bound
             'tree_method': 'hist',
             'device': 'cuda',
             'objective': 'binary:logistic',
             'verbosity': 0,
             'n_jobs': -1,
-            'min_child_weight': trial.suggest_float('min_child_weight', 1.0, 20.0, log=True),  # Increased lower bound
-            'max_depth': trial.suggest_int('max_depth', 3, 10),  # Reduced upper bound
+            'min_child_weight': trial.suggest_float('min_child_weight', 1.0, 25.0, log=True),  # Increased lower bound
+            'max_depth': trial.suggest_int('max_depth', 1, 10),  # Reduced upper bound
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
             'subsample': trial.suggest_float('subsample', 0.5, 0.8),  # Reduced upper bound
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 0.8),  # Reduced upper bound
-            'gamma': trial.suggest_float('gamma', 0.1, 5.0),  # Increased lower bound
+            'gamma': trial.suggest_float('gamma', 0.1, 10.0),  # Increased lower bound
             'eta': trial.suggest_float('eta', 0.0001, 0.1, log=True),  # Reduced upper bound
             'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
             'n_estimators': 1000,
@@ -269,7 +269,6 @@ if __name__ == "__main__":
         initial_model, initial_accuracy, initial_auc, initial_best_params, _, _, _, _, best_accuracy, best_auc = train_and_evaluate_model(
             X_train, X_val, y_train, y_val, 0, [], 0, 0
         )
-
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
 
@@ -279,8 +278,8 @@ if __name__ == "__main__":
     print("Best parameters:", initial_best_params)
     print("--------------------")
 
-    # # Create SHAP graph for the best model
-    # best_model_path = f'models/xgboost/model_0.7079_0_features_removed.json'
+    # Create SHAP graph for the best model
+    # best_model_path = f'models/xgboost/model_0.7574_0_features_removed.json'
     # print(f"Creating SHAP graph for the best model: {best_model_path}")
     # create_shap_graph(best_model_path)
     # print("SHAP graph creation completed.")

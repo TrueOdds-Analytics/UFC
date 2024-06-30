@@ -1,23 +1,52 @@
-import warnings
-
-import numpy as np
 import pandas as pd
+import numpy as np
 from fuzzywuzzy import fuzz
-from statsmodels.stats.outliers_influence import variance_inflation_factor
 
 
 def combine_rounds_stats(file_path):
+    # Load UFC stats and fighter stats
     ufc_stats = pd.read_csv(file_path)
-    ufc_stats['fighter'] = ufc_stats['fighter'].str.lower()
-    ufc_stats['fight_date'] = pd.to_datetime(ufc_stats['fight_date'])
+    fighter_stats = pd.read_csv('data/general data/fighter_stats.csv')
+
+    # Preprocess UFC stats
+    ufc_stats['fighter'] = ufc_stats['fighter'].astype(str).str.lower()
+    ufc_stats['fight_date'] = pd.to_datetime(ufc_stats['fight_date'], format='%Y-%m-%d')
+    # Preprocess fighter stats
+    fighter_stats['name'] = fighter_stats['name'].astype(str).str.lower().str.strip()
+    fighter_stats['dob'] = fighter_stats['dob'].replace(['--', '', 'NA', 'N/A'], np.nan)
+    fighter_stats['dob'] = pd.to_datetime(fighter_stats['dob'], format='%b %d, %Y', errors='coerce')
+
+    # Convert height to inches
+    fighter_stats['height'] = fighter_stats['height'].replace('--', np.nan)
+    fighter_stats['height'] = fighter_stats['height'].apply(
+        lambda x: int(x.split("'")[0]) * 12 + int(x.split("'")[1].replace('"', '')) if pd.notna(x) else x)
+    fighter_stats['height'] = fighter_stats['height'].fillna(fighter_stats['height'].median())
+
+    # Convert reach to inches
+    fighter_stats['reach'] = fighter_stats['reach'].replace('--', np.nan)
+    fighter_stats['reach'] = fighter_stats['reach'].str.replace('"', '').astype(float)
+    fighter_stats['reach'] = fighter_stats['reach'].fillna(fighter_stats['reach'].median())
+
+    # Encode stance column
+    stance_mapping = {'Orthodox': 1, 'Southpaw': 2, 'Switch': 3}
+    fighter_stats['stance'] = fighter_stats['stance'].map(stance_mapping).fillna(1)
+
+    # Merge other fighter stats (excluding dob) with UFC stats
+    ufc_stats = pd.merge(ufc_stats, fighter_stats[['name', 'height', 'reach', 'stance', 'dob']],
+                         left_on='fighter', right_on='name', how='left')
+
+    # Calculate age
+    ufc_stats['dob'] = pd.to_datetime(ufc_stats['dob'], errors='coerce')
+    ufc_stats['age'] = (ufc_stats['fight_date'] - ufc_stats['dob']).dt.days / 365.25
+    ufc_stats['age'] = ufc_stats['age'].fillna(np.nan).round().astype(float)
 
     # Drop unnecessary columns and rows
-    ufc_stats = ufc_stats.drop(['round', 'location'], axis=1)
+    ufc_stats = ufc_stats.drop(['round', 'location', 'name'], axis=1)
     ufc_stats = ufc_stats[~ufc_stats['weight_class'].str.contains("Women's")]
 
     # Identify numeric columns for aggregation
     numeric_columns = ufc_stats.select_dtypes(include='number').columns
-    numeric_columns = numeric_columns.drop(['id', 'last_round', 'attendance'])
+    numeric_columns = numeric_columns.drop(['id', 'last_round', 'attendance', 'age', 'height', 'reach', 'stance'])
 
     fighter_identifier = 'fighter'
 
@@ -33,15 +62,14 @@ def combine_rounds_stats(file_path):
 
     # Recalculate percentage columns
     aggregated_stats['significant_strikes_rate'] = (
-            aggregated_stats['significant_strikes_landed'] / aggregated_stats['significant_strikes_attempted']).fillna(
-        0)
+            aggregated_stats['significant_strikes_landed'] / aggregated_stats['significant_strikes_attempted']).fillna(0)
     aggregated_stats['takedown_rate'] = (
             aggregated_stats['takedown_successful'] / aggregated_stats['takedown_attempted']).fillna(0)
 
     # Extract non-numeric columns and find unique rows
     non_numeric_columns = ufc_stats.select_dtypes(exclude='number').columns.difference(['id', fighter_identifier])
     non_numeric_data = ufc_stats.drop_duplicates(subset=['id', fighter_identifier])[
-        ['id', fighter_identifier] + list(non_numeric_columns)]
+        ['id', fighter_identifier, 'age', 'height', 'reach', 'stance'] + list(non_numeric_columns)]
 
     # Merge the aggregated numeric and non-numeric data
     merged_stats = pd.merge(aggregated_stats, non_numeric_data, on=['id', fighter_identifier], how='left')
@@ -67,15 +95,10 @@ def combine_rounds_stats(file_path):
     # Apply the aggregation function for each fighter up to each fight date
     final_stats = merged_stats.groupby(fighter_identifier, group_keys=False).apply(aggregate_up_to_date)
 
-    # Reorder columns to ensure the final DataFrame has the same column order as the original
+    # Reorder columns
     common_columns = ufc_stats.columns.intersection(final_stats.columns)
     career_columns = [col for col in final_stats.columns if col.endswith('_career') or col.endswith('_career_avg')]
-
-    if fighter_identifier not in common_columns:
-        final_columns = [fighter_identifier] + list(common_columns) + career_columns
-    else:
-        final_columns = list(common_columns) + career_columns
-
+    final_columns = ['fighter', 'height', 'reach', 'stance', 'age'] + list(common_columns) + career_columns
     final_stats = final_stats[final_columns]
 
     final_stats = final_stats[~final_stats['winner'].isin(['NC', 'D'])]
@@ -97,7 +120,7 @@ def combine_rounds_stats(file_path):
     }
 
     final_stats['weight_class'] = final_stats['weight_class'].apply(
-        lambda x: next((v for k, v in weight_class_mapping.items() if k in x), x))
+        lambda x: next((v for k, v in weight_class_mapping.items() if k in str(x)), x))
 
     # Convert unique strings to integers and create dictionary mappings
     for column in ['result', 'winner', 'weight_class', 'scheduled_rounds']:
@@ -116,8 +139,8 @@ def combine_rounds_stats(file_path):
     odds_mappings = {col: cleaned_odds_df.set_index(['Matchup', 'Event'])[col].to_dict() for col in odds_columns}
 
     def get_odds(row):
-        fighter = row['fighter'].lower()
-        event = row['event'].lower()
+        fighter = row['fighter'].lower() if isinstance(row['fighter'], str) else row['fighter'].iloc[0].lower()
+        event = row['event'].lower() if isinstance(row['event'], str) else row['event'].iloc[0].lower()
 
         odds_values = {}
 
@@ -179,6 +202,15 @@ def combine_rounds_stats(file_path):
         columns_to_drop.append('original_open_odds')
     final_stats = final_stats.drop(columns=columns_to_drop)
 
+    # Drop the 'dob' column
+    final_stats = final_stats.drop(columns=['dob'], errors='ignore')
+
+    # Identify and drop duplicate columns
+    duplicate_columns = final_stats.columns[final_stats.columns.duplicated()]
+    final_stats = final_stats.loc[:, ~final_stats.columns.duplicated()]
+
+    print(f"Dropped duplicate columns: {list(duplicate_columns)}")
+
     # Save to new CSV
     final_stats.to_csv('data/combined_rounds.csv', index=False)
 
@@ -228,9 +260,11 @@ def combine_fighters_stats(file_path):
         'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
     ]
 
+    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end', 'age', 'reach', 'height']
+
     # Generate the columns to differentiate using list comprehension
     columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in
-                                                                                  base_columns] + ['open_odds']
+                                                                                  base_columns] + other_columns
 
     # Calculate the differential for each column and store in a new DataFrame
     diff_df = pd.DataFrame(
@@ -471,58 +505,8 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     return matchup_df
 
 
-def remove_multicollinear_features(file_path, thresh=10):
-    matchup_df = pd.read_csv(file_path)
-    numeric_columns = matchup_df.select_dtypes(include=[np.number]).columns
-    numeric_df = matchup_df[numeric_columns]
-
-    # Create a temporary DataFrame for VIF calculation
-    temp_df = numeric_df.copy()
-
-    # Handle missing values and infinity values in the temporary DataFrame
-    temp_df = temp_df.replace([np.inf, -np.inf], np.nan)
-    temp_df = temp_df.dropna()
-
-    columns_to_drop = []
-
-    while True:
-        vif_data = pd.DataFrame()
-        vif_data["feature"] = temp_df.columns
-
-        # Calculate VIF
-        vif_values = []
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=RuntimeWarning)
-            for i in range(len(temp_df.columns)):
-                try:
-                    vif = variance_inflation_factor(temp_df.values, i)
-                except (RuntimeWarning, np.linalg.LinAlgError):
-                    vif = np.inf
-                vif_values.append(vif)
-
-        vif_data["VIF"] = vif_values
-
-        # Find the feature with the highest VIF
-        max_vif = vif_data["VIF"].max()
-        if max_vif > thresh:
-            feature_to_drop = vif_data.loc[vif_data["VIF"].idxmax(), "feature"]
-            columns_to_drop.append(feature_to_drop)
-            temp_df = temp_df.drop(columns=[feature_to_drop])
-            print(f"Dropped {feature_to_drop} with VIF {max_vif}")
-        else:
-            break
-
-    matchup_df = matchup_df.drop(columns=columns_to_drop)
-
-    print(f"Columns dropped due to high VIF: {columns_to_drop}")
-    print(f"Number of columns dropped: {len(columns_to_drop)}")
-
-    return matchup_df, columns_to_drop
-
-
 if __name__ == "__main__":
     combine_rounds_stats('data/UFC_STATS_ORIGINAL.csv')
     combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
     split_train_val('data/matchup data/matchup_data_3_avg.csv')
-    # remove_multicollinear_features('data/matchup data/matchup_data_3_avg.csv')
