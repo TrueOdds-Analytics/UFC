@@ -16,23 +16,9 @@ def combine_rounds_stats(file_path):
     fighter_stats['dob'] = fighter_stats['dob'].replace(['--', '', 'NA', 'N/A'], np.nan)
     fighter_stats['dob'] = pd.to_datetime(fighter_stats['dob'], format='%b %d, %Y', errors='coerce')
 
-    # Convert height to inches
-    fighter_stats['height'] = fighter_stats['height'].replace('--', np.nan)
-    fighter_stats['height'] = fighter_stats['height'].apply(
-        lambda x: int(x.split("'")[0]) * 12 + int(x.split("'")[1].replace('"', '')) if pd.notna(x) else x)
-    fighter_stats['height'] = fighter_stats['height'].fillna(fighter_stats['height'].median())
-
-    # Convert reach to inches
-    fighter_stats['reach'] = fighter_stats['reach'].replace('--', np.nan)
-    fighter_stats['reach'] = fighter_stats['reach'].str.replace('"', '').astype(float)
-    fighter_stats['reach'] = fighter_stats['reach'].fillna(fighter_stats['reach'].median())
-
-    # Encode stance column
-    stance_mapping = {'Orthodox': 1, 'Southpaw': 2, 'Switch': 3}
-    fighter_stats['stance'] = fighter_stats['stance'].map(stance_mapping).fillna(1)
 
     # Merge other fighter stats (excluding dob) with UFC stats
-    ufc_stats = pd.merge(ufc_stats, fighter_stats[['name', 'height', 'reach', 'stance', 'dob']],
+    ufc_stats = pd.merge(ufc_stats, fighter_stats[['name', 'dob']],
                          left_on='fighter', right_on='name', how='left')
 
     # Calculate age
@@ -46,7 +32,7 @@ def combine_rounds_stats(file_path):
 
     # Identify numeric columns for aggregation
     numeric_columns = ufc_stats.select_dtypes(include='number').columns
-    numeric_columns = numeric_columns.drop(['id', 'last_round', 'attendance', 'age', 'height', 'reach', 'stance'])
+    numeric_columns = numeric_columns.drop(['id', 'last_round', 'attendance', 'age'])
 
     fighter_identifier = 'fighter'
 
@@ -69,7 +55,7 @@ def combine_rounds_stats(file_path):
     # Extract non-numeric columns and find unique rows
     non_numeric_columns = ufc_stats.select_dtypes(exclude='number').columns.difference(['id', fighter_identifier])
     non_numeric_data = ufc_stats.drop_duplicates(subset=['id', fighter_identifier])[
-        ['id', fighter_identifier, 'age', 'height', 'reach', 'stance'] + list(non_numeric_columns)]
+        ['id', fighter_identifier, 'age'] + list(non_numeric_columns)]
 
     # Merge the aggregated numeric and non-numeric data
     merged_stats = pd.merge(aggregated_stats, non_numeric_data, on=['id', fighter_identifier], how='left')
@@ -98,7 +84,7 @@ def combine_rounds_stats(file_path):
     # Reorder columns
     common_columns = ufc_stats.columns.intersection(final_stats.columns)
     career_columns = [col for col in final_stats.columns if col.endswith('_career') or col.endswith('_career_avg')]
-    final_columns = ['fighter', 'height', 'reach', 'stance', 'age'] + list(common_columns) + career_columns
+    final_columns = ['fighter', 'age'] + list(common_columns) + career_columns
     final_stats = final_stats[final_columns]
 
     final_stats = final_stats[~final_stats['winner'].isin(['NC', 'D'])]
@@ -260,7 +246,7 @@ def combine_fighters_stats(file_path):
         'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
     ]
 
-    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end', 'age', 'reach', 'height']
+    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end', 'age']
 
     # Generate the columns to differentiate using list comprehension
     columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in
