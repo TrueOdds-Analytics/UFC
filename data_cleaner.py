@@ -246,7 +246,7 @@ def combine_fighters_stats(file_path):
         'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
     ]
 
-    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end', 'age']
+    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end']
 
     # Generate the columns to differentiate using list comprehension
     columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in
@@ -338,7 +338,8 @@ def create_matchup_data(file_path, tester, name):
                           'result', 'winner', 'weight_class', 'scheduled_rounds',
                           'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
 
-    features_to_include = [col for col in df.columns if col not in columns_to_exclude]
+    # Remove columns with 'age' in the name from features_to_include
+    features_to_include = [col for col in df.columns if col not in columns_to_exclude and 'age' not in col.lower()]
 
     method_columns = ['winner']
 
@@ -506,4 +507,4 @@ if __name__ == "__main__":
     combine_rounds_stats('data/UFC_STATS_ORIGINAL.csv')
     combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
-    split_train_val('data/matchup data/matchup_data_3_avg.csv')
+    # split_train_val('data/matchup data/matchup_data_3_avg.csv')
