@@ -1,6 +1,6 @@
-import joblib
 from data_cleaner import create_specific_matchup_data
 import xgboost as xgb
+
 
 def preprocess_data(data):
     # Convert specified columns to category type
@@ -44,6 +44,7 @@ def predict_outcome(model, specific_data, fighter_name, opponent_name):
 
     return None
 
+
 if __name__ == "__main__":
     # Load the trained model
     model_path = 'models/model_0.7079_0_features_removed.json'  # Replace with the actual model file path
@@ -58,7 +59,8 @@ if __name__ == "__main__":
         opponent_name = input("Enter the name of Fighter B: ")
 
         # Generate specific matchup data
-        specific_data = create_specific_matchup_data('data/combined_sorted_fighter_stats.csv', fighter_name, opponent_name, n_past_fights=3)
+        specific_data = create_specific_matchup_data('data/combined_sorted_fighter_stats.csv', fighter_name,
+                                                     opponent_name, n_past_fights=3)
 
         if specific_data is None:
             print("Insufficient data for the specified fighters. Please try again.")

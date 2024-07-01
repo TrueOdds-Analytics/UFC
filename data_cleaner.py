@@ -370,9 +370,13 @@ def create_matchup_data(file_path, tester, name):
         current_fight_odds = [current_fight['open_odds'], current_fight['open_odds_b']]
         current_fight_odds_diff = current_fight['open_odds'] - current_fight['open_odds_b']
 
+        # Get current fight ages and calculate the difference
+        current_fight_ages = [current_fight['age'], current_fight['age_b']]
+        current_fight_age_diff = current_fight['age'] - current_fight['age_b']
+
         combined_features = np.concatenate(
             [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds,
-             [current_fight_odds_diff]])
+             [current_fight_odds_diff], current_fight_ages, [current_fight_age_diff]])
         combined_row = np.concatenate([combined_features, labels])
 
         most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
@@ -394,14 +398,18 @@ def create_matchup_data(file_path, tester, name):
                                          features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
                        results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
-                                          'current_fight_open_odds_diff'] + \
+                                          'current_fight_open_odds_diff',
+                                          'current_fight_age', 'current_fight_age_b',
+                                          'current_fight_age_diff'] + \
                        [f"{method}" for method in method_columns]
     else:
         column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for
                                                                  feature in features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
                        results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
-                                          'current_fight_open_odds_diff'] + \
+                                          'current_fight_open_odds_diff',
+                                          'current_fight_age', 'current_fight_age_b',
+                                          'current_fight_age_diff'] + \
                        [f"{method}" for method in method_columns]
 
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
