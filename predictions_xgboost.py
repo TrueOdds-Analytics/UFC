@@ -6,11 +6,11 @@ def preprocess_data(data):
     # Convert specified columns to category type
     category_columns = [
         'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
-        'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
-        'result_fight_2', 'winner_fight_2', 'weight_class_fight_2', 'scheduled_rounds_fight_2',
-        'result_b_fight_2', 'winner_b_fight_2', 'weight_class_b_fight_2', 'scheduled_rounds_b_fight_2',
-        'result_fight_3', 'winner_fight_3', 'weight_class_fight_3', 'scheduled_rounds_fight_3',
-        'result_b_fight_3', 'winner_b_fight_3', 'weight_class_b_fight_3', 'scheduled_rounds_b_fight_3'
+        'result_b_fight_1', 'winner_b_fight_1', 'scheduled_rounds_b_fight_1',
+        'result_fight_2', 'winner_fight_2', 'scheduled_rounds_fight_2',
+        'result_b_fight_2', 'winner_b_fight_2', 'scheduled_rounds_b_fight_2',
+        'result_fight_3', 'winner_fight_3', 'scheduled_rounds_fight_3',
+        'result_b_fight_3', 'winner_b_fight_3', 'scheduled_rounds_b_fight_3'
     ]
 
     data[category_columns] = data[category_columns].astype("category")
@@ -47,7 +47,7 @@ def predict_outcome(model, specific_data, fighter_name, opponent_name):
 
 if __name__ == "__main__":
     # Load the trained model
-    model_path = 'models/model_0.7079_0_features_removed.json'  # Replace with the actual model file path
+    model_path = 'models/xgboost/model_0.7723_0_features_removed.json'  # Replace with the actual model file path
     model = load_model(model_path)
 
     while True:
@@ -60,7 +60,7 @@ if __name__ == "__main__":
 
         # Generate specific matchup data
         specific_data = create_specific_matchup_data('data/combined_sorted_fighter_stats.csv', fighter_name,
-                                                     opponent_name, n_past_fights=3)
+                                                     opponent_name, n_past_fights=3, name=True)
 
         if specific_data is None:
             print("Insufficient data for the specified fighters. Please try again.")

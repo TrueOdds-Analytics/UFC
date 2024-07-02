@@ -423,7 +423,7 @@ def create_matchup_data(file_path, tester, name):
     return matchup_df
 
 
-def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_fights, csv_name=None):
+def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_fights, name=False):
     df = pd.read_csv(file_path)
 
     # Convert fighter names to lowercase
@@ -433,14 +433,14 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     df['fighter_b'] = df['fighter_b'].str.lower()
 
     # Load the removed features from the file
-    with open('data/removed_features.txt', 'r') as file:
+    with open('data/train test data/removed_features.txt', 'r') as file:
         removed_features = file.read().split(',')
 
     # Define the features to include for averaging, excluding identifiers, non-numeric features, and removed features
     columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
                           'result', 'winner', 'weight_class', 'scheduled_rounds',
                           'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
-    features_to_include = [col for col in df.columns if col not in columns_to_exclude and col not in removed_features]
+    features_to_include = [col for col in df.columns if col not in columns_to_exclude and col not in removed_features and 'age' not in col.lower()]
 
     matchup_data = []
 
@@ -458,13 +458,24 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     opponent_features = opponent_df[features_to_include].mean().values
 
     # Create new columns for the specified features for each of the last three fights
-    results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds', 'open_odds']].head(
-        3).values.flatten()
-    results_opponent = opponent_df[
-        ['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b', 'open_odds_b']].head(
-        3).values.flatten()
+    results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
+    results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(3).values.flatten()
 
-    combined_features = np.concatenate([fighter_features, opponent_features, results_fighter, results_opponent])
+    # Get user input for current fight odds and ages
+    current_fight_open_odds = float(input(f"Enter current open odds for {fighter_name}: "))
+    current_fight_open_odds_b = float(input(f"Enter current open odds for {opponent_name}: "))
+    current_fight_age = float(input(f"Enter current age for {fighter_name}: "))
+    current_fight_age_b = float(input(f"Enter current age for {opponent_name}: "))
+
+    # Calculate differentials
+    current_fight_open_odds_diff = current_fight_open_odds - current_fight_open_odds_b
+    current_fight_age_diff = current_fight_age - current_fight_age_b
+
+    # Add current fight information to the features
+    current_fight_info = [current_fight_open_odds, current_fight_open_odds_b, current_fight_open_odds_diff,
+                          current_fight_age, current_fight_age_b, current_fight_age_diff]
+
+    combined_features = np.concatenate([fighter_features, opponent_features, results_fighter, results_opponent, current_fight_info])
 
     # Get the most recent fight date among the averaged fights
     most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
@@ -475,15 +486,15 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     # Define column names for the new DataFrame
     results_columns = []
     for i in range(1, 4):
-        results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}",
-                            f"scheduled_rounds_fight_{i}"]
-        results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}",
-                            f"scheduled_rounds_b_fight_{i}"]
+        results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}", f"scheduled_rounds_fight_{i}"]
+        results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}", f"scheduled_rounds_b_fight_{i}"]
 
-    column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for feature
-                                                             in features_to_include] + \
+    column_names = ['fighter', 'fighter_b', 'fight_date'] + \
+                   [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in features_to_include] + \
                    [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include] + \
-                   results_columns
+                   results_columns + \
+                   ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
+                    'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff']
 
     # Convert the matchup data into a DataFrame
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
@@ -494,9 +505,12 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     # Drop the 'fight_date' column
     matchup_df = matchup_df.drop(['fight_date'], axis=1)
 
+    # Remove 'fighter' and 'fighter_b' columns if name is False
+    if not name:
+        matchup_df = matchup_df.drop(['fighter', 'fighter_b'], axis=1)
+
     # Save the specific matchup data to a CSV file
-    if csv_name is None:
-        csv_name = f'specific_matchup.csv'
+    csv_name = f'specific_matchup.csv'
     matchup_df.to_csv(f'data/{csv_name}', index=False)
 
     print("Specific matchup success. Data saved to CSV.")
@@ -507,4 +521,4 @@ if __name__ == "__main__":
     combine_rounds_stats('data/UFC_STATS_ORIGINAL.csv')
     combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
-    # split_train_val('data/matchup data/matchup_data_3_avg.csv')
+    split_train_val('data/matchup data/matchup_data_3_avg.csv')
