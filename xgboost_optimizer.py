@@ -48,11 +48,11 @@ def get_train_val_data():
     # Convert specified columns to category type
     category_columns = [
         'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
-        'result_b_fight_1', 'winner_b_fight_1', 'scheduled_rounds_b_fight_1',
-        'result_fight_2', 'winner_fight_2', 'scheduled_rounds_fight_2',
-        'result_b_fight_2', 'winner_b_fight_2', 'scheduled_rounds_b_fight_2',
-        'result_fight_3', 'winner_fight_3', 'scheduled_rounds_fight_3',
-        'result_b_fight_3', 'winner_b_fight_3', 'scheduled_rounds_b_fight_3'
+        'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
+        'result_fight_2', 'winner_fight_2', 'weight_class_fight_2', 'scheduled_rounds_fight_2',
+        'result_b_fight_2', 'winner_b_fight_2', 'weight_class_b_fight_2', 'scheduled_rounds_b_fight_2',
+        'result_fight_3', 'winner_fight_3', 'weight_class_fight_3', 'scheduled_rounds_fight_3',
+        'result_b_fight_3', 'winner_b_fight_3', 'weight_class_b_fight_3', 'scheduled_rounds_b_fight_3'
     ]
 
     for df in [train_data, val_data]:
@@ -86,7 +86,12 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, 
     plt.show()
 
 
-def create_shap_graph(model, X_train):
+def create_shap_graph(model_path, X_train):
+    # Load the model from the file
+    model = xgb.XGBClassifier(enable_categorical=True)
+    model.load_model(model_path)
+
+    # Create the SHAP explainer
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_train)
 
@@ -177,15 +182,15 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
 
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 1e-5, 100.0, log=True),
-            'alpha': trial.suggest_float('alpha', 1e-5, 100.0, log=True),
-            'min_child_weight': trial.suggest_float('min_child_weight', 1e-5, 100.0, log=True),
-            'max_depth': trial.suggest_int('max_depth', 1, 10),
+            'lambda': trial.suggest_float('lambda', 1e-3, 10.0, log=True),
+            'alpha': trial.suggest_float('alpha', 1e-3, 10.0, log=True),
+            'min_child_weight': trial.suggest_float('min_child_weight', 0.1, 10.0),
+            'max_depth': trial.suggest_int('max_depth', 3, 10),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
-            'subsample': trial.suggest_float('subsample', 0.1, 1.0),
-            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.1, 1.0),
-            'gamma': trial.suggest_float('gamma', 1e-5, 100.0, log=True),
-            'eta': trial.suggest_float('eta', 1e-5, 1.0, log=True),
+            'subsample': trial.suggest_float('subsample', 0.5, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
+            'gamma': trial.suggest_float('gamma', 1e-3, 5.0, log=True),
+            'eta': trial.suggest_float('eta', 0.01, 0.3, log=True),
             'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
         }
 
@@ -213,7 +218,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     return accuracy
 
 
-def optimize_model(X_train, X_val, y_train, y_val, n_rounds=5, n_trials_per_round=2000):
+def optimize_model(X_train, X_val, y_train, y_val, n_rounds=10, n_trials_per_round=2500):
     global best_accuracy, best_auc
 
     for round in range(n_rounds):
@@ -296,7 +301,9 @@ if __name__ == "__main__":
         print("Optimization interrupted by user.")
 
     # print("Creating SHAP graph for the best model")
-    # create_shap_graph(best_model, X_train)
+    # X_train, X_val, y_train, y_val = get_train_val_data()
+    # model_path = f'models/xgboost/model_0.6415_328_features.json'
+    # create_shap_graph(model_path, X_train)
     # print("SHAP graph creation completed.")
     # print("--------------------")
     #

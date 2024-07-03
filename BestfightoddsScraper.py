@@ -157,6 +157,9 @@ def clean_fight_odds_from_csv(input_csv_path, output_csv_path):
     # Extract fighter names and create a new column
     modified_df['Fighter'] = modified_df['Matchup'].str.split(' vs ', expand=True)[0]
 
+    # Remove duplicate rows based on 'Matchup' and 'Date'
+    modified_df = modified_df.drop_duplicates(subset=['Matchup', 'Date'], keep='first')
+
     # Sort the DataFrame by Fighter name and then by Date
     modified_df = modified_df.sort_values(['Fighter', 'Date'])
 

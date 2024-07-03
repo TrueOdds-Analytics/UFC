@@ -34,6 +34,7 @@ def parse_date(date_input):
 
 def get_odds(row, odds_mappings, odds_columns):
     fighter = row['fighter'].lower() if isinstance(row['fighter'], str) else row['fighter'].iloc[0].lower()
+    event = row['event'].lower() if isinstance(row['event'], str) else row['event'].iloc[0].lower()
     fight_date = row['fight_date'] if isinstance(row['fight_date'], pd.Timestamp) else row['fight_date'].iloc[0]
     fight_date = parse_date(fight_date)
 
@@ -42,16 +43,25 @@ def get_odds(row, odds_mappings, odds_columns):
     for odds_type in odds_columns:
         for key, odds_data in odds_mappings[odds_type].items():
             if isinstance(key, tuple) and len(key) == 2:
-                matchup, _ = key  # We don't need the event name anymore
+                matchup, event_name = key
                 odds = odds_data['odds']
                 odds_date = parse_date(odds_data['Date'])
             else:
                 continue
 
             matchup_lower = matchup.lower()
+            event_name_lower = event_name.lower()
 
             if fighter in matchup_lower:
-                if odds_date and fight_date:
+                # Check if the event names match
+                if event == event_name_lower:
+                    # If event names match, also check if the years match
+                    if odds_date and fight_date and odds_date.year == fight_date.year:
+                        odds_values[odds_type] = odds
+                        break
+
+                # If event names don't match exactly, check for partial matches
+                elif odds_date and fight_date and odds_date.year == fight_date.year:
                     # Check if the dates are exactly the same
                     if odds_date == fight_date:
                         odds_values[odds_type] = odds
@@ -336,8 +346,10 @@ def remove_correlated_features(matchup_df, correlation_threshold=0.95):
     # Select the upper triangle of the correlation matrix
     upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
 
-    # Find the columns to drop
-    columns_to_drop = [column for column in upper_tri.columns if any(upper_tri[column] > correlation_threshold)]
+    # Find the columns to drop, excluding 'current_fight_open_odds_diff'
+    columns_to_drop = [column for column in upper_tri.columns
+                       if any(upper_tri[column] > correlation_threshold)
+                       and column != 'current_fight_open_odds_diff']
 
     # Drop the highly correlated columns
     matchup_df = matchup_df.drop(columns=columns_to_drop)
