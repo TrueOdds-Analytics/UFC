@@ -10,7 +10,7 @@ import shap
 import threading
 import time
 
-# Global flag for pausing
+# Global variables
 should_pause = False
 best_accuracy = 0
 best_auc = 0
@@ -30,14 +30,12 @@ def user_input_thread():
 
 
 def get_train_val_data():
-    # Load train data
     train_data = pd.read_csv('data/train test data/train_data.csv')
-    train_labels = train_data['winner']
-    train_data = train_data.drop(['winner'], axis=1)
-
-    # Load validation data
     val_data = pd.read_csv('data/train test data/val_data.csv')
+
+    train_labels = train_data['winner']
     val_labels = val_data['winner']
+    train_data = train_data.drop(['winner'], axis=1)
     val_data = val_data.drop(['winner'], axis=1)
 
     # Shuffle data
@@ -84,215 +82,202 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, 
     ax2.grid()
 
     plt.tight_layout()
-    plt.show()  # This will display the plot in the IDE
+    plt.show()
 
 
-def create_shap_graph(model_path):
-    # Load the model
-    model = xgb.XGBClassifier(enable_categorical=True)
-    model.load_model(model_path)
-
-    # Get the data
-    X_train, _, _, _ = get_train_val_data()
-
-    # Calculate SHAP values
+def create_shap_graph(model, X_train):
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_train)
 
-    # Calculate mean absolute SHAP values
     mean_abs_shap_values = np.abs(shap_values).mean(axis=0)
     feature_importance = sorted(zip(X_train.columns, mean_abs_shap_values), key=lambda x: x[1], reverse=True)
 
-    # Print the most influential 150 features
-    top_150_features = feature_importance[:50]
+    top_50_features = feature_importance[:50]
     print("Most influential features:")
-    for feature, importance in top_150_features:
+    for feature, importance in top_50_features:
         print(f"{feature}: {importance}")
 
-    # Create a DataFrame for the top 150 features
-    top_150_df = pd.DataFrame(top_150_features, columns=["Feature", "Importance"])
+    top_50_df = pd.DataFrame(top_50_features, columns=["Feature", "Importance"])
 
-    # Create a vertical bar plot
-    plt.figure(figsize=(12, 20))  # Adjust the figure size as needed
-    plt.barh(top_150_df["Feature"], top_150_df["Importance"], color='blue')
+    plt.figure(figsize=(12, 20))
+    plt.barh(top_50_df["Feature"], top_50_df["Importance"], color='blue')
     plt.xlabel('Mean Absolute SHAP Value')
     plt.ylabel('Features')
-    plt.title(f"SHAP Values for model: {model_path}")
-    plt.gca().invert_yaxis()  # Invert y-axis to have the highest importance at the top
+    plt.title("SHAP Values for XGBoost model")
+    plt.gca().invert_yaxis()
     plt.tight_layout()
-    plt.show()  # Display the plot
-
-    print(f"SHAP summary plot displayed for model: {model_path}")
+    plt.show()
 
 
-def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, all_removed_features, best_accuracy,
-                             best_auc):
-    global should_pause
+def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
+    model = xgb.XGBClassifier(**params)
+    eval_set = [(X_train, y_train), (X_val, y_val)]
+    model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
 
-    def create_fit_and_evaluate_model(params):
-        model = xgb.XGBClassifier(**params)
-        eval_set = [(X_train, y_train), (X_val, y_val)]
-        model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
+    results = model.evals_result()
+    train_losses = results['validation_0']['logloss']
+    val_losses = results['validation_1']['logloss']
+    train_auc = results['validation_0']['auc']
+    val_auc = results['validation_1']['auc']
 
-        results = model.evals_result()
-        train_losses = results['validation_0']['logloss']
-        val_losses = results['validation_1']['logloss']
-        train_auc = results['validation_0']['auc']
-        val_auc = results['validation_1']['auc']
+    y_val_pred = model.predict(X_val)
+    accuracy = accuracy_score(y_val, y_val_pred)
+    auc = roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])
 
-        y_val_pred = model.predict(X_val)
-        accuracy = accuracy_score(y_val, y_val_pred)
-        auc = roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])
+    return model, accuracy, auc, train_losses, val_losses, train_auc, val_auc
 
-        return model, accuracy, auc, train_losses, val_losses, train_auc, val_auc
 
-    def objective(trial):
-        global should_pause, best_accuracy, best_auc
-        while should_pause:
-            time.sleep(1)
+def adjust_hyperparameter_ranges(study, num_best_trials=20):
+    trials = sorted(study.trials, key=lambda t: t.value, reverse=True)
+    best_trials = trials[:num_best_trials]
 
+    new_ranges = {}
+    for param_name in study.best_params.keys():
+        values = [t.params[param_name] for t in best_trials if param_name in t.params]
+        if values:
+            if isinstance(study.best_params[param_name], int):
+                new_ranges[param_name] = {
+                    'low': max(min(values) - 1, 1),
+                    'high': min(max(values) + 1, 10)
+                }
+            else:
+                new_ranges[param_name] = {
+                    'low': max(min(values) * 0.8, 0.00001),
+                    'high': min(max(values) * 1.2, 150.0)
+                }
+
+    return new_ranges
+
+
+def objective(trial, X_train, X_val, y_train, y_val, params=None):
+    global should_pause, best_accuracy, best_auc
+    while should_pause:
+        time.sleep(1)
+
+    if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 0.01, 10.0, log=True),  # Increased lower bound
-            'alpha': trial.suggest_float('alpha', 0.01, 10.0, log=True),  # Increased lower bound
-            'tree_method': 'hist',
-            'device': 'cuda',
-            'objective': 'binary:logistic',
-            'verbosity': 0,
-            'n_jobs': -1,
-            'min_child_weight': trial.suggest_float('min_child_weight', 1.0, 25.0, log=True),  # Increased lower bound
-            'max_depth': trial.suggest_int('max_depth', 1, 10),  # Reduced upper bound
+            'lambda': trial.suggest_float('lambda', 0.01, 10.0, log=True),
+            'alpha': trial.suggest_float('alpha', 0.01, 10.0, log=True),
+            'min_child_weight': trial.suggest_float('min_child_weight', 1.0, 25.0, log=True),
+            'max_depth': trial.suggest_int('max_depth', 1, 10),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
-            'subsample': trial.suggest_float('subsample', 0.5, 0.8),  # Reduced upper bound
-            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 0.8),  # Reduced upper bound
-            'gamma': trial.suggest_float('gamma', 0.1, 10.0),  # Increased lower bound
-            'eta': trial.suggest_float('eta', 0.0001, 0.1, log=True),  # Reduced upper bound
+            'subsample': trial.suggest_float('subsample', 0.5, 0.8),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 0.8),
+            'gamma': trial.suggest_float('gamma', 0.1, 10.0),
+            'eta': trial.suggest_float('eta', 0.0001, 0.1, log=True),
             'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
-            'n_estimators': 1000,
-            'early_stopping_rounds': 50,
-            'eval_metric': ['logloss', 'auc'],
-            'enable_categorical': True
         }
 
-        model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params)
-
-        if accuracy > best_accuracy or (accuracy == best_accuracy and auc > best_auc):
-            best_accuracy = accuracy
-            best_auc = auc
-            model_filename = f'models/xgboost/model_{accuracy:.4f}_{features_removed}_features_removed.json'
-            model.save_model(model_filename)
-
-            plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, accuracy, auc)
-
-            features_removed_filename = f'removed features/removed_features_{accuracy:.4f}_{features_removed}_features.txt'
-            with open(features_removed_filename, 'w') as f:
-                f.write(f"Total features removed: {features_removed}\n\n")
-                f.write("Removed features:\n")
-                for feature in all_removed_features:
-                    f.write(f"{feature}\n")
-
-        return accuracy
-
-    study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
-
-    # Keep track of trial accuracies
-    trial_accuracies = []
-
-    def callback(study, trial):
-        trial_accuracies.append(trial.value)
-
-    study.optimize(objective, n_trials=10000, callbacks=[callback])
-
-    # Print the average accuracy at the end of the study
-    avg_accuracy = sum(trial_accuracies) / len(trial_accuracies)
-
-    best_params = study.best_params
-    best_params.update({
+    params.update({
         'tree_method': 'hist',
         'device': 'cuda',
         'objective': 'binary:logistic',
         'verbosity': 0,
         'n_jobs': -1,
-        'n_estimators': 10000,
+        'n_estimators': 1000,
         'early_stopping_rounds': 50,
         'eval_metric': ['logloss', 'auc'],
         'enable_categorical': True
     })
 
-    best_model, best_accuracy, best_auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(
-        best_params)
-    print(f"Average trial accuracy: {avg_accuracy:.4f}")
-    return best_model, best_accuracy, best_auc, best_params, train_losses, val_losses, train_auc, val_auc, best_accuracy, best_auc
+    model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train,
+                                                                                                       X_val, y_train,
+                                                                                                       y_val)
+
+    if accuracy > best_accuracy or (accuracy == best_accuracy and auc > best_auc):
+        best_accuracy = accuracy
+        best_auc = auc
+        model_filename = f'models/xgboost/model_{accuracy:.4f}_{len(X_train.columns)}_features.json'
+        model.save_model(model_filename)
+        plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy, auc)
+
+    return accuracy
 
 
-def get_top_features_and_retrain(model_path, n_features, X_train, X_val, y_train, y_val):
-    # Load the model
-    model = xgb.XGBClassifier(enable_categorical=True)
-    model.load_model(model_path)
+def optimize_model(X_train, X_val, y_train, y_val, n_rounds=10, n_trials_per_round=10):
+    global best_accuracy, best_auc
 
-    # Calculate SHAP values
+    for round in range(n_rounds):
+        print(f"Starting optimization round {round + 1}/{n_rounds}")
+
+        if round == 0:
+            study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
+            study.optimize(lambda trial: objective(trial, X_train, X_val, y_train, y_val), n_trials=n_trials_per_round)
+        else:
+            new_ranges = adjust_hyperparameter_ranges(study)
+
+            def objective_with_new_ranges(trial):
+                params = {k: trial.suggest_float(k, v['low'], v['high'], log=True) if not isinstance(v['low'],
+                                                                                                     int) else trial.suggest_int(
+                    k, v['low'], v['high']) for k, v in new_ranges.items()}
+                return objective(trial, X_train, X_val, y_train, y_val, params)
+
+            study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
+            study.optimize(objective_with_new_ranges, n_trials=n_trials_per_round)
+
+        print(f"Round {round + 1} best accuracy: {study.best_value:.4f}")
+        print(f"Round {round + 1} best parameters: {study.best_params}")
+
+    return study.best_trial
+
+
+def get_top_features_and_retrain(model, X_train, X_val, y_train, y_val, n_features):
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_train)
 
-    # Calculate mean absolute SHAP values
     mean_abs_shap_values = np.abs(shap_values).mean(axis=0)
     feature_importance = sorted(zip(X_train.columns, mean_abs_shap_values), key=lambda x: x[1], reverse=True)
 
-    # Get top N features
     top_n_features = [feature for feature, _ in feature_importance[:n_features]]
 
     print(f"Top {n_features} features:")
     for feature, importance in feature_importance[:n_features]:
         print(f"{feature}: {importance}")
 
-    # Filter data to include only top N features
     X_train_filtered = X_train[top_n_features]
     X_val_filtered = X_val[top_n_features]
 
-    # Retrain the model with top N features
     print(f"\nRetraining model with top {n_features} features...")
-    removed_features = [col for col in X_train.columns if col not in top_n_features]
-    retrained_model, retrained_accuracy, retrained_auc, retrained_best_params, train_losses, val_losses, train_auc, val_auc, best_accuracy, best_auc = train_and_evaluate_model(
-        X_train_filtered, X_val_filtered, y_train, y_val, len(removed_features), removed_features, 0, 0
-    )
+    best_trial = optimize_model(X_train_filtered, X_val_filtered, y_train, y_val)
 
-    return retrained_model, best_accuracy, best_auc, retrained_best_params
+    return best_trial.params, best_trial.value
 
 
 if __name__ == "__main__":
-    # Start the user input thread
     input_thread = threading.Thread(target=user_input_thread, daemon=True)
     input_thread.start()
 
     X_train, X_val, y_train, y_val = get_train_val_data()
     print("Starting initial optimization and evaluation...")
     try:
-        initial_model, initial_accuracy, initial_auc, initial_best_params, _, _, _, _, best_accuracy, best_auc = train_and_evaluate_model(
-            X_train, X_val, y_train, y_val, 0, [], 0, 0
-        )
+        best_trial = optimize_model(X_train, X_val, y_train, y_val)
+        best_params = best_trial.params
+        best_accuracy = best_trial.value
+
+        # Create and evaluate the best model
+        best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train,
+                                                                              y_val)
+        best_auc = auc
+
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
 
     print("Initial optimization completed.")
     print(f"Best model validation accuracy: {best_accuracy:.4f}")
     print(f"Best model validation AUC: {best_auc:.4f}")
-    print("Best parameters:", initial_best_params)
+    print("Best parameters:", best_params)
     print("--------------------")
 
-    # Create SHAP graph for the best model
-    # best_model_path = f'models/xgboost/model_0.7574_0_features_removed.json'
-    # print(f"Creating SHAP graph for the best model: {best_model_path}")
-    # create_shap_graph(best_model_path)
+    # print("Creating SHAP graph for the best model")
+    # create_shap_graph(best_model, X_train)
     # print("SHAP graph creation completed.")
     # print("--------------------")
     #
-    # X_train, X_val, y_train, y_val = get_train_val_data()
     # n_features = 50  # You can change this to any number you want
-    # retrained_model, retrained_accuracy, retrained_auc, retrained_best_params = get_top_features_and_retrain(
-    #     best_model_path, n_features, X_train, X_val, y_train, y_val
-    # )
+    # retrained_best_params, retrained_accuracy = get_top_features_and_retrain(best_model, X_train, X_val, y_train, y_val,
+    #                                                                          n_features)
     #
     # print("--------------------")
     # print("Retraining with top features completed.")
     # print(f"Retrained model validation accuracy: {retrained_accuracy:.4f}")
-    # print(f"Retrained model validation AUC: {retrained_auc:.4f}")
     # print("Retrained model best parameters:", retrained_best_params)
