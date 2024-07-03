@@ -1,5 +1,4 @@
 import numpy as np
-from fuzzywuzzy import fuzz
 from datetime import datetime
 import pandas as pd
 
@@ -206,12 +205,6 @@ def combine_rounds_stats(file_path):
                             if event_words[1].isdigit() and event_name_words[1].isdigit():
                                 odds_values[odds_type] = odds
                                 break
-
-                    # Step 5: Levenshtein distance
-                    similarity_score = fuzz.ratio(event, event_name_lower)
-                    if similarity_score >= 95:  # 95% similarity threshold
-                        odds_values[odds_type] = odds
-                        break
 
             if odds_type not in odds_values:
                 odds_values[odds_type] = None
