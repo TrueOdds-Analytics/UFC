@@ -335,7 +335,7 @@ def combine_fighters_stats(file_path):
     return final_combined_df
 
 
-def remove_correlated_features(matchup_df, correlation_threshold=0.90):
+def remove_correlated_features(matchup_df, correlation_threshold=0.95):
     # Select only the numeric columns
     numeric_columns = matchup_df.select_dtypes(include=[np.number]).columns
     numeric_df = matchup_df[numeric_columns]
@@ -369,7 +369,7 @@ def split_train_val(matchup_data_file):
     fight_dates_df = fight_dates_df.sort_values(by='fight_date', ascending=True)
 
     # Calculate the index to split the data into train and validation sets
-    split_index = int(len(fight_dates_df) * 0.80)
+    split_index = int(len(fight_dates_df) * 0.90)
 
     # Get the date threshold for splitting the data
     split_date = fight_dates_df.iloc[split_index]['fight_date']
@@ -614,7 +614,7 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    # combine_rounds_stats('data/UFC_STATS_ORIGINAL.csv')
-    # combine_fighters_stats("data/combined_rounds.csv")
+    combine_rounds_stats('data/UFC_STATS_ORIGINAL.csv')
+    combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
     split_train_val('data/matchup data/matchup_data_3_avg.csv')
