@@ -278,8 +278,8 @@ if __name__ == "__main__":
     print("Best parameters:", initial_best_params)
     print("--------------------")
 
-    # # Create SHAP graph for the best model
-    # best_model_path = f'models/xgboost/model_0.7723_0_features_removed.json'
+    # Create SHAP graph for the best model
+    # best_model_path = f'models/xgboost/model_0.7574_0_features_removed.json'
     # print(f"Creating SHAP graph for the best model: {best_model_path}")
     # create_shap_graph(best_model_path)
     # print("SHAP graph creation completed.")
