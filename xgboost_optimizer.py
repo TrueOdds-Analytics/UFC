@@ -152,8 +152,8 @@ def train_and_evaluate_model(X_train, X_val, y_train, y_val, features_removed, a
             time.sleep(1)
 
         params = {
-            'lambda': trial.suggest_float('lambda', 0.1, 150.0, log=True),  # Increased lower bound
-            'alpha': trial.suggest_float('alpha', 0.1, 150.0, log=True),  # Increased lower bound
+            'lambda': trial.suggest_float('lambda', 0.1, 10.0, log=True),  # Increased lower bound
+            'alpha': trial.suggest_float('alpha', 0.1, 10.0, log=True),  # Increased lower bound
             'tree_method': 'hist',
             'device': 'cuda',
             'objective': 'binary:logistic',
