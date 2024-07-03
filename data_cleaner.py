@@ -394,6 +394,25 @@ def split_train_val(matchup_data_file):
     print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}")
 
 
+def calculate_odds(odds):
+    if pd.isna(odds):
+        return 0, 0
+
+    if odds > 0:
+        win_percentage = 100 / (odds + 100)
+    else:
+        win_percentage = abs(odds) / (abs(odds) + 100)
+
+    opponent_percentage = 1 - win_percentage
+
+    if opponent_percentage > 0.5:
+        opponent_odds = -100 * opponent_percentage / (1 - opponent_percentage)
+    else:
+        opponent_odds = 100 * (1 - opponent_percentage) / opponent_percentage
+
+    return odds, opponent_odds
+
+
 def create_matchup_data(file_path, tester, name):
     df = pd.read_csv(file_path)
 
@@ -407,27 +426,6 @@ def create_matchup_data(file_path, tester, name):
 
     matchup_data = []
     n_past_fights = 6 - tester
-
-    def calculate_odds(odds):
-        try:
-            if odds > 0:
-                win_percentage = 100 / (odds + 100) * 100
-            else:
-                win_percentage = abs(odds) / (abs(odds) + 100) * 100
-
-            opponent_percentage = 100 - win_percentage
-
-            if abs(opponent_percentage - 50) < 1e-6:  # Check for values very close to 50
-                opponent_odds = 100  # Even odds
-            elif opponent_percentage > 50:
-                opponent_odds = 100 / (opponent_percentage - 50) - 2
-            else:
-                opponent_odds = -(100 / (50 - opponent_percentage) - 2) * 100
-
-            return odds, opponent_odds
-        except Exception as e:
-            print(f"Error in calculate_odds: {e}")
-            return 0, 0  # Return default values in case of any error
 
     for index, current_fight in df.iterrows():
         fighter_name = current_fight['fighter']
@@ -445,7 +443,8 @@ def create_matchup_data(file_path, tester, name):
         opponent_features = opponent_df[features_to_include].mean().values
 
         results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
-        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(3).values.flatten()
+        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
+            3).values.flatten()
 
         labels = current_fight[method_columns].values
 
@@ -457,7 +456,8 @@ def create_matchup_data(file_path, tester, name):
             current_fight_odds = calculate_odds(current_fight['open_odds'])
             current_fight_odds_diff = current_fight_odds[0] - current_fight_odds[1]
         elif pd.notna(current_fight['open_odds_b']):
-            current_fight_odds = calculate_odds(current_fight['open_odds_b'])[::-1]  # Reverse the order
+            reversed_odds = calculate_odds(current_fight['open_odds_b'])
+            current_fight_odds = [reversed_odds[1], reversed_odds[0]]  # Swap the order
             current_fight_odds_diff = current_fight_odds[0] - current_fight_odds[1]
         else:
             current_fight_odds = [0, 0]
@@ -486,7 +486,8 @@ def create_matchup_data(file_path, tester, name):
                             f"scheduled_rounds_b_fight_{i}"]
 
     if not name:
-        column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
+        column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in
+                                         features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
                        results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
                                           'current_fight_open_odds_diff',
@@ -494,7 +495,8 @@ def create_matchup_data(file_path, tester, name):
                                           'current_fight_age_diff'] + \
                        [f"{method}" for method in method_columns]
     else:
-        column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
+        column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for
+                                                                 feature in features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights - 1}" for feature in features_to_include] + \
                        results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
                                           'current_fight_open_odds_diff',
