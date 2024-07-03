@@ -4,6 +4,35 @@ from fuzzywuzzy import fuzz
 from datetime import datetime
 
 
+def parse_date(date_input):
+    if isinstance(date_input, pd.Timestamp):
+        return date_input.strftime('%Y-%m-%d')
+    elif isinstance(date_input, str):
+        date_formats = [
+            "%b %d %Y",
+            "%b %dst %Y",
+            "%b %dnd %Y",
+            "%b %drd %Y",
+            "%b %dth %Y",
+            "%B %d %Y",
+            "%B %dst %Y",
+            "%B %dnd %Y",
+            "%B %drd %Y",
+            "%B %dth %Y",
+            "%Y-%m-%d"
+        ]
+        for date_format in date_formats:
+            try:
+                return datetime.strptime(date_input, date_format).strftime('%Y-%m-%d')
+            except ValueError:
+                continue
+        print(f"Unable to parse date: {date_input}")
+        return None
+    else:
+        print(f"Unexpected date type: {type(date_input)}")
+        return None
+
+
 def combine_rounds_stats(file_path):
     # Load UFC stats and fighter stats
     ufc_stats = pd.read_csv(file_path)
@@ -123,17 +152,28 @@ def combine_rounds_stats(file_path):
 
     # Create mapping dictionaries for each odds column
     odds_columns = ['Open', 'Closing Range Start', 'Closing Range End', 'Movement']
-    odds_mappings = {col: cleaned_odds_df.set_index(['Matchup', 'Event'])[col].to_dict() for col in odds_columns}
+    odds_mappings = {
+        col: cleaned_odds_df.set_index(['Matchup', 'Event']).apply(lambda x: {'odds': x[col], 'Date': x['Date']},
+                                                                   axis=1).to_dict() for col in odds_columns}
 
-    def get_odds(row):
-        fighter = row['fighter'].lower() if isinstance(row['fighter'], str) else row['fighter'].iloc[0].lower()
-        event = row['event'].lower() if isinstance(row['event'], str) else row['event'].iloc[0].lower()
-        fight_date = row['fight_date'] if isinstance(row['fight_date'], str) else row['fight_date'].iloc[0]
+    def get_odds(row, total_rows, current_row):
+        fighter = row['fighter'].iloc[0].lower() if isinstance(row['fighter'], pd.Series) else row['fighter'].lower()
+        event = row['event'].iloc[0].lower() if isinstance(row['event'], pd.Series) else row['event'].lower()
+        fight_date = row['fight_date'].iloc[0] if isinstance(row['fight_date'], pd.Series) else row['fight_date']
+        fight_date = parse_date(fight_date)
 
         odds_values = {}
 
         for odds_type in odds_columns:
-            for (matchup, event_name, odds_date), odds in odds_mappings[odds_type].items():
+            for key, odds_data in odds_mappings[odds_type].items():
+                if isinstance(key, tuple) and len(key) == 2:
+                    matchup, event_name = key
+                    odds = odds_data['odds']
+                    odds_date = parse_date(odds_data['Date'])
+                else:
+                    # If key is not a tuple or doesn't have 2 elements, skip this iteration
+                    continue
+
                 matchup_lower = matchup.lower()
                 event_name_lower = event_name.lower()
 
@@ -159,15 +199,11 @@ def combine_rounds_stats(file_path):
                                 break
 
                     # Step 4: Compare dates
-                    try:
-                        odds_date = datetime.strptime(odds_date, "%b %d %Y").date()
-                        fight_date = datetime.strptime(fight_date, "%Y-%m-%d").date()
-                        if odds_date == fight_date:
+                    if odds_date and fight_date:
+                        date_diff = abs((odds_date - fight_date).days)
+                        if date_diff <= 1:  # Allow for +/- 1 day difference
                             odds_values[odds_type] = odds
                             break
-                    except ValueError:
-                        print("Date Parsing Failed")
-                        pass
 
                     # Step 5: Levenshtein distance
                     similarity_score = fuzz.ratio(event, event_name_lower)
@@ -178,10 +214,15 @@ def combine_rounds_stats(file_path):
             if odds_type not in odds_values:
                 odds_values[odds_type] = None
 
+        # Print progress
+        print(f"\rMatching odds: {current_row}/{total_rows}", end="", flush=True)
+
         return pd.Series(odds_values)
 
     # Apply the function to get odds for each fighter
-    new_odds = final_stats.apply(get_odds, axis=1)
+    total_rows = len(final_stats)
+    new_odds = final_stats.apply(lambda row: get_odds(row, total_rows, final_stats.index.get_loc(row.name) + 1), axis=1)
+    print("\nOdds matching completed.")
 
     # Add the new columns to final_stats
     for col in odds_columns:
@@ -352,7 +393,8 @@ def split_train_val(matchup_data_file):
     with open('data/train test data/removed_features.txt', 'w') as file:
         file.write(','.join(removed_features))
 
-    print(f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
+    print(
+        f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
     print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}, Test set size: {len(test_data)}")
 
 
@@ -465,7 +507,8 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
                           'result', 'winner', 'weight_class', 'scheduled_rounds',
                           'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
-    features_to_include = [col for col in df.columns if col not in columns_to_exclude and col not in removed_features and 'age' not in col.lower()]
+    features_to_include = [col for col in df.columns if
+                           col not in columns_to_exclude and col not in removed_features and 'age' not in col.lower()]
 
     matchup_data = []
 
@@ -484,7 +527,8 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
     # Create new columns for the specified features for each of the last three fights
     results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
-    results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(3).values.flatten()
+    results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
+        3).values.flatten()
 
     # Get user input for current fight odds and ages
     current_fight_open_odds = float(input(f"Enter current open odds for {fighter_name}: "))
@@ -500,7 +544,8 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     current_fight_info = [current_fight_open_odds, current_fight_open_odds_b, current_fight_open_odds_diff,
                           current_fight_age, current_fight_age_b, current_fight_age_diff]
 
-    combined_features = np.concatenate([fighter_features, opponent_features, results_fighter, results_opponent, current_fight_info])
+    combined_features = np.concatenate(
+        [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_info])
 
     # Get the most recent fight date among the averaged fights
     most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
@@ -511,8 +556,10 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     # Define column names for the new DataFrame
     results_columns = []
     for i in range(1, 4):
-        results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}", f"scheduled_rounds_fight_{i}"]
-        results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}", f"scheduled_rounds_b_fight_{i}"]
+        results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}",
+                            f"scheduled_rounds_fight_{i}"]
+        results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}",
+                            f"scheduled_rounds_b_fight_{i}"]
 
     column_names = ['fighter', 'fighter_b', 'fight_date'] + \
                    [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in features_to_include] + \
