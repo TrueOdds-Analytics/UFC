@@ -1,12 +1,12 @@
-import pandas as pd
 import numpy as np
 from fuzzywuzzy import fuzz
 from datetime import datetime
+import pandas as pd
 
 
 def parse_date(date_input):
     if isinstance(date_input, pd.Timestamp):
-        return date_input.strftime('%Y-%m-%d')
+        return date_input.to_pydatetime()
     elif isinstance(date_input, str):
         date_formats = [
             "%b %d %Y",
@@ -23,11 +23,13 @@ def parse_date(date_input):
         ]
         for date_format in date_formats:
             try:
-                return datetime.strptime(date_input, date_format).strftime('%Y-%m-%d')
+                return datetime.strptime(date_input, date_format)
             except ValueError:
                 continue
         print(f"Unable to parse date: {date_input}")
         return None
+    elif isinstance(date_input, datetime):
+        return date_input
     else:
         print(f"Unexpected date type: {type(date_input)}")
         return None
@@ -183,7 +185,14 @@ def combine_rounds_stats(file_path):
                         odds_values[odds_type] = odds
                         break
 
-                    # Step 2: Compare first and last words
+                    # Step 2: Compare dates
+                    if odds_date and fight_date:
+                        date_diff = abs((odds_date - fight_date).days)
+                        if date_diff <= 1:  # Allow for +/- 1 day difference
+                            odds_values[odds_type] = odds
+                            break
+
+                    # Step 3: Compare first and last words
                     event_words = event.split()
                     event_name_words = event_name_lower.split()
                     if len(event_words) > 1 and len(event_name_words) > 1:
@@ -191,23 +200,16 @@ def combine_rounds_stats(file_path):
                             odds_values[odds_type] = odds
                             break
 
-                    # Step 3: Check first word and second word (if second word is a number)
+                    # Step 4: Check first word and second word (if second word is a number)
                     if len(event_words) > 1 and len(event_name_words) > 1:
                         if event_words[0] == event_name_words[0]:
                             if event_words[1].isdigit() and event_name_words[1].isdigit():
                                 odds_values[odds_type] = odds
                                 break
 
-                    # Step 4: Compare dates
-                    if odds_date and fight_date:
-                        date_diff = abs((odds_date - fight_date).days)
-                        if date_diff <= 1:  # Allow for +/- 1 day difference
-                            odds_values[odds_type] = odds
-                            break
-
                     # Step 5: Levenshtein distance
                     similarity_score = fuzz.ratio(event, event_name_lower)
-                    if similarity_score >= 80:  # 80% similarity threshold
+                    if similarity_score >= 95:  # 95% similarity threshold
                         odds_values[odds_type] = odds
                         break
 
@@ -366,36 +368,30 @@ def split_train_val(matchup_data_file):
     fight_dates_df = matchup_df[['fight_date']]
     fight_dates_df = fight_dates_df.sort_values(by='fight_date', ascending=True)
 
-    # Extract test set (fights after 2024-03-23)
-    test_data = matchup_df[matchup_df['fight_date'] > '2024-03-23']
+    # Calculate the index to split the data into train and validation sets
+    split_index = int(len(fight_dates_df) * 0.90)
 
-    # Remove test data from the main dataset
-    remaining_data = matchup_df[matchup_df['fight_date'] <= '2024-03-23']
+    # Get the date threshold for splitting the data
+    split_date = fight_dates_df.iloc[split_index]['fight_date']
 
-    # Calculate the split index for the remaining data
-    split_index = int(len(remaining_data) * 0.90)
-
-    # Split the remaining data into train and validation sets
-    train_data = remaining_data.iloc[:split_index]
-    val_data = remaining_data.iloc[split_index:]
+    # Split the data into train and validation sets based on the fight date
+    train_data = matchup_df[matchup_df['fight_date'] < split_date]
+    val_data = matchup_df[matchup_df['fight_date'] >= split_date]
 
     # Drop the fight_date column after using it for splitting
     train_data = train_data.drop(columns=['fight_date'])
     val_data = val_data.drop(columns=['fight_date'])
-    test_data = test_data.drop(columns=['fight_date'])
 
-    # Save the train, validation, and test data to CSV files
+    # Save the train and validation data to CSV files
     train_data.to_csv('data/train test data/train_data.csv', index=False)
     val_data.to_csv('data/train test data/val_data.csv', index=False)
-    test_data.to_csv('data/train test data/test_data.csv', index=False)
 
     # Save the removed features to a file
     with open('data/train test data/removed_features.txt', 'w') as file:
         file.write(','.join(removed_features))
 
-    print(
-        f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
-    print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}, Test set size: {len(test_data)}")
+    print(f"Train and validation data saved successfully. {len(removed_features)} correlated features were removed.")
+    print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}")
 
 
 def create_matchup_data(file_path, tester, name):
