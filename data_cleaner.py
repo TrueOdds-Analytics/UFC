@@ -1,6 +1,12 @@
+import pandas as pd
 import numpy as np
 from datetime import datetime
-import pandas as pd
+import multiprocessing
+from functools import partial
+import time
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 def parse_date(date_input):
@@ -8,16 +14,8 @@ def parse_date(date_input):
         return date_input.to_pydatetime()
     elif isinstance(date_input, str):
         date_formats = [
-            "%b %d %Y",
-            "%b %dst %Y",
-            "%b %dnd %Y",
-            "%b %drd %Y",
-            "%b %dth %Y",
-            "%B %d %Y",
-            "%B %dst %Y",
-            "%B %dnd %Y",
-            "%B %drd %Y",
-            "%B %dth %Y",
+            "%b %d %Y", "%b %dst %Y", "%b %dnd %Y", "%b %drd %Y", "%b %dth %Y",
+            "%B %d %Y", "%B %dst %Y", "%B %dnd %Y", "%B %drd %Y", "%B %dth %Y",
             "%Y-%m-%d"
         ]
         for date_format in date_formats:
@@ -34,6 +32,46 @@ def parse_date(date_input):
         return None
 
 
+def get_odds(row, odds_mappings, odds_columns):
+    fighter = row['fighter'].lower() if isinstance(row['fighter'], str) else row['fighter'].iloc[0].lower()
+    fight_date = row['fight_date'] if isinstance(row['fight_date'], pd.Timestamp) else row['fight_date'].iloc[0]
+    fight_date = parse_date(fight_date)
+
+    odds_values = {}
+
+    for odds_type in odds_columns:
+        for key, odds_data in odds_mappings[odds_type].items():
+            if isinstance(key, tuple) and len(key) == 2:
+                matchup, _ = key  # We don't need the event name anymore
+                odds = odds_data['odds']
+                odds_date = parse_date(odds_data['Date'])
+            else:
+                continue
+
+            matchup_lower = matchup.lower()
+
+            if fighter in matchup_lower:
+                if odds_date and fight_date:
+                    # Check if the dates are exactly the same
+                    if odds_date == fight_date:
+                        odds_values[odds_type] = odds
+                        break
+                    # If not exact, allow for a 1-day difference
+                    elif abs((odds_date - fight_date).days) <= 1:
+                        odds_values[odds_type] = odds
+                        break
+
+        if odds_type not in odds_values:
+            odds_values[odds_type] = None
+
+    return pd.Series(odds_values)
+
+
+def process_chunk(chunk, odds_mappings, odds_columns):
+    result = chunk.apply(lambda row: get_odds(row, odds_mappings, odds_columns), axis=1)
+    return result, len(chunk)
+
+
 def combine_rounds_stats(file_path):
     # Load UFC stats and fighter stats
     ufc_stats = pd.read_csv(file_path)
@@ -42,14 +80,14 @@ def combine_rounds_stats(file_path):
     # Preprocess UFC stats
     ufc_stats['fighter'] = ufc_stats['fighter'].astype(str).str.lower()
     ufc_stats['fight_date'] = pd.to_datetime(ufc_stats['fight_date'], format='%Y-%m-%d')
+
     # Preprocess fighter stats
     fighter_stats['name'] = fighter_stats['name'].astype(str).str.lower().str.strip()
     fighter_stats['dob'] = fighter_stats['dob'].replace(['--', '', 'NA', 'N/A'], np.nan)
     fighter_stats['dob'] = pd.to_datetime(fighter_stats['dob'], format='%b %d, %Y', errors='coerce')
 
-    # Merge other fighter stats (excluding dob) with UFC stats
-    ufc_stats = pd.merge(ufc_stats, fighter_stats[['name', 'dob']],
-                         left_on='fighter', right_on='name', how='left')
+    # Merge other fighter stats with UFC stats
+    ufc_stats = pd.merge(ufc_stats, fighter_stats[['name', 'dob']], left_on='fighter', right_on='name', how='left')
 
     # Calculate age
     ufc_stats['dob'] = pd.to_datetime(ufc_stats['dob'], errors='coerce')
@@ -66,7 +104,7 @@ def combine_rounds_stats(file_path):
 
     fighter_identifier = 'fighter'
 
-    # Convert 'time' column from minutes:seconds format to seconds
+    # Convert 'time' column to seconds
     ufc_stats['time'] = pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.second + \
                         pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.minute * 60
 
@@ -77,11 +115,10 @@ def combine_rounds_stats(file_path):
     aggregated_stats = ufc_stats.groupby(['id', fighter_identifier], as_index=False)[numeric_columns].sum()
 
     # Recalculate percentage columns
-    aggregated_stats['significant_strikes_rate'] = (
-            aggregated_stats['significant_strikes_landed'] / aggregated_stats['significant_strikes_attempted']).fillna(
-        0)
+    aggregated_stats['significant_strikes_rate'] = (aggregated_stats['significant_strikes_landed'] / aggregated_stats[
+        'significant_strikes_attempted']).fillna(0)
     aggregated_stats['takedown_rate'] = (
-            aggregated_stats['takedown_successful'] / aggregated_stats['takedown_attempted']).fillna(0)
+                aggregated_stats['takedown_successful'] / aggregated_stats['takedown_attempted']).fillna(0)
 
     # Extract non-numeric columns and find unique rows
     non_numeric_columns = ufc_stats.select_dtypes(exclude='number').columns.difference(['id', fighter_identifier])
@@ -103,9 +140,10 @@ def combine_rounds_stats(file_path):
             group[f"{col}_career_avg"] = group[f"{col}_career"] / fight_count
 
         group['significant_strikes_rate_career'] = (
-                group['significant_strikes_landed_career'] / group['significant_strikes_attempted_career']).fillna(0)
+                    group['significant_strikes_landed_career'] / group['significant_strikes_attempted_career']).fillna(
+            0)
         group['takedown_rate_career'] = (
-                group['takedown_successful_career'] / group['takedown_attempted_career']).fillna(0)
+                    group['takedown_successful_career'] / group['takedown_attempted_career']).fillna(0)
 
         return group
 
@@ -119,21 +157,13 @@ def combine_rounds_stats(file_path):
     final_stats = final_stats[final_columns]
 
     final_stats = final_stats[~final_stats['winner'].isin(['NC', 'D'])]
-
-    # Drop rows with 'DQ' and 'Decision - Split' in the 'result' column
     final_stats = final_stats[~final_stats['result'].isin(['DQ', 'Decision - Split'])]
 
     # Consolidate weight classes
     weight_class_mapping = {
-        'Flyweight': 'Flyweight',
-        'Bantamweight': 'Bantamweight',
-        'Featherweight': 'Featherweight',
-        'Lightweight': 'Lightweight',
-        'Welterweight': 'Welterweight',
-        'Middleweight': 'Middleweight',
-        'Light Heavyweight': 'Light Heavyweight',
-        'Heavyweight': 'Heavyweight',
-        'Tournament': 'Tournament'
+        'Flyweight': 'Flyweight', 'Bantamweight': 'Bantamweight', 'Featherweight': 'Featherweight',
+        'Lightweight': 'Lightweight', 'Welterweight': 'Welterweight', 'Middleweight': 'Middleweight',
+        'Light Heavyweight': 'Light Heavyweight', 'Heavyweight': 'Heavyweight', 'Tournament': 'Tournament'
     }
 
     final_stats['weight_class'] = final_stats['weight_class'].apply(
@@ -155,73 +185,34 @@ def combine_rounds_stats(file_path):
     odds_columns = ['Open', 'Closing Range Start', 'Closing Range End', 'Movement']
     odds_mappings = {
         col: cleaned_odds_df.set_index(['Matchup', 'Event']).apply(lambda x: {'odds': x[col], 'Date': x['Date']},
-                                                                   axis=1).to_dict() for col in odds_columns}
+                                                                   axis=1).to_dict() for col in odds_columns
+    }
 
-    def get_odds(row, total_rows, current_row):
-        fighter = row['fighter'].iloc[0].lower() if isinstance(row['fighter'], pd.Series) else row['fighter'].lower()
-        event = row['event'].iloc[0].lower() if isinstance(row['event'], pd.Series) else row['event'].lower()
-        fight_date = row['fight_date'].iloc[0] if isinstance(row['fight_date'], pd.Series) else row['fight_date']
-        fight_date = parse_date(fight_date)
+    # Split the dataframe into chunks
+    num_cores = multiprocessing.cpu_count()
+    chunks = np.array_split(final_stats, num_cores)
 
-        odds_values = {}
+    # Create a partial function with fixed arguments
+    partial_process = partial(process_chunk, odds_mappings=odds_mappings, odds_columns=odds_columns)
 
-        for odds_type in odds_columns:
-            for key, odds_data in odds_mappings[odds_type].items():
-                if isinstance(key, tuple) and len(key) == 2:
-                    matchup, event_name = key
-                    odds = odds_data['odds']
-                    odds_date = parse_date(odds_data['Date'])
-                else:
-                    continue
-
-                matchup_lower = matchup.lower()
-                event_name_lower = event_name.lower()
-
-                if fighter in matchup_lower:
-                    # Step 1: Direct comparison
-                    if event == event_name_lower:
-                        odds_values[odds_type] = odds
-                        break
-
-                    # Step 2: Compare dates (including year)
-                    if odds_date and fight_date:
-                        if odds_date.year == fight_date.year:
-                            date_diff = abs((odds_date - fight_date).days)
-                            if date_diff <= 1:  # Allow for +/- 1 day difference
-                                odds_values[odds_type] = odds
-                                break
-
-                    # Step 3: Compare first and last words
-                    event_words = event.split()
-                    event_name_words = event_name_lower.split()
-                    if len(event_words) > 1 and len(event_name_words) > 1:
-                        if event_words[0] == event_name_words[0] and event_words[-1] == event_name_words[-1]:
-                            # Additional check for year
-                            if odds_date and fight_date and odds_date.year == fight_date.year:
-                                odds_values[odds_type] = odds
-                                break
-
-                    # Step 4: Check first word and second word (if second word is a number)
-                    if len(event_words) > 1 and len(event_name_words) > 1:
-                        if event_words[0] == event_name_words[0]:
-                            if event_words[1].isdigit() and event_name_words[1].isdigit():
-                                # Additional check for year
-                                if odds_date and fight_date and odds_date.year == fight_date.year:
-                                    odds_values[odds_type] = odds
-                                    break
-
-            if odds_type not in odds_values:
-                odds_values[odds_type] = None
-
-        # Print progress
-        print(f"\rMatching odds: {current_row}/{total_rows}", end="", flush=True)
-
-        return pd.Series(odds_values)
-
-    # Apply the function to get odds for each fighter
+    # Use multiprocessing to process chunks in parallel
     total_rows = len(final_stats)
-    new_odds = final_stats.apply(lambda row: get_odds(row, total_rows, final_stats.index.get_loc(row.name) + 1), axis=1)
-    print("\nOdds matching completed.")
+    print(f"Processing {total_rows} rows...")
+
+    start_time = time.time()
+    with multiprocessing.Pool(processes=num_cores) as pool:
+        results = []
+        processed_rows = 0
+        for chunk_result, chunk_size in pool.imap(partial_process, chunks):
+            results.append(chunk_result)
+            processed_rows += chunk_size
+            print(f"\rProgress: {processed_rows}/{total_rows} ({processed_rows / total_rows * 100:.2f}%)", end="",
+                  flush=True)
+
+    new_odds = pd.concat(results)
+
+    end_time = time.time()
+    print(f"\nOdds matching completed in {end_time - start_time:.2f} seconds.")
 
     # Add the new columns to final_stats
     for col in odds_columns:

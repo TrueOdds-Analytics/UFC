@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import shap
 import threading
 import time
+import sys
 
 # Global variables
 should_pause = False
@@ -110,22 +111,36 @@ def create_shap_graph(model, X_train):
 
 
 def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
+    params['enable_categorical'] = True
+    params['eval_metric'] = ['logloss', 'auc']  # Add this line
+
     model = xgb.XGBClassifier(**params)
     eval_set = [(X_train, y_train), (X_val, y_val)]
+
+    # Remove eval_metric from fit method
     model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
 
     results = model.evals_result()
     train_losses = results['validation_0']['logloss']
     val_losses = results['validation_1']['logloss']
-    train_auc = results['validation_0']['auc']
-    val_auc = results['validation_1']['auc']
+
+    # Safely get AUC values
+    train_auc = results['validation_0'].get('auc', [])
+    val_auc = results['validation_1'].get('auc', [])
 
     y_val_pred = model.predict(X_val)
     accuracy = accuracy_score(y_val, y_val_pred)
-    auc = roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])
+
+    # Calculate AUC manually
+    try:
+        auc = roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])
+    except ValueError as e:
+        print(f"Error calculating AUC: {str(e)}")
+        print(f"Unique values in y_val: {np.unique(y_val)}")
+        print(f"Shape of predict_proba: {model.predict_proba(X_val).shape}")
+        auc = None
 
     return model, accuracy, auc, train_losses, val_losses, train_auc, val_auc
-
 
 def adjust_hyperparameter_ranges(study, num_best_trials=20):
     trials = sorted(study.trials, key=lambda t: t.value, reverse=True)
@@ -137,17 +152,23 @@ def adjust_hyperparameter_ranges(study, num_best_trials=20):
         if values:
             if isinstance(study.best_params[param_name], int):
                 new_ranges[param_name] = {
+                    'type': 'int',
                     'low': max(min(values) - 1, 1),
                     'high': min(max(values) + 1, 10)
                 }
-            else:
+            elif isinstance(study.best_params[param_name], float):
                 new_ranges[param_name] = {
+                    'type': 'float',
                     'low': max(min(values) * 0.8, 0.00001),
                     'high': min(max(values) * 1.2, 150.0)
                 }
+            else:  # For categorical parameters
+                new_ranges[param_name] = {
+                    'type': 'categorical',
+                    'choices': list(set(values))
+                }
 
     return new_ranges
-
 
 def objective(trial, X_train, X_val, y_train, y_val, params=None):
     global should_pause, best_accuracy, best_auc
@@ -156,15 +177,15 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
 
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 0.01, 10.0, log=True),
-            'alpha': trial.suggest_float('alpha', 0.01, 10.0, log=True),
-            'min_child_weight': trial.suggest_float('min_child_weight', 1.0, 25.0, log=True),
+            'lambda': trial.suggest_float('lambda', 1e-5, 100.0, log=True),
+            'alpha': trial.suggest_float('alpha', 1e-5, 100.0, log=True),
+            'min_child_weight': trial.suggest_float('min_child_weight', 1e-5, 100.0, log=True),
             'max_depth': trial.suggest_int('max_depth', 1, 10),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
-            'subsample': trial.suggest_float('subsample', 0.5, 0.8),
-            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 0.8),
-            'gamma': trial.suggest_float('gamma', 0.1, 10.0),
-            'eta': trial.suggest_float('eta', 0.0001, 0.1, log=True),
+            'subsample': trial.suggest_float('subsample', 0.1, 1.0),
+            'colsample_bytree': trial.suggest_float('colsample_bytree', 0.1, 1.0),
+            'gamma': trial.suggest_float('gamma', 1e-5, 100.0, log=True),
+            'eta': trial.suggest_float('eta', 1e-5, 1.0, log=True),
             'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
         }
 
@@ -176,25 +197,23 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         'n_jobs': -1,
         'n_estimators': 1000,
         'early_stopping_rounds': 50,
-        'eval_metric': ['logloss', 'auc'],
+        'eval_metric': ['logloss', 'auc'],  # Move this here
         'enable_categorical': True
     })
 
-    model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train,
-                                                                                                       X_val, y_train,
-                                                                                                       y_val)
+    model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val)
 
-    if accuracy > best_accuracy or (accuracy == best_accuracy and auc > best_auc):
+    if accuracy > best_accuracy or (accuracy == best_accuracy and (auc is None or auc > best_auc)):
         best_accuracy = accuracy
-        best_auc = auc
+        best_auc = auc if auc is not None else 0
         model_filename = f'models/xgboost/model_{accuracy:.4f}_{len(X_train.columns)}_features.json'
         model.save_model(model_filename)
-        plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy, auc)
+        plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy, auc if auc is not None else 0)
 
     return accuracy
 
 
-def optimize_model(X_train, X_val, y_train, y_val, n_rounds=10, n_trials_per_round=10):
+def optimize_model(X_train, X_val, y_train, y_val, n_rounds=5, n_trials_per_round=2000):
     global best_accuracy, best_auc
 
     for round in range(n_rounds):
@@ -207,9 +226,19 @@ def optimize_model(X_train, X_val, y_train, y_val, n_rounds=10, n_trials_per_rou
             new_ranges = adjust_hyperparameter_ranges(study)
 
             def objective_with_new_ranges(trial):
-                params = {k: trial.suggest_float(k, v['low'], v['high'], log=True) if not isinstance(v['low'],
-                                                                                                     int) else trial.suggest_int(
-                    k, v['low'], v['high']) for k, v in new_ranges.items()}
+                params = {}
+                for k, v in new_ranges.items():
+                    if v['type'] == 'int':
+                        params[k] = trial.suggest_int(k, v['low'], v['high'])
+                    elif v['type'] == 'float':
+                        if k in ['subsample', 'colsample_bytree']:
+                            params[k] = trial.suggest_float(k, max(v['low'], 0.1), min(v['high'], 1.0))
+                        elif k == 'eta':
+                            params[k] = trial.suggest_float(k, max(v['low'], 1e-5), min(v['high'], 1.0), log=True)
+                        else:
+                            params[k] = trial.suggest_float(k, max(v['low'], 1e-5), min(v['high'], 100.0), log=True)
+                    elif v['type'] == 'categorical':
+                        params[k] = trial.suggest_categorical(k, v['choices'])
                 return objective(trial, X_train, X_val, y_train, y_val, params)
 
             study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
@@ -219,7 +248,6 @@ def optimize_model(X_train, X_val, y_train, y_val, n_rounds=10, n_trials_per_rou
         print(f"Round {round + 1} best parameters: {study.best_params}")
 
     return study.best_trial
-
 
 def get_top_features_and_retrain(model, X_train, X_val, y_train, y_val, n_features):
     explainer = shap.TreeExplainer(model)
@@ -255,18 +283,17 @@ if __name__ == "__main__":
         best_accuracy = best_trial.value
 
         # Create and evaluate the best model
-        best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train,
-                                                                              y_val)
+        best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train, y_val)
         best_auc = auc
+
+        print("Initial optimization completed.")
+        print(f"Best model validation accuracy: {best_accuracy:.4f}")
+        print(f"Best model validation AUC: {best_auc:.4f}")
+        print("Best parameters:", best_params)
+        print("--------------------")
 
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
-
-    print("Initial optimization completed.")
-    print(f"Best model validation accuracy: {best_accuracy:.4f}")
-    print(f"Best model validation AUC: {best_auc:.4f}")
-    print("Best parameters:", best_params)
-    print("--------------------")
 
     # print("Creating SHAP graph for the best model")
     # create_shap_graph(best_model, X_train)

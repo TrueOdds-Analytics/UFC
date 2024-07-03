@@ -7,6 +7,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from datetime import datetime
 
 class BestFightOddsScraperSelenium:
     def __init__(self, fighters):
@@ -108,6 +109,17 @@ class BestFightOddsScraperSelenium:
         return pd.DataFrame(odds_data)
 
 
+def parse_custom_date(date_string):
+    try:
+        return datetime.strptime(date_string, '%b %d %Y')
+    except ValueError:
+        try:
+            return datetime.strptime(
+                date_string.replace('th', '').replace('st', '').replace('nd', '').replace('rd', ''), '%b %d %Y')
+        except ValueError:
+            return pd.NaT
+
+
 def clean_fight_odds_from_csv(input_csv_path, output_csv_path):
     fight_odds_df = pd.read_csv(input_csv_path)
 
@@ -138,18 +150,37 @@ def clean_fight_odds_from_csv(input_csv_path, output_csv_path):
             i += 1
 
     modified_df = pd.DataFrame(modified_rows, columns=fight_odds_df.columns)
+
+    # Convert Date column to datetime using the custom parser
+    modified_df['Date'] = modified_df['Date'].apply(parse_custom_date)
+
+    # Extract fighter names and create a new column
+    modified_df['Fighter'] = modified_df['Matchup'].str.split(' vs ', expand=True)[0]
+
+    # Sort the DataFrame by Fighter name and then by Date
+    modified_df = modified_df.sort_values(['Fighter', 'Date'])
+
+    # Drop the temporary Fighter column
+    modified_df = modified_df.drop('Fighter', axis=1)
+
+    # Reset the index
+    modified_df = modified_df.reset_index(drop=True)
+
+    # Convert Date back to string format for CSV output
+    modified_df['Date'] = modified_df['Date'].dt.strftime('%b %d %Y')
+
     modified_df.to_csv(output_csv_path, index=False)
     return modified_df
 
 
 if __name__ == "__main__":
-    combined_rounds_df = pd.read_csv("data/combined_rounds.csv")
-    fighters = combined_rounds_df["fighter"].unique().tolist()
-    fighters = list(set(fighters))
-    scraper = BestFightOddsScraperSelenium(fighters)
-    odds_df = scraper.scrape()
-    odds_df.to_csv("data/odds data/fight_odds.csv", index=False)
-    print(odds_df)
+    # combined_rounds_df = pd.read_csv("data/combined_rounds.csv")
+    # fighters = combined_rounds_df["fighter"].unique().tolist()
+    # fighters = list(set(fighters))
+    # scraper = BestFightOddsScraperSelenium(fighters)
+    # odds_df = scraper.scrape()
+    # odds_df.to_csv("data/odds data/fight_odds.csv", index=False)
+    # print(odds_df)
 
     # Clean the fight odds data
     input_file = "data/odds data/fight_odds.csv"
