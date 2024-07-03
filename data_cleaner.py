@@ -172,7 +172,6 @@ def combine_rounds_stats(file_path):
                     odds = odds_data['odds']
                     odds_date = parse_date(odds_data['Date'])
                 else:
-                    # If key is not a tuple or doesn't have 2 elements, skip this iteration
                     continue
 
                 matchup_lower = matchup.lower()
@@ -184,27 +183,32 @@ def combine_rounds_stats(file_path):
                         odds_values[odds_type] = odds
                         break
 
-                    # Step 2: Compare dates
+                    # Step 2: Compare dates (including year)
                     if odds_date and fight_date:
-                        date_diff = abs((odds_date - fight_date).days)
-                        if date_diff <= 1:  # Allow for +/- 1 day difference
-                            odds_values[odds_type] = odds
-                            break
+                        if odds_date.year == fight_date.year:
+                            date_diff = abs((odds_date - fight_date).days)
+                            if date_diff <= 1:  # Allow for +/- 1 day difference
+                                odds_values[odds_type] = odds
+                                break
 
                     # Step 3: Compare first and last words
                     event_words = event.split()
                     event_name_words = event_name_lower.split()
                     if len(event_words) > 1 and len(event_name_words) > 1:
                         if event_words[0] == event_name_words[0] and event_words[-1] == event_name_words[-1]:
-                            odds_values[odds_type] = odds
-                            break
+                            # Additional check for year
+                            if odds_date and fight_date and odds_date.year == fight_date.year:
+                                odds_values[odds_type] = odds
+                                break
 
                     # Step 4: Check first word and second word (if second word is a number)
                     if len(event_words) > 1 and len(event_name_words) > 1:
                         if event_words[0] == event_name_words[0]:
                             if event_words[1].isdigit() and event_name_words[1].isdigit():
-                                odds_values[odds_type] = odds
-                                break
+                                # Additional check for year
+                                if odds_date and fight_date and odds_date.year == fight_date.year:
+                                    odds_values[odds_type] = odds
+                                    break
 
             if odds_type not in odds_values:
                 odds_values[odds_type] = None
