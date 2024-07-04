@@ -338,6 +338,11 @@ def combine_fighters_stats(file_path):
     return final_combined_df
 
 
+def calculate_vif(args):
+    data, feature_index = args
+    return variance_inflation_factor(data, feature_index)
+
+
 def remove_correlated_features(matchup_df, vif_threshold=10, noise_level=1e-5):
     # Select only the numeric columns
     numeric_columns = matchup_df.select_dtypes(include=[np.number]).columns
@@ -351,10 +356,28 @@ def remove_correlated_features(matchup_df, vif_threshold=10, noise_level=1e-5):
     noise = np.random.normal(0, noise_level, size=numeric_df.shape)
     numeric_df = numeric_df + noise
 
-    # Calculate VIF for each feature
-    vif = pd.DataFrame()
-    vif["Feature"] = numeric_df.columns
-    vif["VIF"] = [variance_inflation_factor(numeric_df.values, i) for i in range(len(numeric_df.columns))]
+    # Create a pool of worker processes
+    pool = multiprocessing.Pool()
+
+    # Calculate VIF for each feature using multiprocessing
+    total_features = len(numeric_df.columns)
+    vif_results = []
+    processed_features = 0
+
+    print(f"Calculating VIF for {total_features} features...")
+
+    for vif_result in pool.imap(calculate_vif, [(numeric_df.values, i) for i in range(total_features)]):
+        vif_results.append(vif_result)
+        processed_features += 1
+        print(f"\rProgress: {processed_features}/{total_features} ({processed_features / total_features * 100:.2f}%)", end="", flush=True)
+
+    print("\nVIF calculation completed.")
+
+    # Close the pool and wait for the worker processes to finish
+    pool.close()
+    pool.join()
+
+    vif = pd.DataFrame({"Feature": numeric_df.columns, "VIF": vif_results})
 
     # Find the columns to drop based on VIF threshold, excluding 'current_fight_open_odds_diff'
     columns_to_drop = vif[vif["VIF"] > vif_threshold]["Feature"].tolist()
@@ -530,105 +553,6 @@ def create_matchup_data(file_path, tester, name):
     else:
         matchup_df.to_csv(f'data/matchup data/matchup_data_{n_past_fights - 1}_avg_name.csv', index=False)
 
-    return matchup_df
-
-
-def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_fights, name=False):
-    df = pd.read_csv(file_path)
-
-    # Convert fighter names to lowercase
-    fighter_name = fighter_name.lower()
-    opponent_name = opponent_name.lower()
-    df['fighter'] = df['fighter'].str.lower()
-    df['fighter_b'] = df['fighter_b'].str.lower()
-
-    # Load the removed features from the file
-    with open('data/train test data/removed_features.txt', 'r') as file:
-        removed_features = file.read().split(',')
-
-    # Define the features to include for averaging, excluding identifiers, non-numeric features, and removed features
-    columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
-                          'result', 'winner', 'weight_class', 'scheduled_rounds',
-                          'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
-    features_to_include = [col for col in df.columns if
-                           col not in columns_to_exclude and col not in removed_features and 'age' not in col.lower()]
-
-    matchup_data = []
-
-    # Get the last 'n' fights for Fighter A and Fighter B before the specified matchup
-    fighter_df = df[(df['fighter'] == fighter_name)].sort_values(by='fight_date', ascending=False).head(n_past_fights)
-    opponent_df = df[(df['fighter'] == opponent_name)].sort_values(by='fight_date', ascending=False).head(n_past_fights)
-
-    # Check if either fighter doesn't have enough fights
-    if len(fighter_df) < n_past_fights or len(opponent_df) < n_past_fights:
-        print("Specific matchup failure: One of the fighters doesn't have enough fights.")
-        return None
-
-    # Calculate the average of the relevant columns over the past 'n' fights
-    fighter_features = fighter_df[features_to_include].mean().values
-    opponent_features = opponent_df[features_to_include].mean().values
-
-    # Create new columns for the specified features for each of the last three fights
-    results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
-    results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
-        3).values.flatten()
-
-    # Get user input for current fight odds and ages
-    current_fight_open_odds = float(input(f"Enter current open odds for {fighter_name}: "))
-    current_fight_open_odds_b = float(input(f"Enter current open odds for {opponent_name}: "))
-    current_fight_age = float(input(f"Enter current age for {fighter_name}: "))
-    current_fight_age_b = float(input(f"Enter current age for {opponent_name}: "))
-
-    # Calculate differentials
-    current_fight_open_odds_diff = current_fight_open_odds - current_fight_open_odds_b
-    current_fight_age_diff = current_fight_age - current_fight_age_b
-
-    # Add current fight information to the features
-    current_fight_info = [current_fight_open_odds, current_fight_open_odds_b, current_fight_open_odds_diff,
-                          current_fight_age, current_fight_age_b, current_fight_age_diff]
-
-    combined_features = np.concatenate(
-        [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_info])
-
-    # Get the most recent fight date among the averaged fights
-    most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
-
-    # Add the combined features, most recent fight date, and fighter names to the dataset
-    matchup_data.append([fighter_name, opponent_name, most_recent_date] + combined_features.tolist())
-
-    # Define column names for the new DataFrame
-    results_columns = []
-    for i in range(1, 4):
-        results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}",
-                            f"scheduled_rounds_fight_{i}"]
-        results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}",
-                            f"scheduled_rounds_b_fight_{i}"]
-
-    column_names = ['fighter', 'fighter_b', 'fight_date'] + \
-                   [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in features_to_include] + \
-                   [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include] + \
-                   results_columns + \
-                   ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
-                    'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff']
-
-    # Convert the matchup data into a DataFrame
-    matchup_df = pd.DataFrame(matchup_data, columns=column_names)
-
-    # Drop the specified columns from the removed features
-    matchup_df = matchup_df.drop(columns=[col for col in removed_features if col in matchup_df.columns], axis=1)
-
-    # Drop the 'fight_date' column
-    matchup_df = matchup_df.drop(['fight_date'], axis=1)
-
-    # Remove 'fighter' and 'fighter_b' columns if name is False
-    if not name:
-        matchup_df = matchup_df.drop(['fighter', 'fighter_b'], axis=1)
-
-    # Save the specific matchup data to a CSV file
-    csv_name = f'specific_matchup.csv'
-    matchup_df.to_csv(f'data/{csv_name}', index=False)
-
-    print("Specific matchup success. Data saved to CSV.")
     return matchup_df
 
 
