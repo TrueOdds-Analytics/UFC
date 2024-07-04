@@ -5,6 +5,8 @@ import multiprocessing
 from functools import partial
 import time
 import warnings
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -187,7 +189,7 @@ def combine_rounds_stats(file_path):
         print(f"Mapping for {column}: {mapping}")
 
     # Drop fights before 2014
-    # final_stats = final_stats[final_stats['fight_date'] >= '2014-01-01']
+    final_stats = final_stats[final_stats['fight_date'] >= '2014-01-01']
 
     # Load the cleaned fight odds data
     cleaned_odds_df = pd.read_csv('data/odds data/cleaned_fight_odds.csv')
@@ -336,21 +338,27 @@ def combine_fighters_stats(file_path):
     return final_combined_df
 
 
-def remove_correlated_features(matchup_df, correlation_threshold=0.95):
+def remove_correlated_features(matchup_df, vif_threshold=10, noise_level=1e-5):
     # Select only the numeric columns
     numeric_columns = matchup_df.select_dtypes(include=[np.number]).columns
     numeric_df = matchup_df[numeric_columns]
 
-    # Calculate the correlation matrix
-    corr_matrix = numeric_df.corr().abs()
+    # Replace inf and NaN values with the median of each column
+    numeric_df = numeric_df.replace([np.inf, -np.inf], np.nan)
+    numeric_df = numeric_df.fillna(numeric_df.median())
 
-    # Select the upper triangle of the correlation matrix
-    upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+    # Add a small amount of random noise to the data
+    noise = np.random.normal(0, noise_level, size=numeric_df.shape)
+    numeric_df = numeric_df + noise
 
-    # Find the columns to drop, excluding 'current_fight_open_odds_diff'
-    columns_to_drop = [column for column in upper_tri.columns
-                       if any(upper_tri[column] > correlation_threshold)
-                       and column != 'current_fight_open_odds_diff']
+    # Calculate VIF for each feature
+    vif = pd.DataFrame()
+    vif["Feature"] = numeric_df.columns
+    vif["VIF"] = [variance_inflation_factor(numeric_df.values, i) for i in range(len(numeric_df.columns))]
+
+    # Find the columns to drop based on VIF threshold, excluding 'current_fight_open_odds_diff'
+    columns_to_drop = vif[vif["VIF"] > vif_threshold]["Feature"].tolist()
+    columns_to_drop = [col for col in columns_to_drop if col != 'current_fight_open_odds_diff']
 
     # Drop the highly correlated columns
     matchup_df = matchup_df.drop(columns=columns_to_drop)
@@ -470,8 +478,8 @@ def create_matchup_data(file_path, tester, name):
             current_fight_odds = [odds_a, odds_b]
             current_fight_odds_diff = odds_a - odds_b
         else:
-            current_fight_odds = [None, None]
-            current_fight_odds_diff = None
+            current_fight_odds = [100, 100]
+            current_fight_odds_diff = 0
 
         current_fight_ages = [current_fight['age'], current_fight['age_b']]
         current_fight_age_diff = current_fight['age'] - current_fight['age_b']
@@ -625,7 +633,7 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('data/ufc_fight_processed.csv')
-    combine_fighters_stats("data/combined_rounds.csv")
+    # combine_rounds_stats('data/ufc_fight_processed.csv')
+    # combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
     split_train_val_test('data/matchup data/matchup_data_3_avg.csv')

@@ -157,7 +157,7 @@ def main():
     INITIAL_BANKROLL = 10000
     KELLY_FRACTION = 0.125
 
-    model_path = os.path.abspath('models/xgboost/model_0.6587_338_features.json')
+    model_path = os.path.abspath('models/xgboost/model_0.6827_338_features.json')
     print(f"Attempting to load model from: {model_path}")
     model = load_model(model_path)
 

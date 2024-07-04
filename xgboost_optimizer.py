@@ -202,7 +202,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         'verbosity': 0,
         'n_jobs': -1,
         'n_estimators': 1000,
-        'early_stopping_rounds': 50,
+        'early_stopping_rounds': 250,
         'eval_metric': ['logloss', 'auc'],  # Move this here
         'enable_categorical': True
     })
