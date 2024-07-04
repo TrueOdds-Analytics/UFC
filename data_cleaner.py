@@ -629,5 +629,5 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 if __name__ == "__main__":
     # combine_rounds_stats('data/ufc_fight_processed.csv')
     # combine_fighters_stats("data/combined_rounds.csv")
-    create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
+    # create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
     split_train_val_test('data/matchup data/matchup_data_3_avg.csv')

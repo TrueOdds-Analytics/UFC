@@ -39,7 +39,7 @@ def calculate_profit(odds, stake):
 
 def calculate_kelly_fraction(p, b, kelly_fraction):
     q = 1 - p
-    full_kelly = max(0, (p - q) / b)  # Ensure non-negative fraction
+    full_kelly = max(0, (p - (q / b))) # Ensure non-negative fraction
     return full_kelly * kelly_fraction  # Apply fractional Kelly
 
 
@@ -53,6 +53,8 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
     kelly_bankroll = initial_bankroll
     kelly_total_stake = 0
     kelly_total_return = 0
+
+    confident_bets = []
 
     for i in range(len(test_data)):
         true_winner = "Fighter A" if y_test.iloc[i] == 1 else "Fighter B"
@@ -81,6 +83,19 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
             kelly_total_stake += kelly_stake
             total_bets += 1
 
+            bet_result = {
+                'Fight': i + 1,
+                'True Winner': true_winner,
+                'Predicted Winner': predicted_winner,
+                'Confidence': f"{winning_probability:.2%}",
+                'Odds': odds,
+                'Fixed Stake Potential Profit': f"${profit:.2f}",
+                'Fractional Kelly Stake': f"${kelly_stake:.2f}",
+                'Fractional Kelly Potential Profit': f"${kelly_profit:.2f}"
+            }
+
+            confident_bets.append(bet_result)
+
             if predicted_winner == true_winner:
                 total_return += stake + profit
                 kelly_total_return += kelly_stake + kelly_profit
@@ -90,16 +105,17 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
             else:
                 kelly_bankroll -= kelly_stake
 
-            if confident_predictions <= 10:  # Print only the first 10 confident predictions
-                print(f"Fight {i + 1}")
-                print(f"True Winner: {true_winner}")
-                print(f"Predicted Winner: {predicted_winner}")
-                print(f"Confidence: {winning_probability:.2%}")
-                print(f"Odds: {odds}")
-                print(f"Fixed Stake Potential profit: ${profit:.2f}")
-                print(f"Fractional Kelly Stake: ${kelly_stake:.2f}")
-                print(f"Fractional Kelly Potential profit: ${kelly_profit:.2f}")
-                print("---")
+    # Print all confident bets
+    for bet in confident_bets:
+        print(f"Fight {bet['Fight']}")
+        print(f"True Winner: {bet['True Winner']}")
+        print(f"Predicted Winner: {bet['Predicted Winner']}")
+        print(f"Confidence: {bet['Confidence']}")
+        print(f"Odds: {bet['Odds']}")
+        print(f"Fixed Stake Potential profit: {bet['Fixed Stake Potential Profit']}")
+        print(f"Fractional Kelly Stake: {bet['Fractional Kelly Stake']}")
+        print(f"Fractional Kelly Potential profit: {bet['Fractional Kelly Potential Profit']}")
+        print("---")
 
     return (total_stake, total_return, correct_bets, total_bets, confident_predictions,
             correct_confident_predictions, kelly_total_stake, kelly_total_return, kelly_bankroll)
@@ -113,7 +129,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
     roi = (net_profit / total_stake) * 100 if total_stake > 0 else 0
     kelly_net_profit = kelly_final_bankroll - initial_bankroll
     kelly_roi = (kelly_net_profit / initial_bankroll) * 100
-
+    print("-------------------------------------------------------------------------")
     print(f"\nConfident Prediction Accuracy (≥{confidence_threshold:.0%} confidence): {confident_accuracy:.2%}")
     print(f"\nBetting Results ({confidence_threshold:.0%} confidence threshold):")
     print(f"Total fights: {total_fights}")
@@ -153,12 +169,11 @@ def print_overall_metrics(y_test, y_pred, y_pred_proba):
 
 
 def main():
-    CONFIDENCE_THRESHOLD = 0.50
+    CONFIDENCE_THRESHOLD = 0.65
     INITIAL_BANKROLL = 10000
-    KELLY_FRACTION = 0.125
+    KELLY_FRACTION = 1
 
-    model_path = os.path.abspath('models/xgboost/model_0.6635_19_features.json')
-    print(f"Attempting to load model from: {model_path}")
+    model_path = os.path.abspath('models/xgboost/model_0.7212_338_features.json')
     model = load_model(model_path)
 
     test_data = pd.read_csv('data/train test data/test_data.csv')

@@ -183,15 +183,15 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
 
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 1e-3, 150.0, log=True),
-            'alpha': trial.suggest_float('alpha', 1e-3, 150.0, log=True),
-            'min_child_weight': trial.suggest_float('min_child_weight', 0.1, 10.0),
-            'max_depth': trial.suggest_int('max_depth', 3, 10),
+            'lambda': trial.suggest_float('lambda', 30, 35, log=True),
+            'alpha': trial.suggest_float('alpha', 30, 35, log=True),
+            'min_child_weight': trial.suggest_float('min_child_weight', 1, 10.0),
+            'max_depth': trial.suggest_int('max_depth', 1, 6),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
             'subsample': trial.suggest_float('subsample', 0.5, 1.0),
             'colsample_bytree': trial.suggest_float('colsample_bytree', 0.5, 1.0),
             'gamma': trial.suggest_float('gamma', 1e-3, 10.0, log=True),
-            'eta': trial.suggest_float('eta', 0.01, 0.3, log=True),
+            'eta': trial.suggest_float('eta', 0.01, 0.1, log=True),
             'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
         }
 
@@ -219,7 +219,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     return accuracy
 
 
-def optimize_model(X_train, X_val, y_train, y_val, n_rounds=5, n_trials_per_round=2500):
+def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=10000):
     global best_accuracy, best_auc
 
     for round in range(n_rounds):
@@ -312,10 +312,10 @@ if __name__ == "__main__":
     # print("SHAP graph creation completed.")
     # print("--------------------")
 
-    # n_features = 25
+    # n_features = 100
     #
     # X_train, X_val, y_train, y_val = get_train_val_data()
-    # model_path = 'models/xgboost/model_0.7452_338_features.json'
+    # model_path = 'models/xgboost/model_0.6683_338_features.json'
     # retrained_best_params, retrained_accuracy = get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val,
     #                                                                          n_features)
     #
