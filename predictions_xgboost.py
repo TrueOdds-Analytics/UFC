@@ -1,23 +1,21 @@
-from data_cleaner import create_specific_matchup_data
+from data_cleaner import create_matchup_data
 import xgboost as xgb
+import pandas as pd
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 
 def preprocess_data(data):
     # Convert specified columns to category type
     category_columns = [
         'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
-        'result_b_fight_1', 'winner_b_fight_1', 'scheduled_rounds_b_fight_1',
-        'result_fight_2', 'winner_fight_2', 'scheduled_rounds_fight_2',
-        'result_b_fight_2', 'winner_b_fight_2', 'scheduled_rounds_b_fight_2',
-        'result_fight_3', 'winner_fight_3', 'scheduled_rounds_fight_3',
-        'result_b_fight_3', 'winner_b_fight_3', 'scheduled_rounds_b_fight_3'
+        'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
+        'result_fight_2', 'winner_fight_2', 'weight_class_fight_2', 'scheduled_rounds_fight_2',
+        'result_b_fight_2', 'winner_b_fight_2', 'weight_class_b_fight_2', 'scheduled_rounds_b_fight_2',
+        'result_fight_3', 'winner_fight_3', 'weight_class_fight_3', 'scheduled_rounds_fight_3',
+        'result_b_fight_3', 'winner_b_fight_3', 'weight_class_b_fight_3', 'scheduled_rounds_b_fight_3'
     ]
 
     data[category_columns] = data[category_columns].astype("category")
-
-    # Remove 'fighter' and 'fighter_b' columns
-    data = data.drop(['fighter', 'fighter_b'], axis=1)
-
     return data
 
 
@@ -27,44 +25,73 @@ def load_model(model_path):
     return model
 
 
-def predict_outcome(model, specific_data, fighter_name, opponent_name):
-    # Preprocess the specific data
-    specific_data = preprocess_data(specific_data)
-
+def predict_outcome(model, specific_data):
     # Make predictions using the loaded model
     predictions = model.predict(specific_data)
     probabilities = model.predict_proba(specific_data)
 
-    if predictions[0] == 1:
-        print(f"{fighter_name} wins")
-        print(f"Probability of {fighter_name} winning: {probabilities[0][1]:.2%}")
-    else:
-        print(f"{opponent_name} wins")
-        print(f"Probability of {opponent_name} winning: {probabilities[0][0]:.2%}")
+    return predictions[0], probabilities[0]
 
-    return None
+
+def evaluate_model(model, test_data, test_labels):
+    predictions = []
+    probabilities = []
+
+    for _, row in test_data.iterrows():
+        pred, prob = predict_outcome(model, row.to_frame().T)
+        predictions.append(pred)
+        probabilities.append(prob)
+
+    predictions = pd.Series(predictions)
+
+    # Calculate evaluation metrics
+    accuracy = accuracy_score(test_labels, predictions)
+    precision = precision_score(test_labels, predictions)
+    recall = recall_score(test_labels, predictions)
+    f1 = f1_score(test_labels, predictions)
+
+    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall: {recall:.4f}")
+    print(f"F1 Score: {f1:.4f}")
+
+    return predictions, probabilities
 
 
 if __name__ == "__main__":
     # Load the trained model
-    model_path = 'models/xgboost/model_0.7723_0_features_removed.json'  # Replace with the actual model file path
+    model_path = 'models/xgboost/model_0.7260_338_features.json'  # Replace with the actual model file path
     model = load_model(model_path)
 
-    while True:
-        # Get fighter names from user input
-        fighter_name = input("Enter the name of Fighter A: ")
-        if fighter_name.lower() == 'q':
-            break
+    # Load and preprocess the test set
+    test_data = pd.read_csv('data/train test data/test_data.csv')
 
-        opponent_name = input("Enter the name of Fighter B: ")
+    # Separate features and labels
+    test_labels = test_data['winner']
+    test_features = test_data.drop('winner', axis=1)
 
-        # Generate specific matchup data
-        specific_data = create_specific_matchup_data('data/combined_sorted_fighter_stats.csv', fighter_name,
-                                                     opponent_name, n_past_fights=3, name=True)
+    # Preprocess the test features
+    test_features = preprocess_data(test_features)
 
-        if specific_data is None:
-            print("Insufficient data for the specified fighters. Please try again.")
-            continue
+    # Evaluate the model on the test set
+    predictions, probabilities = evaluate_model(model, test_features, test_labels)
 
-        # Predict the outcome for the specific matchup
-        predict_outcome(model, specific_data, fighter_name, opponent_name)
+    # Print some example predictions
+    print("\nExample predictions:")
+    for i in range(min(10, len(test_data))):
+        true_winner = "Fighter A" if test_labels.iloc[i] == 1 else "Fighter B"
+        predicted_winner = "Fighter A" if predictions[i] == 1 else "Fighter B"
+        winning_probability = probabilities[i][1] if predictions[i] == 1 else probabilities[i][0]
+
+        print(f"Fight {i + 1}")
+        print(f"True Winner: {true_winner}")
+        print(f"Predicted Winner: {predicted_winner}")
+        print(f"Probability of {predicted_winner} winning: {winning_probability:.2%}")
+        print("---")
+
+    # Calculate overall prediction accuracy
+    correct_predictions = sum(predictions == test_labels)
+    total_predictions = len(test_labels)
+    overall_accuracy = correct_predictions / total_predictions
+
+    print(f"\nOverall Prediction Accuracy: {overall_accuracy:.2%}")

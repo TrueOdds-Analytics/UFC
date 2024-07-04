@@ -110,7 +110,7 @@ def combine_rounds_stats(file_path):
 
     # Identify numeric columns for aggregation
     numeric_columns = ufc_stats.select_dtypes(include='number').columns
-    numeric_columns = numeric_columns.drop(['id', 'last_round', 'attendance', 'age'])
+    numeric_columns = numeric_columns.drop(['id', 'last_round', 'age'])
 
     fighter_identifier = 'fighter'
 
@@ -166,8 +166,9 @@ def combine_rounds_stats(file_path):
     final_columns = ['fighter', 'age'] + list(common_columns) + career_columns
     final_stats = final_stats[final_columns]
 
-    final_stats = final_stats[~final_stats['winner'].isin(['NC', 'D'])]
-    final_stats = final_stats[~final_stats['result'].isin(['DQ', 'Decision - Split'])]
+    final_stats = final_stats[~final_stats['winner'].isin(['NC/NC', 'D/D'])]
+    final_stats = final_stats[~final_stats['result'].isin(['DQ', 'Decision - Split ', 'DQ ', 'Could Not Continue ',
+                                                           'Overturned ', 'Other '])]
 
     # Consolidate weight classes
     weight_class_mapping = {
@@ -186,7 +187,7 @@ def combine_rounds_stats(file_path):
         print(f"Mapping for {column}: {mapping}")
 
     # Drop fights before 2014
-    final_stats = final_stats[final_stats['fight_date'] >= '2014-01-01']
+    # final_stats = final_stats[final_stats['fight_date'] >= '2014-01-01']
 
     # Load the cleaned fight odds data
     cleaned_odds_df = pd.read_csv('data/odds data/cleaned_fight_odds.csv')
@@ -357,41 +358,47 @@ def remove_correlated_features(matchup_df, correlation_threshold=0.95):
     return matchup_df, columns_to_drop
 
 
-def split_train_val(matchup_data_file):
+def split_train_val_test(matchup_data_file):
     # Load the matchup data
     matchup_df = pd.read_csv(matchup_data_file)
 
     # Remove correlated features
     matchup_df, removed_features = remove_correlated_features(matchup_df)
 
-    # Create a separate DataFrame with fight dates
-    fight_dates_df = matchup_df[['fight_date']]
-    fight_dates_df = fight_dates_df.sort_values(by='fight_date', ascending=True)
+    # Create test set from fights on and after 2024-04-13
+    test_data = matchup_df[matchup_df['current_fight_date'] >= '2024-04-13']
+    remaining_data = matchup_df[matchup_df['current_fight_date'] < '2024-04-13']
 
-    # Calculate the index to split the data into train and validation sets
-    split_index = int(len(fight_dates_df) * 0.90)
+    # Sort remaining data by fight_date
+    remaining_data = remaining_data.sort_values(by='fight_date', ascending=True)
 
-    # Get the date threshold for splitting the data
-    split_date = fight_dates_df.iloc[split_index]['fight_date']
+    # Calculate the index to split the remaining data into train and validation sets
+    split_index = int(len(remaining_data) * 0.90)
 
-    # Split the data into train and validation sets based on the fight date
-    train_data = matchup_df[matchup_df['fight_date'] < split_date]
-    val_data = matchup_df[matchup_df['fight_date'] >= split_date]
+    # Get the date threshold for splitting the remaining data
+    split_date = remaining_data.iloc[split_index]['fight_date']
 
-    # Drop the fight_date column after using it for splitting
-    train_data = train_data.drop(columns=['fight_date'])
-    val_data = val_data.drop(columns=['fight_date'])
+    # Split the remaining data into train and validation sets based on the fight date
+    train_data = remaining_data[remaining_data['fight_date'] < split_date]
+    val_data = remaining_data[remaining_data['fight_date'] >= split_date]
 
-    # Save the train and validation data to CSV files
+    # Drop the fight_date and current_fight_date columns after using them for splitting
+    columns_to_drop = ['fight_date', 'current_fight_date']
+    train_data = train_data.drop(columns=columns_to_drop)
+    val_data = val_data.drop(columns=columns_to_drop)
+    test_data = test_data.drop(columns=columns_to_drop)
+
+    # Save the train, validation, and test data to CSV files
     train_data.to_csv('data/train test data/train_data.csv', index=False)
     val_data.to_csv('data/train test data/val_data.csv', index=False)
+    test_data.to_csv('data/train test data/test_data.csv', index=False)
 
     # Save the removed features to a file
     with open('data/train test data/removed_features.txt', 'w') as file:
         file.write(','.join(removed_features))
 
-    print(f"Train and validation data saved successfully. {len(removed_features)} correlated features were removed.")
-    print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}")
+    print(f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
+    print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}, Test set size: {len(test_data)}")
 
 
 def round_to_nearest_5(x):
@@ -449,7 +456,6 @@ def create_matchup_data(file_path, tester, name):
 
         labels = current_fight[method_columns].values
 
-        # Replace the existing odds calculation block with this:
         if pd.notna(current_fight['open_odds']) and pd.notna(current_fight['open_odds_b']):
             current_fight_odds = [current_fight['open_odds'], current_fight['open_odds_b']]
             current_fight_odds_diff = current_fight['open_odds'] - current_fight['open_odds_b']
@@ -464,8 +470,8 @@ def create_matchup_data(file_path, tester, name):
             current_fight_odds = [odds_a, odds_b]
             current_fight_odds_diff = odds_a - odds_b
         else:
-            current_fight_odds = [0, 0]
-            current_fight_odds_diff = 0
+            current_fight_odds = [None, None]
+            current_fight_odds_diff = None
 
         current_fight_ages = [current_fight['age'], current_fight['age_b']]
         current_fight_age_diff = current_fight['age'] - current_fight['age_b']
@@ -476,11 +482,12 @@ def create_matchup_data(file_path, tester, name):
         combined_row = np.concatenate([combined_features, labels])
 
         most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
+        current_fight_date = current_fight['fight_date']  # Get the current fight date
 
         if not name:
-            matchup_data.append([most_recent_date] + combined_row.tolist())
+            matchup_data.append([most_recent_date] + combined_row.tolist() + [current_fight_date])
         else:
-            matchup_data.append([fighter_name, opponent_name, most_recent_date] + combined_row.tolist())
+            matchup_data.append([fighter_name, opponent_name, most_recent_date] + combined_row.tolist() + [current_fight_date])
 
     results_columns = []
     for i in range(1, 4):
@@ -497,7 +504,7 @@ def create_matchup_data(file_path, tester, name):
                                           'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
                                           'current_fight_age_diff'] + \
-                       [f"{method}" for method in method_columns]
+                       [f"{method}" for method in method_columns] + ['current_fight_date']
     else:
         column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights - 1}" for
                                                                  feature in features_to_include] + \
@@ -506,7 +513,7 @@ def create_matchup_data(file_path, tester, name):
                                           'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
                                           'current_fight_age_diff'] + \
-                       [f"{method}" for method in method_columns]
+                       [f"{method}" for method in method_columns] + ['current_fight_date']
 
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
 
@@ -618,7 +625,7 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    # combine_rounds_stats('data/UFC_STATS_ORIGINAL.csv')
-    # combine_fighters_stats("data/combined_rounds.csv")
+    combine_rounds_stats('data/ufc_fight_processed.csv')
+    combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
-    split_train_val('data/matchup data/matchup_data_3_avg.csv')
+    split_train_val_test('data/matchup data/matchup_data_3_avg.csv')

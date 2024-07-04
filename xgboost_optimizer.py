@@ -304,18 +304,18 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
-    #
+
     # print("Creating SHAP graph for the best model")
     # X_train, X_val, y_train, y_val = get_train_val_data()
-    # model_path = f'models/xgboost/model_0.6415_328_features.json'
+    # model_path = f'models/xgboost/model_0.7452_338_features.json'
     # create_shap_graph(model_path, X_train)
     # print("SHAP graph creation completed.")
     # print("--------------------")
 
-    # n_features = 200
+    # n_features = 25
     #
     # X_train, X_val, y_train, y_val = get_train_val_data()
-    # model_path = 'models/xgboost/model_0.7547_328_features.json'
+    # model_path = 'models/xgboost/model_0.7452_338_features.json'
     # retrained_best_params, retrained_accuracy = get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val,
     #                                                                          n_features)
     #
