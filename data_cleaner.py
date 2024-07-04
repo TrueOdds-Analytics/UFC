@@ -454,6 +454,7 @@ def calculate_complementary_odd(odd):
 
 def create_matchup_data(file_path, tester, name):
     df = pd.read_csv(file_path)
+    df = df.drop(['id'], axis=1)
 
     columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
                           'result', 'winner', 'weight_class', 'scheduled_rounds',
