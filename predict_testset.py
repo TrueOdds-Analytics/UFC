@@ -129,7 +129,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
     roi = (net_profit / total_stake) * 100 if total_stake > 0 else 0
     kelly_net_profit = kelly_final_bankroll - initial_bankroll
     kelly_roi = (kelly_net_profit / initial_bankroll) * 100
-    print("-------------------------------------------------------------------------")
+    print("________________________________________________________________________")
     print(f"\nConfident Prediction Accuracy (≥{confidence_threshold:.0%} confidence): {confident_accuracy:.2%}")
     print(f"\nBetting Results ({confidence_threshold:.0%} confidence threshold):")
     print(f"Total fights: {total_fights}")
