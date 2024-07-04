@@ -394,23 +394,24 @@ def split_train_val(matchup_data_file):
     print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}")
 
 
-def calculate_odds(odds):
-    if pd.isna(odds):
-        return 0, 0
+def round_to_nearest_5(x):
+    return round(x / 5) * 5
 
-    if odds > 0:
-        win_percentage = 100 / (odds + 100)
+
+def calculate_complementary_odd(odd):
+    if odd > 0:
+        prob = 100 / (odd + 100)
     else:
-        win_percentage = abs(odds) / (abs(odds) + 100)
+        prob = abs(odd) / (abs(odd) + 100)
 
-    opponent_percentage = 1 - win_percentage
+    complementary_prob = 1.045 - prob  # Make probabilities sum to 104.5%
 
-    if opponent_percentage > 0.5:
-        opponent_odds = -100 * opponent_percentage / (1 - opponent_percentage)
+    if complementary_prob >= 0.5:
+        complementary_odd = -100 * complementary_prob / (1 - complementary_prob)
     else:
-        opponent_odds = 100 * (1 - opponent_percentage) / opponent_percentage
+        complementary_odd = 100 * (1 - complementary_prob) / complementary_prob
 
-    return odds, opponent_odds
+    return round_to_nearest_5(complementary_odd)
 
 
 def create_matchup_data(file_path, tester, name):
@@ -448,17 +449,20 @@ def create_matchup_data(file_path, tester, name):
 
         labels = current_fight[method_columns].values
 
-        # Handle odds calculation
+        # Replace the existing odds calculation block with this:
         if pd.notna(current_fight['open_odds']) and pd.notna(current_fight['open_odds_b']):
             current_fight_odds = [current_fight['open_odds'], current_fight['open_odds_b']]
             current_fight_odds_diff = current_fight['open_odds'] - current_fight['open_odds_b']
         elif pd.notna(current_fight['open_odds']):
-            current_fight_odds = calculate_odds(current_fight['open_odds'])
-            current_fight_odds_diff = current_fight_odds[0] - current_fight_odds[1]
+            odds_a = round_to_nearest_5(current_fight['open_odds'])
+            odds_b = calculate_complementary_odd(odds_a)
+            current_fight_odds = [odds_a, odds_b]
+            current_fight_odds_diff = odds_a - odds_b
         elif pd.notna(current_fight['open_odds_b']):
-            reversed_odds = calculate_odds(current_fight['open_odds_b'])
-            current_fight_odds = [reversed_odds[1], reversed_odds[0]]  # Swap the order
-            current_fight_odds_diff = current_fight_odds[0] - current_fight_odds[1]
+            odds_b = round_to_nearest_5(current_fight['open_odds_b'])
+            odds_a = calculate_complementary_odd(odds_b)
+            current_fight_odds = [odds_a, odds_b]
+            current_fight_odds_diff = odds_a - odds_b
         else:
             current_fight_odds = [0, 0]
             current_fight_odds_diff = 0
@@ -614,7 +618,7 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('data/UFC_STATS_ORIGINAL.csv')
-    combine_fighters_stats("data/combined_rounds.csv")
+    # combine_rounds_stats('data/UFC_STATS_ORIGINAL.csv')
+    # combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
     split_train_val('data/matchup data/matchup_data_3_avg.csv')

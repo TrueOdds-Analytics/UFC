@@ -147,6 +147,7 @@ def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
 
     return model, accuracy, auc, train_losses, val_losses, train_auc, val_auc
 
+
 def adjust_hyperparameter_ranges(study, num_best_trials=20):
     trials = sorted(study.trials, key=lambda t: t.value, reverse=True)
     best_trials = trials[:num_best_trials]
@@ -218,7 +219,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     return accuracy
 
 
-def optimize_model(X_train, X_val, y_train, y_val, n_rounds=10, n_trials_per_round=2500):
+def optimize_model(X_train, X_val, y_train, y_val, n_rounds=5, n_trials_per_round=2500):
     global best_accuracy, best_auc
 
     for round in range(n_rounds):
@@ -254,7 +255,11 @@ def optimize_model(X_train, X_val, y_train, y_val, n_rounds=10, n_trials_per_rou
 
     return study.best_trial
 
-def get_top_features_and_retrain(model, X_train, X_val, y_train, y_val, n_features):
+def get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val, n_features):
+    # Load the model from the file
+    model = xgb.XGBClassifier(enable_categorical=True)
+    model.load_model(model_path)
+
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_train)
 
@@ -299,16 +304,19 @@ if __name__ == "__main__":
 
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
-
+    #
     # print("Creating SHAP graph for the best model")
     # X_train, X_val, y_train, y_val = get_train_val_data()
     # model_path = f'models/xgboost/model_0.6415_328_features.json'
     # create_shap_graph(model_path, X_train)
     # print("SHAP graph creation completed.")
     # print("--------------------")
+
+    # n_features = 200
     #
-    # n_features = 50  # You can change this to any number you want
-    # retrained_best_params, retrained_accuracy = get_top_features_and_retrain(best_model, X_train, X_val, y_train, y_val,
+    # X_train, X_val, y_train, y_val = get_train_val_data()
+    # model_path = 'models/xgboost/model_0.7547_328_features.json'
+    # retrained_best_params, retrained_accuracy = get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val,
     #                                                                          n_features)
     #
     # print("--------------------")

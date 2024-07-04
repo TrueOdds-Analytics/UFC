@@ -66,8 +66,6 @@ def merge_csv_files(file1_path, file2_path, file3_path, output_file_path):
         merged_df.to_csv(output_file_path, index=False)
 
         print("Files merged successfully!")
-    except FileNotFoundError:
-        print("One or more input files not found.")
     except Exception as e:
         print(f"An error occurred: {str(e)}")
 
@@ -181,8 +179,6 @@ def process_merged_csv(merged_file_path, processed_file_path):
         print("CSV file processed successfully!")
     except FileNotFoundError:
         print("Merged file not found.")
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
 
 
 if __name__ == "__main__":
