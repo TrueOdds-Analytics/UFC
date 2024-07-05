@@ -173,7 +173,7 @@ def main():
     INITIAL_BANKROLL = 10000
     KELLY_FRACTION = 1
 
-    model_path = os.path.abspath('models/xgboost/model_0.7212_338_features.json')
+    model_path = os.path.abspath('models/xgboost/model_0.7308_338_features.json')
     model = load_model(model_path)
 
     test_data = pd.read_csv('data/train test data/test_data.csv')
