@@ -38,6 +38,9 @@ def get_train_val_data():
     val_labels = val_data['winner']
     train_data = train_data.drop(['winner'], axis=1)
     val_data = val_data.drop(['winner'], axis=1)
+    columns_to_drop = ['fighter', 'fighter_b', 'fight_date', 'current_fight_date']
+    train_data = train_data.drop(columns=columns_to_drop)
+    val_data = val_data.drop(columns=columns_to_drop)
 
     # Shuffle data
     train_data = train_data.sample(frac=1, random_state=42).reset_index(drop=True)
@@ -69,7 +72,7 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, 
     ax1.set_xlabel('Number of iterations')
     ax1.set_ylabel('Log Loss')
     ax1.set_title(
-        f'Learning Curves - Log Loss (Features removed: {features_removed}, Test Acc: {accuracy:.4f}, Test AUC: {auc:.4f})')
+        f'Learning Curves - Log Loss (Features removed: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
     ax1.legend()
     ax1.grid()
 
@@ -78,7 +81,7 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, 
     ax2.set_xlabel('Number of iterations')
     ax2.set_ylabel('AUC')
     ax2.set_title(
-        f'Learning Curves - AUC (Features removed: {features_removed}, Test Acc: {accuracy:.4f}, Test AUC: {auc:.4f})')
+        f'Learning Curves - AUC (Features removed: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
     ax2.legend()
     ax2.grid()
 
