@@ -367,9 +367,9 @@ def split_train_val_test(matchup_data_file):
     # Remove correlated features
     matchup_df, removed_features = remove_correlated_features(matchup_df)
 
-    # Create test set from fights on and after 2024-04-13
-    test_data = matchup_df[matchup_df['current_fight_date'] >= '2024-04-13']
-    remaining_data = matchup_df[matchup_df['current_fight_date'] < '2024-04-13']
+    # Create test set from fights on and after 2024-01-01
+    test_data = matchup_df[matchup_df['current_fight_date'] >= '2024-01-01']
+    remaining_data = matchup_df[matchup_df['current_fight_date'] < '2024-01-01']
 
     # Sort remaining data by fight_date
     remaining_data = remaining_data.sort_values(by='fight_date', ascending=True)
@@ -406,7 +406,6 @@ def split_train_val_test(matchup_data_file):
 
     print(f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
     print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}, Test set size: {len(test_data)}")
-
 
 def round_to_nearest_5(x):
     return round(x / 5) * 5
@@ -634,5 +633,5 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 if __name__ == "__main__":
     # combine_rounds_stats('data/ufc_fight_processed.csv')
     # combine_fighters_stats("data/combined_rounds.csv")
-    # create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, False)
+    # create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')

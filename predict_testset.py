@@ -45,12 +45,13 @@ def calculate_kelly_fraction(p, b, kelly_fraction):
 
 def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial_bankroll=10000, kelly_fraction=0.125, fixed_bet_fraction=0.001):
     current_bankroll = initial_bankroll
-    total_return = 0
+    total_volume = 0
     correct_bets = 0
     total_bets = 0
     confident_predictions = 0
     correct_confident_predictions = 0
     kelly_bankroll = initial_bankroll
+    kelly_total_volume = 0
 
     confident_bets = []
     processed_fights = set()
@@ -75,6 +76,7 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
             # Compounding Fixed Fraction Betting
             stake = current_bankroll * fixed_bet_fraction
             profit = calculate_profit(odds, stake)
+            total_volume += stake
 
             # Fractional Kelly Criterion Betting
             if odds > 0:
@@ -84,6 +86,7 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
             kelly_bet_size = calculate_kelly_fraction(winning_probability, b, kelly_fraction)
             kelly_stake = kelly_bankroll * kelly_bet_size
             kelly_profit = calculate_profit(odds, kelly_stake)
+            kelly_total_volume += kelly_stake
 
             total_bets += 1
 
@@ -106,7 +109,6 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
             if predicted_winner == true_winner:
                 current_bankroll += profit
-                total_return += stake + profit
                 kelly_bankroll += kelly_profit
                 correct_bets += 1
                 correct_confident_predictions += 1
@@ -127,13 +129,13 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
         print(f"Fractional Kelly Potential profit: {bet['Fractional Kelly Potential Profit']}")
         print("---")
 
-    return (current_bankroll, total_return, correct_bets, total_bets, confident_predictions,
-            correct_confident_predictions, kelly_bankroll)
+    return (current_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
+            correct_confident_predictions, kelly_bankroll, kelly_total_volume)
 
 
 def print_betting_results(total_fights, confident_predictions, correct_confident_predictions, total_bets, correct_bets,
-                          initial_bankroll, final_bankroll, total_return, confidence_threshold,
-                          kelly_final_bankroll, kelly_fraction, fixed_bet_fraction):
+                          initial_bankroll, final_bankroll, total_volume, confidence_threshold,
+                          kelly_final_bankroll, kelly_total_volume, kelly_fraction, fixed_bet_fraction):
     confident_accuracy = correct_confident_predictions / confident_predictions if confident_predictions > 0 else 0
     net_profit = final_bankroll - initial_bankroll
     roi = (net_profit / initial_bankroll) * 100
@@ -152,7 +154,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
     print("\nCompounding Fixed Fraction Betting Results:")
     print(f"Initial bankroll: ${initial_bankroll:.2f}")
     print(f"Final bankroll: ${final_bankroll:.2f}")
-    print(f"Total return: ${total_return:.2f}")
+    print(f"Total volume: ${total_volume:.2f}")
     print(f"Net profit: ${net_profit:.2f}")
     print(f"ROI (based on initial bankroll): {roi:.2f}%")
     print(f"Fixed bet fraction: {fixed_bet_fraction:.3f}")
@@ -160,6 +162,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
     print(f"\nFractional Kelly Criterion Betting Results (fraction: {kelly_fraction:.3f}):")
     print(f"Initial bankroll: ${initial_bankroll:.2f}")
     print(f"Final bankroll: ${kelly_final_bankroll:.2f}")
+    print(f"Total volume: ${kelly_total_volume:.2f}")
     print(f"Net profit: ${kelly_net_profit:.2f}")
     print(f"ROI (based on initial bankroll): {kelly_roi:.2f}%")
 
@@ -179,7 +182,7 @@ def print_overall_metrics(y_test, y_pred, y_pred_proba):
     print(f"AUC: {overall_auc:.4f}")
 
 
-if __name__ == "__main__":
+def main():
     CONFIDENCE_THRESHOLD = 0.65
     INITIAL_BANKROLL = 10000
     KELLY_FRACTION = 1
@@ -210,14 +213,18 @@ if __name__ == "__main__":
     test_data_with_display = pd.concat([X_test, display_data], axis=1)
 
     print(f"\nExample predictions and bets ({CONFIDENCE_THRESHOLD:.0%} confidence threshold):")
-    (final_bankroll, total_return, correct_bets, total_bets, confident_predictions,
-     correct_confident_predictions, kelly_final_bankroll) = evaluate_bets(
+    (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
+     correct_confident_predictions, kelly_final_bankroll, kelly_total_volume) = evaluate_bets(
         y_test, y_pred_proba, test_data_with_display, CONFIDENCE_THRESHOLD, INITIAL_BANKROLL,
         KELLY_FRACTION, FIXED_BET_FRACTION)
 
     print_betting_results(len(test_data), confident_predictions, correct_confident_predictions, total_bets,
-                          correct_bets, INITIAL_BANKROLL, final_bankroll, total_return, CONFIDENCE_THRESHOLD,
-                          kelly_final_bankroll, KELLY_FRACTION, FIXED_BET_FRACTION)
+                          correct_bets, INITIAL_BANKROLL, final_bankroll, total_volume, CONFIDENCE_THRESHOLD,
+                          kelly_final_bankroll, kelly_total_volume, KELLY_FRACTION, FIXED_BET_FRACTION)
 
     y_pred = (y_pred_proba[:, 1] > 0.5).astype(int)
     print_overall_metrics(y_test, y_pred, y_pred_proba)
+
+
+if __name__ == "__main__":
+    main()
