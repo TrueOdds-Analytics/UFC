@@ -180,14 +180,14 @@ def adjust_hyperparameter_ranges(study, num_best_trials=20):
     return new_ranges
 
 def objective(trial, X_train, X_val, y_train, y_val, params=None):
-    global should_pause, best_accuracy, best_auc
+    global should_pause, best_accuracy, best_auc_diff
     while should_pause:
         time.sleep(1)
 
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 30, 35, log=True),
-            'alpha': trial.suggest_float('alpha', 30, 35, log=True),
+            'lambda': trial.suggest_float('lambda', 35, 40, log=True),
+            'alpha': trial.suggest_float('alpha', 35, 40, log=True),
             'min_child_weight': trial.suggest_float('min_child_weight', 1, 10.0),
             'max_depth': trial.suggest_int('max_depth', 1, 6),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
@@ -206,16 +206,19 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         'n_jobs': -1,
         'n_estimators': 1000,
         'early_stopping_rounds': 250,
-        'eval_metric': ['logloss', 'auc'],  # Move this here
+        'eval_metric': ['logloss', 'auc'],
         'enable_categorical': True
     })
 
     model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val)
 
-    if accuracy > best_accuracy or (accuracy == best_accuracy and (auc is None or auc > best_auc)):
+    # Calculate the difference between train and validation AUC
+    auc_diff = abs(train_auc[-1] - val_auc[-1])
+
+    if accuracy > 0.7 and (best_auc_diff is None or auc_diff < best_auc_diff):
         best_accuracy = accuracy
-        best_auc = auc if auc is not None else 0
-        model_filename = f'models/xgboost/model_{accuracy:.4f}_{len(X_train.columns)}_features.json'
+        best_auc_diff = auc_diff
+        model_filename = f'models/xgboost/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy, auc if auc is not None else 0)
 
