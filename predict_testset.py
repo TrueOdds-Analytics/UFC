@@ -43,7 +43,8 @@ def calculate_kelly_fraction(p, b, kelly_fraction):
     return full_kelly * kelly_fraction  # Apply fractional Kelly
 
 
-def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial_bankroll=10000, kelly_fraction=0.125, fixed_bet_fraction=0.001):
+def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial_bankroll=10000, kelly_fraction=0.125,
+                  fixed_bet_fraction=0.001, default_bet=0.05, min_odds=-300):
     current_bankroll = initial_bankroll
     total_volume = 0
     correct_bets = 0
@@ -64,13 +65,13 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
         processed_fights.add(fight_id)
 
-        true_winner = "Fighter A" if y_test.iloc[i] == 1 else "Fighter B"
+        true_winner = test_data.iloc[i]['fighter'] if y_test.iloc[i] == 1 else test_data.iloc[i]['fighter_b']
         winning_probability = max(y_pred_proba[i])
-        predicted_winner = "Fighter A" if y_pred_proba[i][1] > y_pred_proba[i][0] else "Fighter B"
+        predicted_winner = test_data.iloc[i]['fighter'] if y_pred_proba[i][1] > y_pred_proba[i][0] else test_data.iloc[i]['fighter_b']
 
         if winning_probability >= confidence_threshold:
             confident_predictions += 1
-            odds = test_data.iloc[i]['current_fight_open_odds'] if predicted_winner == "Fighter A" else \
+            odds = test_data.iloc[i]['current_fight_open_odds'] if predicted_winner == test_data.iloc[i]['fighter'] else \
                 test_data.iloc[i]['current_fight_open_odds_b']
 
             # Compounding Fixed Fraction Betting
@@ -85,6 +86,11 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
                 b = 100 / abs(odds)
             kelly_bet_size = calculate_kelly_fraction(winning_probability, b, kelly_fraction)
             kelly_stake = kelly_bankroll * kelly_bet_size
+
+            # Set a default bet of 5% of the current bankroll if the Fractional Kelly Stake is $0.00 and odds are better than min_odds
+            if kelly_stake == 0 and odds >= min_odds:
+                kelly_stake = kelly_bankroll * default_bet
+
             kelly_profit = calculate_profit(odds, kelly_stake)
             kelly_total_volume += kelly_stake
 
@@ -131,7 +137,6 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
     return (current_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
             correct_confident_predictions, kelly_bankroll, kelly_total_volume)
-
 
 def print_betting_results(total_fights, confident_predictions, correct_confident_predictions, total_bets, correct_bets,
                           initial_bankroll, final_bankroll, total_volume, confidence_threshold,
@@ -188,7 +193,7 @@ def main():
     KELLY_FRACTION = 1
     FIXED_BET_FRACTION = 0.1
 
-    model_path = os.path.abspath('models/xgboost/model_0.7308_338_features.json')
+    model_path = os.path.abspath('models/xgboost/model_0.7190_338_features.json')
     model = load_model(model_path)
 
     test_data = pd.read_csv('data/train test data/test_data.csv')
@@ -216,7 +221,7 @@ def main():
     (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
      correct_confident_predictions, kelly_final_bankroll, kelly_total_volume) = evaluate_bets(
         y_test, y_pred_proba, test_data_with_display, CONFIDENCE_THRESHOLD, INITIAL_BANKROLL,
-        KELLY_FRACTION, FIXED_BET_FRACTION)
+        KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.05)
 
     print_betting_results(len(test_data), confident_predictions, correct_confident_predictions, total_bets,
                           correct_bets, INITIAL_BANKROLL, final_bankroll, total_volume, CONFIDENCE_THRESHOLD,
