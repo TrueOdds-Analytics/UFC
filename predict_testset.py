@@ -3,6 +3,9 @@ import xgboost as xgb
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 import os
 import numpy as np
+import multiprocessing as mp
+from functools import partial
+from tqdm import tqdm
 
 
 def preprocess_data(data):
@@ -44,15 +47,15 @@ def calculate_kelly_fraction(p, b, kelly_fraction):
 
 
 def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial_bankroll=10000, kelly_fraction=0.125,
-                  fixed_bet_fraction=0.001, default_bet=0.05, min_odds=-300):
+                  fixed_bet_fraction=0.001, default_bet=0.05, min_odds=-300, print_fights=True):
     current_bankroll = initial_bankroll
+    kelly_bankroll = initial_bankroll
     total_volume = 0
+    kelly_total_volume = 0
     correct_bets = 0
     total_bets = 0
     confident_predictions = 0
     correct_confident_predictions = 0
-    kelly_bankroll = initial_bankroll
-    kelly_total_volume = 0
 
     confident_bets = []
     processed_fights = set()
@@ -105,13 +108,13 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
                 'Predicted Winner': predicted_winner,
                 'Confidence': f"{winning_probability:.2%}",
                 'Odds': odds,
+                'Fixed Fraction Bankroll Before': f"${current_bankroll:.2f}",
                 'Fixed Fraction Stake': f"${stake:.2f}",
                 'Fixed Fraction Potential Profit': f"${profit:.2f}",
+                'Kelly Bankroll Before': f"${kelly_bankroll:.2f}",
                 'Fractional Kelly Stake': f"${kelly_stake:.2f}",
                 'Fractional Kelly Potential Profit': f"${kelly_profit:.2f}"
             }
-
-            confident_bets.append(bet_result)
 
             if predicted_winner == true_winner:
                 current_bankroll += profit
@@ -122,21 +125,32 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
                 current_bankroll -= stake
                 kelly_bankroll -= kelly_stake
 
+            bet_result['Fixed Fraction Bankroll After'] = f"${current_bankroll:.2f}"
+            bet_result['Kelly Bankroll After'] = f"${kelly_bankroll:.2f}"
+
+            confident_bets.append(bet_result)
+
     # Print all confident bets
-    for bet in confident_bets:
-        print(f"Fight {bet['Fight']}: {bet['Fighter A']} vs {bet['Fighter B']} on {bet['Date']}")
-        print(f"True Winner: {bet['True Winner']}")
-        print(f"Predicted Winner: {bet['Predicted Winner']}")
-        print(f"Confidence: {bet['Confidence']}")
-        print(f"Odds: {bet['Odds']}")
-        print(f"Fixed Fraction Stake: {bet['Fixed Fraction Stake']}")
-        print(f"Fixed Fraction Potential profit: {bet['Fixed Fraction Potential Profit']}")
-        print(f"Fractional Kelly Stake: {bet['Fractional Kelly Stake']}")
-        print(f"Fractional Kelly Potential profit: {bet['Fractional Kelly Potential Profit']}")
-        print("---")
+    if print_fights:
+        for bet in confident_bets:
+            print(f"Fight {bet['Fight']}: {bet['Fighter A']} vs {bet['Fighter B']} on {bet['Date']}")
+            print(f"True Winner: {bet['True Winner']}")
+            print(f"Predicted Winner: {bet['Predicted Winner']}")
+            print(f"Confidence: {bet['Confidence']}")
+            print(f"Odds: {bet['Odds']}")
+            print(f"Fixed Fraction Bankroll Before: {bet['Fixed Fraction Bankroll Before']}")
+            print(f"Fixed Fraction Stake: {bet['Fixed Fraction Stake']}")
+            print(f"Fixed Fraction Potential Profit: {bet['Fixed Fraction Potential Profit']}")
+            print(f"Fixed Fraction Bankroll After: {bet['Fixed Fraction Bankroll After']}")
+            print(f"Kelly Bankroll Before: {bet['Kelly Bankroll Before']}")
+            print(f"Fractional Kelly Stake: {bet['Fractional Kelly Stake']}")
+            print(f"Fractional Kelly Potential Profit: {bet['Fractional Kelly Potential Profit']}")
+            print(f"Kelly Bankroll After: {bet['Kelly Bankroll After']}")
+            print("---")
 
     return (current_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
             correct_confident_predictions, kelly_bankroll, kelly_total_volume)
+
 
 def print_betting_results(total_fights, confident_predictions, correct_confident_predictions, total_bets, correct_bets,
                           initial_bankroll, final_bankroll, total_volume, confidence_threshold,
@@ -147,6 +161,10 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
     kelly_net_profit = kelly_final_bankroll - initial_bankroll
     kelly_roi = (kelly_net_profit / initial_bankroll) * 100
 
+    print("________________________________________________________________________")
+    print(f"\nBest confidence threshold: {confidence_threshold:.4f}")
+    print(f"Best Kelly ROI: {kelly_roi:.2f}%")
+    print(f"Betting results for best threshold ({confidence_threshold:.4f}):")
     print("________________________________________________________________________")
     print(f"\nConfident Prediction Accuracy (≥{confidence_threshold:.0%} confidence): {confident_accuracy:.2%}")
     print(f"\nBetting Results ({confidence_threshold:.0%} confidence threshold):")
@@ -187,13 +205,23 @@ def print_overall_metrics(y_test, y_pred, y_pred_proba):
     print(f"AUC: {overall_auc:.4f}")
 
 
+def evaluate_threshold(threshold, y_test, y_pred_proba, test_data_with_display, INITIAL_BANKROLL, KELLY_FRACTION, FIXED_BET_FRACTION):
+    (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
+     correct_confident_predictions, kelly_final_bankroll, kelly_total_volume) = evaluate_bets(
+        y_test, y_pred_proba, test_data_with_display, threshold, INITIAL_BANKROLL,
+        KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.05, print_fights=False)
+
+    kelly_roi = ((kelly_final_bankroll - INITIAL_BANKROLL) / INITIAL_BANKROLL) * 100
+
+    return (threshold, kelly_roi, final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
+            correct_confident_predictions, kelly_final_bankroll, kelly_total_volume)
+
 def main():
-    CONFIDENCE_THRESHOLD = 0.65
     INITIAL_BANKROLL = 10000
     KELLY_FRACTION = 1
     FIXED_BET_FRACTION = 0.1
 
-    model_path = os.path.abspath('models/xgboost/model_0.7190_338_features.json')
+    model_path = os.path.abspath('models/xgboost/model_0.7048_338_features_auc_diff_0.0630_good.json')
     model = load_model(model_path)
 
     test_data = pd.read_csv('data/train test data/test_data.csv')
@@ -217,15 +245,33 @@ def main():
     # Add back the display columns for result printing
     test_data_with_display = pd.concat([X_test, display_data], axis=1)
 
-    print(f"\nExample predictions and bets ({CONFIDENCE_THRESHOLD:.0%} confidence threshold):")
-    (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
-     correct_confident_predictions, kelly_final_bankroll, kelly_total_volume) = evaluate_bets(
-        y_test, y_pred_proba, test_data_with_display, CONFIDENCE_THRESHOLD, INITIAL_BANKROLL,
-        KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.05)
+    thresholds = np.arange(0.5, 0.75, 0.0001)
 
-    print_betting_results(len(test_data), confident_predictions, correct_confident_predictions, total_bets,
-                          correct_bets, INITIAL_BANKROLL, final_bankroll, total_volume, CONFIDENCE_THRESHOLD,
-                          kelly_final_bankroll, kelly_total_volume, KELLY_FRACTION, FIXED_BET_FRACTION)
+    # Prepare the partial function for multiprocessing
+    evaluate_threshold_partial = partial(evaluate_threshold,
+                                         y_test=y_test,
+                                         y_pred_proba=y_pred_proba,
+                                         test_data_with_display=test_data_with_display,
+                                         INITIAL_BANKROLL=INITIAL_BANKROLL,
+                                         KELLY_FRACTION=KELLY_FRACTION,
+                                         FIXED_BET_FRACTION=FIXED_BET_FRACTION)
+
+    # Use multiprocessing to evaluate thresholds with progress bar
+    print("Evaluating thresholds...")
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        results = list(tqdm(pool.imap(evaluate_threshold_partial, thresholds), total=len(thresholds)))
+
+    # Find the best result based on Kelly ROI
+    best_result = max(results, key=lambda x: x[1])  # x[1] is now the Kelly ROI
+    best_threshold, best_kelly_roi, *best_results = best_result
+
+    # Now evaluate bets again with the best threshold and print the fights
+    evaluate_bets(y_test, y_pred_proba, test_data_with_display, best_threshold, INITIAL_BANKROLL,
+                  KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.05, print_fights=True)
+
+    print_betting_results(len(test_data), best_results[4], best_results[5], best_results[3],
+                          best_results[2], INITIAL_BANKROLL, best_results[0], best_results[1], best_threshold,
+                          best_results[6], best_results[7], KELLY_FRACTION, FIXED_BET_FRACTION)
 
     y_pred = (y_pred_proba[:, 1] > 0.5).astype(int)
     print_overall_metrics(y_test, y_pred, y_pred_proba)

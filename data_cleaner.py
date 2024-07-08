@@ -5,8 +5,7 @@ import multiprocessing
 from functools import partial
 import time
 import warnings
-from statsmodels.stats.outliers_influence import variance_inflation_factor
-
+from tqdm import tqdm
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -215,12 +214,10 @@ def combine_rounds_stats(file_path):
     start_time = time.time()
     with multiprocessing.Pool(processes=num_cores) as pool:
         results = []
-        processed_rows = 0
-        for chunk_result, chunk_size in pool.imap(partial_process, chunks):
-            results.append(chunk_result)
-            processed_rows += chunk_size
-            print(f"\rProgress: {processed_rows}/{total_rows} ({processed_rows / total_rows * 100:.2f}%)", end="",
-                  flush=True)
+        with tqdm(total=total_rows, desc="Processing", unit="row") as pbar:
+            for chunk_result, chunk_size in pool.imap(partial_process, chunks):
+                results.append(chunk_result)
+                pbar.update(chunk_size)
 
     new_odds = pd.concat(results)
 
