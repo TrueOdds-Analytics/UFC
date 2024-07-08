@@ -12,7 +12,6 @@ from rich.panel import Panel
 from rich.columns import Columns
 from rich.text import Text
 from rich.console import Group
-
 import datetime
 
 
@@ -198,8 +197,6 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
             correct_confident_predictions, kelly_bankroll, kelly_total_volume)
 
 
-import datetime
-
 def print_betting_results(total_fights, confident_predictions, correct_confident_predictions, total_bets, correct_bets,
                           initial_bankroll, final_bankroll, total_volume, confidence_threshold,
                           kelly_final_bankroll, kelly_total_volume, kelly_fraction, fixed_bet_fraction, earliest_fight_date):
@@ -304,6 +301,17 @@ def evaluate_threshold(threshold, y_test, y_pred_proba, test_data_with_display, 
 
 
 def main(optimize_threshold=True, manual_threshold=None):
+    from io import StringIO
+    import sys
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.live import Live
+    from rich.progress import Progress
+
+    # Redirect stdout to capture all output
+    old_stdout = sys.stdout
+    sys.stdout = mystdout = StringIO()
+
     INITIAL_BANKROLL = 10000
     KELLY_FRACTION = 1
     FIXED_BET_FRACTION = 0.1
@@ -315,13 +323,10 @@ def main(optimize_threshold=True, manual_threshold=None):
 
     y_test = test_data['winner']
 
-    # Store the columns we want to drop for prediction but keep for display
     display_columns = ['current_fight_date', 'fighter', 'fighter_b']
     display_data = test_data[display_columns]
 
-    # Drop the display columns and 'winner' for prediction
     X_test = test_data.drop(['winner'] + display_columns, axis=1)
-
     X_test = preprocess_data(X_test)
 
     expected_features = model.get_booster().feature_names
@@ -329,13 +334,11 @@ def main(optimize_threshold=True, manual_threshold=None):
 
     y_pred_proba = model.predict_proba(X_test)
 
-    # Add back the display columns for result printing
     test_data_with_display = pd.concat([X_test, display_data], axis=1)
 
     if optimize_threshold:
         thresholds = np.arange(0.5, 0.75, 0.0001)
 
-        # Prepare the partial function for multiprocessing
         evaluate_threshold_partial = partial(evaluate_threshold,
                                              y_test=y_test,
                                              y_pred_proba=y_pred_proba,
@@ -344,28 +347,27 @@ def main(optimize_threshold=True, manual_threshold=None):
                                              KELLY_FRACTION=KELLY_FRACTION,
                                              FIXED_BET_FRACTION=FIXED_BET_FRACTION)
 
-        # Use multiprocessing to evaluate thresholds with progress bar
         print("Evaluating thresholds...")
-        with mp.Pool(processes=mp.cpu_count()) as pool:
-            results = list(tqdm(pool.imap(evaluate_threshold_partial, thresholds), total=len(thresholds)))
+        with Progress() as progress:
+            task = progress.add_task("[cyan]Evaluating...", total=len(thresholds))
+            with mp.Pool(processes=mp.cpu_count()) as pool:
+                results = list(pool.imap(evaluate_threshold_partial, thresholds))
+                for _ in results:
+                    progress.update(task, advance=1)
 
-        # Find the best result based on Kelly ROI
-        best_result = max(results, key=lambda x: x[1])  # x[1] is now the Kelly ROI
+        best_result = max(results, key=lambda x: x[1])
         best_threshold, best_kelly_roi, *best_results = best_result
     else:
         if manual_threshold is None:
             raise ValueError("If optimize_threshold is False, you must provide a manual_threshold value.")
         best_threshold = manual_threshold
 
-    # Evaluate bets and print fights
     bet_results = evaluate_bets(y_test, y_pred_proba, test_data_with_display, best_threshold, INITIAL_BANKROLL,
                                 KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.05, print_fights=True)
 
-    # Unpack the results
     (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
      correct_confident_predictions, kelly_final_bankroll, kelly_total_volume) = bet_results
 
-    # Get the earliest fight date from the test data
     earliest_fight_date = test_data['current_fight_date'].min()
 
     print_betting_results(len(test_data), confident_predictions, correct_confident_predictions, total_bets,
@@ -376,10 +378,28 @@ def main(optimize_threshold=True, manual_threshold=None):
     y_pred = (y_pred_proba[:, 1] > 0.5).astype(int)
     print_overall_metrics(y_test, y_pred, y_pred_proba)
 
+    # Restore stdout
+    sys.stdout = old_stdout
+
+    # Get the captured output
+    output = mystdout.getvalue()
+
+    # Create a console object
+    console = Console(width=94)
+
+    # Create a panel with all the output
+    main_panel = Panel(
+        output,
+        title="Past Fight Testing",
+        border_style="bold magenta",
+        expand=True,
+    )
+
+    # Print the main panel
+    console.print(main_panel)
+
 
 if __name__ == "__main__":
-    # To run with threshold optimization:
-    main(optimize_threshold=True)
-    #
+    # main(optimize_threshold=True)
     # To run with a manually set threshold:
-    # main(optimize_threshold=False, manual_threshold=0.65)
+    main(optimize_threshold=False, manual_threshold=0.65)
