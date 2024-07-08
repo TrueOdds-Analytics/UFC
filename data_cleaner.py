@@ -382,9 +382,9 @@ def split_train_val_test(matchup_data_file):
     val_data = remaining_data[remaining_data['fight_date'] >= split_date]
 
     # Sort train, validation, and test data by current_fight_date
-    train_data = train_data.sort_values(by='current_fight_date', ascending=False)
-    val_data = val_data.sort_values(by='current_fight_date', ascending=False)
-    test_data = test_data.sort_values(by='current_fight_date', ascending=False)
+    train_data = train_data.sort_values(by='current_fight_date', ascending=True)
+    val_data = val_data.sort_values(by='current_fight_date', ascending=True)
+    test_data = test_data.sort_values(by='current_fight_date', ascending=True)
 
     # Drop the fight_date and current_fight_date columns after using them for splitting
     # columns_to_drop = ['fight_date', 'current_fight_date']

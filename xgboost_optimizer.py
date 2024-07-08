@@ -180,6 +180,7 @@ def adjust_hyperparameter_ranges(study, num_best_trials=20):
 
     return new_ranges
 
+
 def objective(trial, X_train, X_val, y_train, y_val, params=None):
     global should_pause, best_accuracy, best_auc_diff
     while should_pause:
@@ -211,7 +212,9 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         'enable_categorical': True
     })
 
-    model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val)
+    model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train,
+                                                                                                       X_val, y_train,
+                                                                                                       y_val)
 
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
@@ -221,7 +224,8 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         best_auc_diff = auc_diff
         model_filename = f'models/xgboost/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
-        plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy, auc if auc is not None else 0)
+        plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
+                    auc if auc is not None else 0)
 
     return accuracy
 
@@ -262,6 +266,7 @@ def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_roun
 
     return study.best_trial
 
+
 def get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val, n_features):
     # Load the model from the file
     model = xgb.XGBClassifier(enable_categorical=True)
@@ -300,7 +305,8 @@ if __name__ == "__main__":
         best_accuracy = best_trial.value
 
         # Create and evaluate the best model
-        best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train, y_val)
+        best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train,
+                                                                              y_val)
         best_auc = auc
 
         print("Initial optimization completed.")
