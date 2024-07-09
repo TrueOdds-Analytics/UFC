@@ -521,9 +521,9 @@ def create_matchup_data(file_path, tester, name):
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
 
     if not name:
-        matchup_df.to_csv(f'data/matchup data/matchup_data_{n_past_fights - 1}_avg.csv', index=False)
+        matchup_df.to_csv(f'data/matchup data/matchup_data_{n_past_fights}_avg.csv', index=False)
     else:
-        matchup_df.to_csv(f'data/matchup data/matchup_data_{n_past_fights - 1}_avg_name.csv', index=False)
+        matchup_df.to_csv(f'data/matchup data/matchup_data_{n_past_fights}_avg_name.csv', index=False)
 
     return matchup_df
 
@@ -630,5 +630,5 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 if __name__ == "__main__":
     # combine_rounds_stats('data/ufc_fight_processed.csv')
     # combine_fighters_stats("data/combined_rounds.csv")
-    # create_matchup_data("data/combined_sorted_fighter_stats.csv", 2, True)
+    create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')
