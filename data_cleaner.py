@@ -168,7 +168,7 @@ def combine_rounds_stats(file_path):
     final_stats = final_stats[final_columns]
 
     final_stats = final_stats[~final_stats['winner'].isin(['NC/NC', 'D/D'])]
-    final_stats = final_stats[~final_stats['result'].isin(['DQ', 'Decision - Split ', 'DQ ', 'Could Not Continue ',
+    final_stats = final_stats[~final_stats['result'].isin(['DQ', 'DQ ', 'Could Not Continue ',
                                                            'Overturned ', 'Other '])]
 
     # Consolidate weight classes
@@ -447,7 +447,7 @@ def create_matchup_data(file_path, tester, name):
         opponent_df = df[(df['fighter'] == opponent_name) & (df['fight_date'] < current_fight['fight_date'])] \
             .sort_values(by='fight_date', ascending=False).head(n_past_fights)
 
-        if (len(fighter_df) - 1) < n_past_fights or (len(opponent_df) - 1) < n_past_fights:
+        if (len(fighter_df)) < n_past_fights or (len(opponent_df)) < n_past_fights:
             continue
 
         fighter_features = fighter_df[features_to_include].mean().values
@@ -628,7 +628,7 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    # combine_rounds_stats('data/ufc_fight_processed.csv')
-    # combine_fighters_stats("data/combined_rounds.csv")
+    combine_rounds_stats('data/ufc_fight_processed.csv')
+    combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')

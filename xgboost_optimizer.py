@@ -188,8 +188,8 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
 
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 30, 35, log=True),
-            'alpha': trial.suggest_float('alpha', 30, 35, log=True),
+            'lambda': trial.suggest_float('lambda', 0.01, 50, log=True),
+            'alpha': trial.suggest_float('alpha', 0.01, 50, log=True),
             'min_child_weight': trial.suggest_float('min_child_weight', 1, 10.0),
             'max_depth': trial.suggest_int('max_depth', 1, 6),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
@@ -219,7 +219,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.72 and (auc_diff < 0.10):
+    if accuracy > 0.7 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
         model_filename = f'models/xgboost/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.json'

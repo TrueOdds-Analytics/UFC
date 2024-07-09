@@ -316,7 +316,7 @@ def main(optimize_threshold=True, manual_threshold=None):
     KELLY_FRACTION = 1
     FIXED_BET_FRACTION = 0.1
 
-    model_path = os.path.abspath('models/xgboost/model_0.7143_338_features_auc_diff_0.0685.json')
+    model_path = os.path.abspath('models/xgboost/model_0.6394_344_features_auc_diff_0.0220.json')
     model = load_model(model_path)
 
     test_data = pd.read_csv('data/train test data/test_data.csv')
@@ -348,12 +348,8 @@ def main(optimize_threshold=True, manual_threshold=None):
                                              FIXED_BET_FRACTION=FIXED_BET_FRACTION)
 
         print("Evaluating thresholds...")
-        with Progress() as progress:
-            task = progress.add_task("[cyan]Evaluating...", total=len(thresholds))
-            with mp.Pool(processes=mp.cpu_count()) as pool:
-                results = list(pool.imap(evaluate_threshold_partial, thresholds))
-                for _ in results:
-                    progress.update(task, advance=1)
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            results = list(tqdm(pool.imap(evaluate_threshold_partial, thresholds), total=len(thresholds)))
 
         best_result = max(results, key=lambda x: x[1])
         best_threshold, best_kelly_roi, *best_results = best_result
@@ -400,6 +396,6 @@ def main(optimize_threshold=True, manual_threshold=None):
 
 
 if __name__ == "__main__":
-    # main(optimize_threshold=True)
+    main(optimize_threshold=True)
     # To run with a manually set threshold:
-    main(optimize_threshold=False, manual_threshold=0.65)
+    # main(optimize_threshold=False, manual_threshold=0.65)
