@@ -447,7 +447,7 @@ def create_matchup_data(file_path, tester, name):
         opponent_df = df[(df['fighter'] == opponent_name) & (df['fight_date'] < current_fight['fight_date'])] \
             .sort_values(by='fight_date', ascending=False).head(n_past_fights)
 
-        if len(fighter_df) < n_past_fights or len(opponent_df) < n_past_fights:
+        if (len(fighter_df) - 1) < n_past_fights or (len(opponent_df) - 1) < n_past_fights:
             continue
 
         fighter_features = fighter_df[features_to_include].mean().values
