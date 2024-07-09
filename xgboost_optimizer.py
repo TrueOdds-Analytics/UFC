@@ -188,8 +188,8 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
 
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 0.01, 50, log=True),
-            'alpha': trial.suggest_float('alpha', 0.01, 50, log=True),
+            'lambda': trial.suggest_float('lambda', 0.01, 100, log=True),
+            'alpha': trial.suggest_float('alpha', 0.01, 100, log=True),
             'min_child_weight': trial.suggest_float('min_child_weight', 1, 10.0),
             'max_depth': trial.suggest_int('max_depth', 1, 6),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
