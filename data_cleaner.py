@@ -268,8 +268,8 @@ def split_train_val_test(matchup_data_file):
     matchup_df, removed_features = remove_correlated_features(matchup_df)
 
     # Create test set from fights on and after 2024-01-01
-    test_data = matchup_df[matchup_df['current_fight_date'] >= '2024-01-01']
-    remaining_data = matchup_df[matchup_df['current_fight_date'] < '2024-01-01']
+    test_data = matchup_df[matchup_df['current_fight_date'] >= '2024-01-01'].copy()
+    remaining_data = matchup_df[matchup_df['current_fight_date'] < '2024-01-01'].copy()
 
     # Sort remaining data by fight_date
     remaining_data = remaining_data.sort_values(by='fight_date', ascending=True)
@@ -281,19 +281,24 @@ def split_train_val_test(matchup_data_file):
     split_date = remaining_data.iloc[split_index]['fight_date']
 
     # Split the remaining data into train and validation sets based on the fight date
-    train_data = remaining_data[remaining_data['fight_date'] < split_date]
-    val_data = remaining_data[remaining_data['fight_date'] >= split_date]
+    train_data = remaining_data[remaining_data['fight_date'] < split_date].copy()
+    val_data = remaining_data[remaining_data['fight_date'] >= split_date].copy()
+
+    # Remove duplicate fights from validation and test data
+    def remove_duplicates(df):
+        df = df.copy()  # Create a copy to avoid SettingWithCopyWarning
+        df['fight_pair'] = df.apply(lambda row: tuple(sorted([row['fighter'], row['fighter_b']])), axis=1)
+        df = df.drop_duplicates(subset=['fight_pair'], keep='first')
+        df = df.drop(columns=['fight_pair'])
+        return df.reset_index(drop=True)
+
+    val_data = remove_duplicates(val_data)
+    test_data = remove_duplicates(test_data)
 
     # Sort train, validation, and test data by current_fight_date
     train_data = train_data.sort_values(by='current_fight_date', ascending=True)
     val_data = val_data.sort_values(by='current_fight_date', ascending=True)
     test_data = test_data.sort_values(by='current_fight_date', ascending=True)
-
-    # Drop the fight_date and current_fight_date columns after using them for splitting
-    # columns_to_drop = ['fight_date', 'current_fight_date']
-    # train_data = train_data.drop(columns=columns_to_drop)
-    # val_data = val_data.drop(columns=columns_to_drop)
-    # test_data = test_data.drop(columns=columns_to_drop)
 
     # Save the train, validation, and test data to CSV files
     train_data.to_csv('data/train test data/train_data.csv', index=False)
@@ -306,7 +311,6 @@ def split_train_val_test(matchup_data_file):
 
     print(f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
     print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}, Test set size: {len(test_data)}")
-
 
 def create_matchup_data(file_path, tester, name):
     df = pd.read_csv(file_path)
@@ -508,8 +512,8 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('data/ufc_fight_processed.csv')
-    combine_fighters_stats("data/combined_rounds.csv")
-    create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
+    # combine_rounds_stats('data/ufc_fight_processed.csv')
+    # combine_fighters_stats("data/combined_rounds.csv")
+    # create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)
