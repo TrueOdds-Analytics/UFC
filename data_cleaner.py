@@ -93,6 +93,8 @@ def combine_rounds_stats(file_path):
     final_stats = final_stats[final_columns]
 
     final_stats = final_stats[~final_stats['winner'].isin(['NC/NC', 'D/D'])]
+    # final_stats = final_stats[~final_stats['result'].isin(['DQ', 'DQ ', 'Could Not Continue ',
+    #                                                        'Overturned ', 'Other '])]
     final_stats = final_stats[~final_stats['result'].isin(['DQ', 'Decision - Split ', 'DQ ', 'Could Not Continue ',
                                                            'Overturned ', 'Other '])]
 
