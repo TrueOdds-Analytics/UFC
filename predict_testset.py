@@ -335,7 +335,7 @@ def main(optimize_threshold=True, manual_threshold=None):
     KELLY_FRACTION = 1
     FIXED_BET_FRACTION = 0.1
 
-    model_path = os.path.abspath('models/xgboost/model_0.6642_342_features_auc_diff_0.0556.json')
+    model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0892.json')
     model = load_model(model_path)
 
     test_data = pd.read_csv('data/train test data/test_data.csv')

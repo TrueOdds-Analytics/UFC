@@ -2,11 +2,10 @@ from data_cleaner import create_specific_matchup_data
 from predict_testset import *
 
 
-def predict_outcome(model, specific_data, fighter_name, opponent_name, initial_bankroll=10000, kelly_fraction=0.125,
+def predict_outcome(model, specific_data, display_data, fighter_name, opponent_name, initial_bankroll=10000, kelly_fraction=0.125,
                     fixed_bet_fraction=0.1, default_bet=0.05, min_odds=-300, confidence_threshold=0.60):
     console = Console(width=160)
 
-    specific_data = preprocess_data(specific_data)
     predictions = model.predict(specific_data)
     probabilities = model.predict_proba(specific_data)
 
@@ -46,7 +45,9 @@ def predict_outcome(model, specific_data, fighter_name, opponent_name, initial_b
     # Create rich text output
     fighter_a = fighter_name.title()
     fighter_b = opponent_name.title()
-    current_date = datetime.datetime.now().strftime('%B %d, %Y')
+    fight_date_str = display_data['current_fight_date'].values[0]
+    fight_date = datetime.datetime.strptime(fight_date_str, '%Y-%m-%d')
+    formatted_fight_date = fight_date.strftime('%B %d, %Y')
 
     fight_info = Panel(
         Group(
@@ -81,7 +82,7 @@ def predict_outcome(model, specific_data, fighter_name, opponent_name, initial_b
             fight_info,
             Columns([fixed_panel, kelly_panel], equal=True, expand=True)
         ),
-        title=f"{fighter_a} vs {fighter_b} on {current_date}",
+        title=f"{fighter_a} vs {fighter_b} on {formatted_fight_date}",
         subtitle=f"Odds: {odds}",
         width=100
     )
@@ -89,8 +90,9 @@ def predict_outcome(model, specific_data, fighter_name, opponent_name, initial_b
     console.print(main_panel, style="magenta")
 
 
+# In the main part of the script, update the function call:
 if __name__ == "__main__":
-    model_path = os.path.abspath('models/xgboost/model_0.6642_342_features_auc_diff_0.0556.json')
+    model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0892.json')
     model = load_model(model_path)
 
     console = Console()
@@ -117,6 +119,6 @@ if __name__ == "__main__":
         expected_features = model.get_booster().feature_names
         specific_data = specific_data.reindex(columns=expected_features)
 
-        predict_outcome(model, specific_data, fighter_name, opponent_name, 10000, 0.125,
-                        0.1, 0.05, -300, 0.5743)
+        predict_outcome(model, specific_data, display_data, fighter_name, opponent_name, 10000, 0.125,
+                        0.1, 0.05, -300, 0.5010)
         console.print()
