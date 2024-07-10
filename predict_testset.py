@@ -72,9 +72,11 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
     # Sort the test_data by date
     test_data = test_data.sort_values('current_fight_date')
 
-    # Initialize daily bankrolls with the initial bankroll
+    # Initialize daily bankrolls and stakes
     daily_bankrolls = {}
     daily_kelly_bankrolls = {}
+    daily_fixed_stakes = {}
+    daily_kelly_stakes = {}
 
     current_date = None
     date_bankroll = initial_bankroll
@@ -89,7 +91,7 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
         processed_fights.add(fight_id)
 
-        # If it's a new date, update the bankrolls
+        # If it's a new date, update the bankrolls and reset daily stakes
         if fight_date != current_date:
             if current_date is not None:
                 daily_bankrolls[current_date] = date_bankroll
@@ -97,6 +99,8 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
             current_date = fight_date
             date_bankroll = current_bankroll
             date_kelly_bankroll = kelly_bankroll
+            daily_fixed_stakes[current_date] = 0
+            daily_kelly_stakes[current_date] = 0
 
         true_winner = row['fighter'] if y_test.iloc[i] == 1 else row['fighter_b']
         winning_probability = max(y_pred_proba[i])
@@ -108,19 +112,27 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
                 'current_fight_open_odds_b']
 
             # Compounding Fixed Fraction Betting
-            stake = date_bankroll * fixed_bet_fraction
+            available_fixed_bankroll = date_bankroll - daily_fixed_stakes[current_date]
+            stake = min(available_fixed_bankroll * fixed_bet_fraction, available_fixed_bankroll)
+            if stake <= 0:
+                continue  # Skip this bet if no funds are available
+            daily_fixed_stakes[current_date] += stake
             profit = calculate_profit(odds, stake)
             total_volume += stake
 
             # Fractional Kelly Criterion Betting
+            available_kelly_bankroll = date_kelly_bankroll - daily_kelly_stakes[current_date]
             b = odds / 100 if odds > 0 else 100 / abs(odds)
             kelly_bet_size = calculate_kelly_fraction(winning_probability, b, kelly_fraction)
-            kelly_stake = date_kelly_bankroll * kelly_bet_size
+            kelly_stake = min(available_kelly_bankroll * kelly_bet_size, available_kelly_bankroll)
 
             # Set a default bet if the Fractional Kelly Stake is $0.00 and odds are better than min_odds
             if kelly_stake == 0 and odds >= min_odds:
-                kelly_stake = date_kelly_bankroll * default_bet
+                kelly_stake = min(available_kelly_bankroll * default_bet, available_kelly_bankroll)
 
+            if kelly_stake <= 0:
+                continue  # Skip this bet if no funds are available
+            daily_kelly_stakes[current_date] += kelly_stake
             kelly_profit = calculate_profit(odds, kelly_stake)
             kelly_total_volume += kelly_stake
 
@@ -185,7 +197,8 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
                 f"Profit: ${bet['Fixed Fraction Profit']:.2f}\n"
                 f"ROI (of daily bankroll): {bet['Fixed Fraction ROI']:.2f}%",
                 title="Fixed Fraction",
-                expand=True
+                expand=True,
+                width=42
             )
             kelly_panel = Panel(
                 f"Bankroll Before: {bet['Kelly Bankroll Before']}\n"
@@ -195,23 +208,24 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
                 f"Profit: ${bet['Kelly Profit']:.2f}\n"
                 f"ROI (of daily bankroll): {bet['Kelly ROI']:.2f}%",
                 title="Kelly",
-                expand=True
+                expand=True,
+                width=42
             )
 
             fight_info = Group(
                 Text(f"True Winner: {bet['True Winner'].title()}", style="green"),
                 Text(f"Predicted Winner: {bet['Predicted Winner'].title()}", style="blue"),
-                Text(f"Confidence: {bet['Confidence']}", style="yellow"),
+                Text(f"Confidence: {bet['Confidence']}", style="yellow")
             )
 
             main_panel = Panel(
                 Group(
                     Panel(fight_info, title="Fight Information"),
-                    Columns([fixed_panel, kelly_panel], equal=True, expand=True)
+                    Columns([fixed_panel, kelly_panel], equal=False, expand=False, align="left")
                 ),
                 title=f"Fight {bet['Fight']}: {fighter_a} vs {fighter_b} on {formatted_date}",
                 subtitle=f"Odds: {bet['Odds']}",
-                width=90
+                width=89
             )
 
             console.print(main_panel, style="magenta")
@@ -226,6 +240,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
                           kelly_final_bankroll, kelly_total_volume, kelly_fraction, fixed_bet_fraction,
                           earliest_fight_date):
     confident_accuracy = correct_confident_predictions / confident_predictions if confident_predictions > 0 else 0
+    correct_bets_accuracy = correct_bets / total_bets if total_bets > 0 else 0
     net_profit = final_bankroll - initial_bankroll
     roi = (net_profit / initial_bankroll) * 100
     kelly_net_profit = kelly_final_bankroll - initial_bankroll
@@ -260,6 +275,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
     table.add_row("Total bets", str(total_bets))
     table.add_row("Correct bets", str(correct_bets))
     table.add_row("Confident Prediction Accuracy", f"{confident_accuracy:.2%}")
+    table.add_row("Correct Bets Accuracy", f"{correct_bets_accuracy:.2%}")
 
     console.print(table)
 
@@ -272,7 +288,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
         f"Average ROI per month: {avg_fixed_roi_per_month:.2f}%\n"
         f"Fixed bet fraction: {fixed_bet_fraction:.3f}\n"
         f"Average bet size: ${avg_fixed_bet_size:.2f}\n"
-        f"Scale: {fixed_scale:.2f}%",
+        f"Risk: {fixed_scale:.2f}%",
         title="Compounding Fixed Fraction Betting Results"
     )
 
@@ -285,7 +301,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
         f"Average ROI per month: {avg_kelly_roi_per_month:.2f}%\n"
         f"Kelly fraction: {kelly_fraction:.3f}\n"
         f"Average bet size: ${avg_kelly_bet_size:.2f}\n"
-        f"Scale: {kelly_scale:.2f}%",
+        f"Risk: {kelly_scale:.2f}%",
         title="Fractional Kelly Criterion Betting Results"
     )
 
@@ -335,7 +351,7 @@ def main(optimize_threshold=True, manual_threshold=None):
     KELLY_FRACTION = 1
     FIXED_BET_FRACTION = 0.1
 
-    model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0892.json')
+    model_path = os.path.abspath('models/xgboost/split/model_0.6545_344_features_auc_diff_0.0244.json')
     model = load_model(model_path)
 
     test_data = pd.read_csv('data/train test data/test_data.csv')
@@ -378,7 +394,7 @@ def main(optimize_threshold=True, manual_threshold=None):
         best_threshold = manual_threshold
 
     bet_results = evaluate_bets(y_test, y_pred_proba, test_data_with_display, best_threshold, INITIAL_BANKROLL,
-                                KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.05, print_fights=True)
+                                KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.01, print_fights=True)
 
     (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
      correct_confident_predictions, kelly_final_bankroll, kelly_total_volume) = bet_results
@@ -400,7 +416,7 @@ def main(optimize_threshold=True, manual_threshold=None):
     output = mystdout.getvalue()
 
     # Create a console object
-    console = Console(width=94)
+    console = Console(width=93)
 
     # Create a panel with all the output
     main_panel = Panel(

@@ -29,6 +29,7 @@ def predict_outcome(model, specific_data, display_data, fighter_name, opponent_n
     # Fixed Fraction Betting
     fixed_stake = initial_bankroll * fixed_bet_fraction
     fixed_profit = calculate_profit(odds, fixed_stake)
+    fixed_units = fixed_stake / (initial_bankroll * 0.01)  # Calculate units
 
     # Kelly Criterion Betting
     b = odds / 100 if odds > 0 else 100 / abs(odds)
@@ -37,10 +38,11 @@ def predict_outcome(model, specific_data, display_data, fighter_name, opponent_n
     # If Kelly bet size is 0, use default_bet (5% of bankroll)
     if kelly_bet_size == 0:
         kelly_bet_size = default_bet
-        console.print("[yellow]Kelly formula suggested 0% bet. Using 5% of bankroll instead.[/yellow]")
+        console.print("[yellow]Kelly formula suggested 0% bet. Using 1% of bankroll instead.[/yellow]")
 
     kelly_stake = initial_bankroll * kelly_bet_size
     kelly_profit = calculate_profit(odds, kelly_stake)
+    kelly_units = kelly_stake / (initial_bankroll * 0.01)  # Calculate units
 
     # Create rich text output
     fighter_a = fighter_name.title()
@@ -60,7 +62,7 @@ def predict_outcome(model, specific_data, display_data, fighter_name, opponent_n
 
     fixed_panel = Panel(
         f"Initial Bankroll: ${initial_bankroll:.2f}\n"
-        f"Stake: ${fixed_stake:.2f}\n"
+        f"Stake: ${fixed_stake:.2f} ({fixed_units:.2f} units)\n"
         f"Potential Profit: ${fixed_profit:.2f}\n"
         f"Potential Bankroll After: ${initial_bankroll + fixed_profit:.2f}\n"
         f"Potential ROI: {(fixed_profit / initial_bankroll) * 100:.2f}%",
@@ -69,7 +71,7 @@ def predict_outcome(model, specific_data, display_data, fighter_name, opponent_n
     )
     kelly_panel = Panel(
         f"Initial Bankroll: ${initial_bankroll:.2f}\n"
-        f"Stake: ${kelly_stake:.2f}\n"
+        f"Stake: ${kelly_stake:.2f} ({kelly_units:.2f} units)\n"
         f"Potential Profit: ${kelly_profit:.2f}\n"
         f"Potential Bankroll After: ${initial_bankroll + kelly_profit:.2f}\n"
         f"Potential ROI: {(kelly_profit / initial_bankroll) * 100:.2f}%",
@@ -92,7 +94,7 @@ def predict_outcome(model, specific_data, display_data, fighter_name, opponent_n
 
 # In the main part of the script, update the function call:
 if __name__ == "__main__":
-    model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0892.json')
+    model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0616_good.json')
     model = load_model(model_path)
 
     console = Console()
@@ -119,6 +121,6 @@ if __name__ == "__main__":
         expected_features = model.get_booster().feature_names
         specific_data = specific_data.reindex(columns=expected_features)
 
-        predict_outcome(model, specific_data, display_data, fighter_name, opponent_name, 10000, 0.125,
-                        0.1, 0.05, -300, 0.5010)
+        predict_outcome(model, specific_data, display_data, fighter_name, opponent_name, 13000, 1,
+                        0.1, 0.01, -300, 0.5488)
         console.print()
