@@ -17,6 +17,7 @@ best_accuracy = 0
 best_auc = 0
 best_auc_diff = 0
 
+
 def user_input_thread():
     global should_pause
     while True:
@@ -28,6 +29,7 @@ def user_input_thread():
             print("Quitting...")
             should_pause = True
             break
+
 
 def get_train_val_data():
     train_data = pd.read_csv('../data/train test data/train_data.csv')
@@ -62,11 +64,14 @@ def get_train_val_data():
 
     return train_data, val_data, train_labels, val_labels
 
+
 def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, accuracy, auc):
+    iterations = range(1, len(train_losses) + 1)
+
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
 
-    ax1.plot(train_losses, label='Train Loss')
-    ax1.plot(val_losses, label='Validation Loss')
+    ax1.plot(iterations, train_losses, label='Train Loss')
+    ax1.plot(iterations, val_losses, label='Validation Loss')
     ax1.set_xlabel('Number of iterations')
     ax1.set_ylabel('Log Loss')
     ax1.set_title(
@@ -74,8 +79,8 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, 
     ax1.legend()
     ax1.grid()
 
-    ax2.plot(train_auc, label='Train AUC')
-    ax2.plot(val_auc, label='Validation AUC')
+    ax2.plot(iterations, train_auc, label='Train AUC')
+    ax2.plot(iterations, val_auc, label='Validation AUC')
     ax2.set_xlabel('Number of iterations')
     ax2.set_ylabel('AUC')
     ax2.set_title(
@@ -85,6 +90,7 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, 
 
     plt.tight_layout()
     plt.show()
+
 
 def create_shap_graph(model_path, X_train):
     # Load the model from the file
@@ -113,13 +119,15 @@ def create_shap_graph(model_path, X_train):
     plt.tight_layout()
     plt.show()
 
+
 def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
     train_data = lgb.Dataset(X_train, label=y_train, categorical_feature='auto')
     val_data = lgb.Dataset(X_val, label=y_val, categorical_feature='auto', reference=train_data)
 
+    results = {}
     callbacks = [
-        lgb.early_stopping(stopping_rounds=250, verbose=False),
-        lgb.log_evaluation(period=0)  # Suppress default logging
+        lgb.early_stopping(stopping_rounds=100, verbose=False),
+        lgb.record_evaluation(results)
     ]
 
     model = lgb.train(
@@ -131,11 +139,10 @@ def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
         callbacks=callbacks
     )
 
-    results = model.best_score
-    train_losses = model.best_score['train']['binary_logloss']
-    val_losses = model.best_score['valid']['binary_logloss']
-    train_auc = model.best_score['train']['auc']
-    val_auc = model.best_score['valid']['auc']
+    train_losses = results['train']['binary_logloss']
+    val_losses = results['valid']['binary_logloss']
+    train_auc = results['train']['auc']
+    val_auc = results['valid']['auc']
 
     y_val_pred = model.predict(X_val, num_iteration=model.best_iteration)
     y_val_pred_binary = (y_val_pred > 0.5).astype(int)
@@ -149,7 +156,7 @@ def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
         print(f"Shape of predict_proba: {y_val_pred.shape}")
         auc = None
 
-    return model, accuracy, auc, [train_losses], [val_losses], [train_auc], [val_auc]
+    return model, accuracy, auc, train_losses, val_losses, train_auc, val_auc
 
 
 def adjust_hyperparameter_ranges(study, num_best_trials=20):
@@ -180,11 +187,12 @@ def adjust_hyperparameter_ranges(study, num_best_trials=20):
 
     return new_ranges
 
+
 def objective(trial, X_train, X_val, y_train, y_val, params=None):
     if params is None:
         params = {
-            'lambda_l1': trial.suggest_float('lambda_l1', 1e-8, 10.0, log=True),
-            'lambda_l2': trial.suggest_float('lambda_l2', 1e-8, 10.0, log=True),
+            'lambda_l1': trial.suggest_float('lambda_l1', 30, 35, log=True),
+            'lambda_l2': trial.suggest_float('lambda_l2', 30, 35, log=True),
             'num_leaves': trial.suggest_int('num_leaves', 2, 256),
             'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
             'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
@@ -200,7 +208,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         'boosting_type': 'gbdt',
         'device': 'gpu',  # Use GPU
         'gpu_platform_id': 0,  # ID of the GPU platform to use
-        'gpu_device_id': 0,   # ID of the GPU device to use
+        'gpu_device_id': 0,  # ID of the GPU device to use
     })
 
     model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train,
@@ -210,15 +218,16 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.685 and (auc_diff < 0.10):
+    if accuracy > 0.70 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
-        model_filename = f'models/lightgbm/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.txt'
+        model_filename = f'../models/lightgbm/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.txt'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
 
     return accuracy
+
 
 def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=10000):
     global best_accuracy, best_auc
@@ -256,6 +265,7 @@ def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_roun
 
     return study.best_trial
 
+
 def get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val, n_features):
     # Load the model from the file
     model = lgb.Booster(model_file=model_path)
@@ -279,6 +289,7 @@ def get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val, n_f
     best_trial = optimize_model(X_train_filtered, X_val_filtered, y_train, y_val)
 
     return best_trial.params, best_trial.value
+
 
 if __name__ == "__main__":
     input_thread = threading.Thread(target=user_input_thread, daemon=True)
