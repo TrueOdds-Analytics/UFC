@@ -13,9 +13,6 @@ import sys
 
 # Global variables
 should_pause = False
-best_accuracy = 0
-best_auc = 0
-best_auc_diff = 0
 
 
 def user_input_thread():
@@ -219,8 +216,6 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
     if accuracy > 0.70 and (auc_diff < 0.10):
-        best_accuracy = accuracy
-        best_auc_diff = auc_diff
         model_filename = f'../models/lightgbm/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.txt'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
@@ -230,7 +225,6 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
 
 
 def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=10000):
-    global best_accuracy, best_auc
 
     for round in range(n_rounds):
         print(f"Starting optimization round {round + 1}/{n_rounds}")
