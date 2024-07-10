@@ -123,7 +123,7 @@ def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
 
     results = {}
     callbacks = [
-        lgb.early_stopping(stopping_rounds=100, verbose=False),
+        lgb.early_stopping(stopping_rounds=250, verbose=False),
         lgb.record_evaluation(results)
     ]
 
@@ -188,8 +188,8 @@ def adjust_hyperparameter_ranges(study, num_best_trials=20):
 def objective(trial, X_train, X_val, y_train, y_val, params=None):
     if params is None:
         params = {
-            'lambda_l1': trial.suggest_float('lambda_l1', 30, 35, log=True),
-            'lambda_l2': trial.suggest_float('lambda_l2', 30, 35, log=True),
+            'lambda_l1': trial.suggest_float('lambda_l1', 20, 25, log=True),
+            'lambda_l2': trial.suggest_float('lambda_l2', 20, 25, log=True),
             'num_leaves': trial.suggest_int('num_leaves', 2, 256),
             'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
             'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
@@ -215,7 +215,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.685 and (auc_diff < 0.10):
+    if accuracy > 0.70 and (auc_diff < 0.10):
         model_filename = f'../models/lightgbm/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.txt'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,

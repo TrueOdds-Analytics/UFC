@@ -5,6 +5,8 @@ import os
 import numpy as np
 import multiprocessing as mp
 from functools import partial
+
+from sklearn.utils.validation import check_is_fitted
 from tqdm import tqdm
 from rich.table import Table
 from rich.columns import Columns
@@ -15,7 +17,9 @@ from io import StringIO
 import sys
 from rich.console import Console
 from rich.panel import Panel
-
+import lightgbm as lgb
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.calibration import CalibratedClassifierCV
 
 def preprocess_data(data):
     category_columns = [
@@ -30,12 +34,17 @@ def preprocess_data(data):
     return data
 
 
-def load_model(model_path):
+def load_model(model_path, model_type='xgboost'):
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
     try:
-        model = xgb.XGBClassifier(enable_categorical=True)
-        model.load_model(model_path)
+        if model_type == 'xgboost':
+            model = xgb.XGBClassifier(enable_categorical=True)
+            model.load_model(model_path)
+        elif model_type == 'lightgbm':
+            model = lgb.Booster(model_file=model_path)
+        else:
+            raise ValueError(f"Unsupported model type: {model_type}")
         return model
     except Exception as e:
         print(f"Error loading model: {str(e)}")
@@ -140,8 +149,8 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
             daily_kelly_stakes[current_date] += kelly_stake
             kelly_profit = calculate_profit(odds, kelly_stake)
             kelly_total_volume += kelly_stake
-
-            total_bets += 1
+            if kelly_stake > 0:
+                total_bets += 1
 
             bet_result = {
                 'Fight': i + 1,
@@ -347,8 +356,28 @@ def evaluate_threshold(threshold, y_test, y_pred_proba, test_data_with_display, 
     return (threshold, kelly_roi, final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
             correct_confident_predictions, kelly_final_bankroll, kelly_total_volume)
 
+class LGBMWrapper(BaseEstimator, ClassifierMixin):
+    def __init__(self, model):
+        self.model = model
+        self.classes_ = None
 
-def main(optimize_threshold=True, manual_threshold=None):
+    def fit(self, X, y):
+        # Set the classes_ attribute
+        self.classes_ = np.unique(y)
+        return self
+
+    def predict_proba(self, X):
+        check_is_fitted(self, ['classes_'])
+        raw_preds = self.model.predict(X, raw_score=True)
+        proba = 1 / (1 + np.exp(-raw_preds))
+        return np.column_stack((1 - proba, proba))
+
+    def predict(self, X):
+        proba = self.predict_proba(X)
+        return self.classes_[np.argmax(proba, axis=1)]
+
+
+def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', use_calibration=True):
     # Redirect stdout to capture all output
     old_stdout = sys.stdout
     sys.stdout = mystdout = StringIO()
@@ -357,26 +386,58 @@ def main(optimize_threshold=True, manual_threshold=None):
     KELLY_FRACTION = 1
     FIXED_BET_FRACTION = 0.1
 
-    model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0616_good.json')
-    model = load_model(model_path)
-
+    # Load and preprocess data
+    train_data = pd.read_csv('data/train test data/train_data.csv')
     test_data = pd.read_csv('data/train test data/test_data.csv')
 
-    y_test = test_data['winner']
-
     display_columns = ['current_fight_date', 'fighter', 'fighter_b']
-    display_data = test_data[display_columns]
-
+    y_train = train_data['winner']
+    y_test = test_data['winner']
+    X_train = train_data.drop(['winner'] + display_columns, axis=1)
     X_test = test_data.drop(['winner'] + display_columns, axis=1)
+
+    X_train = preprocess_data(X_train)
     X_test = preprocess_data(X_test)
 
-    expected_features = model.get_booster().feature_names
-    X_test = X_test.reindex(columns=expected_features)
-
-    y_pred_proba = model.predict_proba(X_test)
-
+    display_data = test_data[display_columns]
     test_data_with_display = pd.concat([X_test, display_data], axis=1)
 
+    # Load and optionally calibrate model
+    if model_type == 'xgboost':
+        model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0585.json')
+        model = load_model(model_path, 'xgboost')
+        expected_features = model.get_booster().feature_names
+        X_train = X_train.reindex(columns=expected_features)
+        X_test = X_test.reindex(columns=expected_features)
+
+        if use_calibration:
+            calibrated_model = CalibratedClassifierCV(model, cv='prefit', method='sigmoid')
+            calibrated_model.fit(X_train, y_train)
+            y_pred_proba = calibrated_model.predict_proba(X_test)
+        else:
+            y_pred_proba = model.predict_proba(X_test)
+
+    elif model_type == 'lightgbm':
+        model_path = os.path.abspath('models/lightgbm/model_0.7313_342_features_auc_diff_0.0398.txt')
+        model = load_model(model_path, 'lightgbm')
+        expected_features = model.feature_name()
+        X_train = X_train.reindex(columns=expected_features)
+        X_test = X_test.reindex(columns=expected_features)
+
+        lgb_wrapper = LGBMWrapper(model)
+        lgb_wrapper.fit(X_train, y_train)  # Fit the wrapper to set classes_
+
+        if use_calibration:
+            calibrated_model = CalibratedClassifierCV(lgb_wrapper, cv='prefit', method='sigmoid')
+            calibrated_model.fit(X_train, y_train)
+            y_pred_proba = calibrated_model.predict_proba(X_test)
+        else:
+            y_pred_proba = lgb_wrapper.predict_proba(X_test)
+
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+
+    # Optimize threshold or use manual threshold
     if optimize_threshold:
         print("Evaluating thresholds...")
         thresholds = np.arange(0.5, 0.75, 0.0001)
@@ -399,8 +460,9 @@ def main(optimize_threshold=True, manual_threshold=None):
             raise ValueError("If optimize_threshold is False, you must provide a manual_threshold value.")
         best_threshold = manual_threshold
 
+    # Evaluate bets and print results
     bet_results = evaluate_bets(y_test, y_pred_proba, test_data_with_display, best_threshold, INITIAL_BANKROLL,
-                                KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.01, print_fights=True)
+                                KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.00, print_fights=True)
 
     (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
      correct_confident_predictions, kelly_final_bankroll, kelly_total_volume) = bet_results
@@ -415,28 +477,20 @@ def main(optimize_threshold=True, manual_threshold=None):
     y_pred = (y_pred_proba[:, 1] > 0.5).astype(int)
     print_overall_metrics(y_test, y_pred, y_pred_proba)
 
-    # Restore stdout
+    # Restore stdout and print results
     sys.stdout = old_stdout
-
-    # Get the captured output
     output = mystdout.getvalue()
-
-    # Create a console object
     console = Console(width=93)
-
-    # Create a panel with all the output
     main_panel = Panel(
         output,
         title="Past Fight Testing",
         border_style="bold magenta",
         expand=True,
     )
-
-    # Print the main panel
     console.print(main_panel)
 
 
 if __name__ == "__main__":
-    main(optimize_threshold=True)
+    main(optimize_threshold=True, model_type='xgboost', use_calibration=True)
     # To run with a manually set threshold:
     # main(optimize_threshold=False, manual_threshold=0.65)
