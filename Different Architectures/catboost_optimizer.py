@@ -1,27 +1,55 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+import optuna
 from optuna.samplers import TPESampler
-import joblib
-import optuna.importance
-from catboost import CatBoostClassifier
-from sklearn.metrics import accuracy_score, roc_auc_score
-from sklearn.feature_selection import SelectFromModel
 from optuna.pruners import MedianPruner
+from catboost import CatBoostClassifier, Pool
+from sklearn.metrics import accuracy_score, roc_auc_score
 import matplotlib.pyplot as plt
+import shap
+import threading
+import time
+import sys
 
+# Global variables
+should_pause = False
 best_accuracy = 0
 best_auc = 0
-best_model_state = None
-best_train_losses = []
-best_val_losses = []
-best_test_losses = []
-best_train_auc = []
-best_val_auc = []
-best_test_auc = []
+best_auc_diff = 0
 
 
-def objective(trial):
-    global best_accuracy, best_auc, best_model_state, best_train_losses, best_val_losses, best_test_losses, best_train_auc, best_val_auc, best_test_auc
+def user_input_thread():
+    global should_pause
+    while True:
+        user_input = input("Press 'p' to pause/resume or 'q' to quit: ")
+        if user_input.lower() == 'p':
+            should_pause = not should_pause
+            print("Paused" if should_pause else "Resumed")
+        elif user_input.lower() == 'q':
+            print("Quitting...")
+            should_pause = True
+            break
+
+
+def get_train_val_data(golden_features=[]):
+    train_data = pd.read_csv('../data/train test data/train_data.csv')
+    val_data = pd.read_csv('../data/train test data/val_data.csv')
+
+    train_labels = train_data['winner']
+    val_labels = val_data['winner']
+    train_data = train_data.drop(['winner'], axis=1)
+    val_data = val_data.drop(['winner'], axis=1)
+    columns_to_drop = ['fighter', 'fighter_b', 'fight_date', 'current_fight_date']
+    train_data = train_data.drop(columns=columns_to_drop)
+    val_data = val_data.drop(columns=columns_to_drop)
+
+    # Shuffle data
+    train_data = train_data.sample(frac=1, random_state=42).reset_index(drop=True)
+    train_labels = train_labels.sample(frac=1, random_state=42).reset_index(drop=True)
+    val_data = val_data.sample(frac=1, random_state=42).reset_index(drop=True)
+    val_labels = val_labels.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    # Convert specified columns to category type
     category_columns = [
         'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
         'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
@@ -30,171 +58,30 @@ def objective(trial):
         'result_fight_3', 'winner_fight_3', 'weight_class_fight_3', 'scheduled_rounds_fight_3',
         'result_b_fight_3', 'winner_b_fight_3', 'weight_class_b_fight_3', 'scheduled_rounds_b_fight_3'
     ]
-    search_space = {
-        'depth': trial.suggest_int('depth', 1, 10),
-        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.5),
-        'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 1e-8, 10.0, log=True),
-        'random_strength': trial.suggest_float('random_strength', 1e-9, 10.0, log=True),
-        'bagging_temperature': trial.suggest_float('bagging_temperature', 0.01, 100.0, log=True),
-        'iterations': 10000,
-        'random_seed': trial.suggest_int('random_seed', 1, 100),
-        'od_type': trial.suggest_categorical('od_type', ['IncToDec', 'Iter']),
-        'od_wait': trial.suggest_int('od_wait', 10, 50),
-        'eval_metric': 'Logloss',
-        'task_type': 'GPU'  # Specify GPU task type
-    }
 
-    X_train, X_val, X_test, y_train, y_val, y_test = get_train_test_data()
+    for df in [train_data, val_data]:
+        for col in category_columns:
+            df[col] = df[col].astype(str).fillna('Unknown')
 
-    model = CatBoostClassifier(**search_space)
+    # Create a list for per-feature quantization
+    per_float_feature_quantization = []
+    for feature in golden_features:
+        if feature in train_data.columns:
+            feature_index = train_data.columns.get_loc(feature)
+            per_float_feature_quantization.append(f"{feature_index}:border_count=1024")
 
-    eval_set = [(X_train, y_train), (X_val, y_val)]
-    model.fit(X_train, y_train, eval_set=eval_set)
-
-    eval_results = model.get_evals_result()
-
-    train_losses = eval_results['learn']['Logloss']
-    val_losses = eval_results['validation']['Logloss']
-    train_auc = eval_results['learn']['AUC']
-    val_auc = eval_results['validation']['AUC']
-
-    y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
-    auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
-
-    if accuracy > best_accuracy or (accuracy == best_accuracy and auc > best_auc):
-        best_accuracy = accuracy
-        best_auc = auc
-        model.save_model(f'models/model_{accuracy}.cbm')
-        best_train_losses = train_losses
-        best_val_losses = val_losses
-        best_train_auc = train_auc
-        best_val_auc = val_auc
-
-        plot_losses(best_train_losses, best_val_losses, best_train_auc, best_val_auc, trial.number, best_accuracy,
-                    best_auc)
-
-    return accuracy
+    return train_data, val_data, train_labels, val_labels, per_float_feature_quantization
 
 
-def get_train_test_data():
-    # Load train data from CSV
-    train_data = pd.read_csv('../data/train test data/train_data.csv')
-    train_labels = train_data['winner']
-    train_data = train_data.drop(['winner'], axis=1)
-
-    # Shuffle train data
-    train_data = train_data.sample(frac=1, random_state=42).reset_index(drop=True)
-    train_labels = train_labels.sample(frac=1, random_state=42).reset_index(drop=True)
-
-    # Load validation data from CSV
-    val_data = pd.read_csv('data/val_data.csv')
-    val_labels = val_data['winner']
-    val_data = val_data.drop(['winner'], axis=1)
-
-    # Shuffle validation data
-    val_data = val_data.sample(frac=1, random_state=42).reset_index(drop=True)
-    val_labels = val_labels.sample(frac=1, random_state=42).reset_index(drop=True)
-
-    # Load test data from CSV
-    test_data = pd.read_csv('data/train test data/test_data.csv')
-    test_labels = test_data['winner']
-    test_data = test_data.drop(['winner'], axis=1)
-
-    # Shuffle test data
-    test_data = test_data.sample(frac=1, random_state=42).reset_index(drop=True)
-    test_labels = test_labels.sample(frac=1, random_state=42).reset_index(drop=True)
-
-    X_train = train_data
-    y_train = train_labels
-
-    X_val = val_data
-    y_val = val_labels
-
-    X_test = test_data
-    y_test = test_labels
-
-    return X_train, X_val, X_test, y_train, y_val, y_test
-
-
-def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rounds=100):
-    X_train = X_train.values
-    X_test = X_test.values
-    thresholds = np.arange(0.0, 1.0, 0.00001)
-    avgs = []
-
-    if hasattr(clf, 'feature_importances_'):
-        importances = clf.feature_importances_
-        sorted_indices = np.argsort(importances)[::-1]
-        sorted_importances = importances[sorted_indices]
-
-        print("Feature importances (sorted):")
-        for idx in sorted_indices:
-            print(f"Feature {idx}: {importances[idx]}")
-
-        print(f"Sum of feature importances: {np.sum(importances)}")
-    else:
-        print("The classifier does not have feature importances.")
-
-    for thresh in thresholds:
-        loopavg = []
-        for x in range(1):
-            selection = SelectFromModel(clf, threshold=thresh, prefit=True)
-            select_X_train = selection.transform(X_train)
-            select_X_test = selection.transform(X_test)
-            n_selected_features = select_X_train.shape[1]
-
-            if n_selected_features < 10:
-                print(f"Stopping as n_selected_features < 10 (n={n_selected_features})")
-                break
-
-            model = CatBoostClassifier(
-                loss_function='Logloss',
-                iterations=10000,
-                early_stopping_rounds=early_stopping_rounds,
-                min_child_samples=1,
-                max_depth=7,
-                subsample=0.620476062728463,
-                colsample_bylevel=0.5010304127889094,
-                learning_rate=0.016481827926062682,
-                random_seed=62,
-                verbose=False,
-                task_type="GPU",
-                devices="0"
-            )
-
-            model.fit(select_X_train, y_train.values.ravel(), eval_set=[(select_X_test, y_test)], verbose=False)
-            ypred = model.predict(select_X_test)
-            accuracy = accuracy_score(y_test, ypred)
-            print(f"Thresh={thresh:.4f}, n={n_selected_features}, Accuracy: {accuracy * 100.0:.2f}")
-            loopavg.append(accuracy)
-
-        if n_selected_features < 10:
-            break
-
-        avgs.append((thresh, np.mean(loopavg)))
-
-    best_thresh, best_accuracy = max(avgs, key=lambda x: x[1])
-    print(f"Best threshold: {best_thresh:.4f}, Best accuracy: {best_accuracy:.4f}")
-
-    selection = SelectFromModel(clf, threshold=best_thresh, prefit=True)
-    select_X_train = selection.transform(X_train)
-    select_X_test = selection.transform(X_test)
-    selected_model = CatBoostClassifier(**clf.get_params())
-    selected_model.set_params(early_stopping_rounds=early_stopping_rounds)
-    selected_model.fit(select_X_train, y_train.values.ravel(), eval_set=[(select_X_test, y_test)], verbose=False)
-
-    return selected_model, best_accuracy
-
-
-def plot_losses(train_losses, val_losses, train_auc, val_auc, trial_number, accuracy, auc):
+def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, accuracy, auc):
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
 
     ax1.plot(train_losses, label='Train Loss')
     ax1.plot(val_losses, label='Validation Loss')
     ax1.set_xlabel('Number of iterations')
     ax1.set_ylabel('Log Loss')
-    ax1.set_title(f'Learning Curves - Log Loss (Trial {trial_number}, Acc: {accuracy:.4f}, AUC: {auc:.4f})')
+    ax1.set_title(
+        f'Learning Curves - Log Loss (Features removed: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
     ax1.legend()
     ax1.grid()
 
@@ -202,7 +89,8 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, trial_number, accu
     ax2.plot(val_auc, label='Validation AUC')
     ax2.set_xlabel('Number of iterations')
     ax2.set_ylabel('AUC')
-    ax2.set_title(f'Learning Curves - AUC (Trial {trial_number}, Acc: {accuracy:.4f}, AUC: {auc:.4f})')
+    ax2.set_title(
+        f'Learning Curves - AUC (Features removed: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
     ax2.legend()
     ax2.grid()
 
@@ -210,32 +98,211 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, trial_number, accu
     plt.show()
 
 
-if __name__ == "__main__":
-    sampler = TPESampler()
-    study = optuna.create_study(direction="maximize", sampler=sampler, pruner=MedianPruner(),
-                                study_name="Test Maximum")
-    try:
-        study.optimize(objective, n_trials=10000)
-    except KeyboardInterrupt:
-        print("Optimization interrupted by user.")
+def create_shap_graph(model_path, X_train):
+    model = CatBoostClassifier()
+    model.load_model(model_path)
 
-    print("Number of finished trials: ", len(study.trials))
-    print("Best trial: ", study.best_trial.params)
-    print("Best value: ", study.best_value)
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_train)
 
-    best_model = best_model_state
-    print(f"Best model accuracy: {best_accuracy}")
-    print(f"Best model AUC: {best_auc}")
+    mean_abs_shap_values = np.abs(shap_values).mean(axis=0)
+    feature_importance = sorted(zip(X_train.columns, mean_abs_shap_values), key=lambda x: x[1], reverse=True)
 
-    loaded_model = joblib.load(f'models/best_model_0.7079207920792079.pkl')
+    top_50_features = feature_importance[:50]
+    print("Most influential features:")
+    for feature, importance in top_50_features:
+        print(f"{feature}: {importance}")
 
-    X_train, X_val, X_test, y_train, y_val, y_test = get_train_test_data()
-    selected_model, best_accuracy_final = threshold_selector(loaded_model, X_train, y_train, X_test, y_test)
-    selected_model.save_model(f'models/model_final_{best_accuracy_final}.cbm')
-    importances = selected_model.feature_importances_
+    top_50_df = pd.DataFrame(top_50_features, columns=["Feature", "Importance"])
+
+    plt.figure(figsize=(12, 20))
+    plt.barh(top_50_df["Feature"], top_50_df["Importance"], color='blue')
+    plt.xlabel('Mean Absolute SHAP Value')
+    plt.ylabel('Features')
+    plt.title("SHAP Values for CatBoost model")
+    plt.gca().invert_yaxis()
+    plt.tight_layout()
+    plt.show()
+
+
+def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
+    cat_features = X_train.select_dtypes(include=['category']).columns.tolist()
+    train_pool = Pool(X_train, y_train, cat_features=cat_features)
+    val_pool = Pool(X_val, y_val, cat_features=cat_features)
+
+    params['eval_metric'] = 'Logloss'
+
+    model = CatBoostClassifier(**params)
+    model.fit(train_pool, eval_set=val_pool, verbose=False)
+
+    results = model.get_evals_result()
+    train_losses = results['learn']['Logloss']
+    val_losses = results['validation']['Logloss']
+
+    y_val_pred = model.predict(val_pool)
+    y_val_pred_proba = model.predict_proba(val_pool)[:, 1]
+    accuracy = accuracy_score(y_val, y_val_pred)
+
+    train_auc = roc_auc_score(y_train, model.predict_proba(train_pool)[:, 1])
+    val_auc = roc_auc_score(y_val, y_val_pred_proba)
+
+    return model, accuracy, val_auc, train_losses, val_losses, [train_auc], [val_auc]
+
+
+def adjust_hyperparameter_ranges(study, num_best_trials=20):
+    trials = sorted(study.trials, key=lambda t: t.value, reverse=True)
+    best_trials = trials[:num_best_trials]
+
+    new_ranges = {}
+    for param_name in study.best_params.keys():
+        values = [t.params[param_name] for t in best_trials if param_name in t.params]
+        if values:
+            if isinstance(study.best_params[param_name], int):
+                new_ranges[param_name] = {
+                    'type': 'int',
+                    'low': max(min(values) - 1, 1),
+                    'high': min(max(values) + 1, 10)
+                }
+            elif isinstance(study.best_params[param_name], float):
+                new_ranges[param_name] = {
+                    'type': 'float',
+                    'low': max(min(values) * 0.8, 0.00001),
+                    'high': min(max(values) * 1.2, 150.0)
+                }
+            else:  # For categorical parameters
+                new_ranges[param_name] = {
+                    'type': 'categorical',
+                    'choices': list(set(values))
+                }
+
+    return new_ranges
+
+
+def objective(trial, X_train, X_val, y_train, y_val, per_float_feature_quantization, params=None):
+    global should_pause, best_accuracy, best_auc_diff
+    while should_pause:
+        time.sleep(1)
+
+    if params is None:
+        params = {
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
+            'depth': trial.suggest_int('depth', 1, 10),
+            'l2_leaf_reg': trial.suggest_float('l2_leaf_reg', 25, 35, log=True),
+            'bootstrap_type': trial.suggest_categorical('bootstrap_type', ['Bayesian', 'Bernoulli', 'MVS']),
+            'random_strength': trial.suggest_float('random_strength', 1e-8, 10.0, log=True),
+            'od_type': trial.suggest_categorical('od_type', ['IncToDec', 'Iter']),
+        }
+        if per_float_feature_quantization:
+            params['per_float_feature_quantization'] = per_float_feature_quantization
+        if params['bootstrap_type'] == 'Bayesian':
+            params['bagging_temperature'] = trial.suggest_float('bagging_temperature', 0.0, 10.0)
+
+    params.update({
+        'iterations': 1000,
+        'eval_metric': 'Logloss',
+        'use_best_model': True,
+        'early_stopping_rounds': 250,
+        'task_type': 'GPU',
+        'devices': '0',
+        'verbose': False,
+        'per_float_feature_quantization': per_float_feature_quantization
+    })
+
+    cat_features = X_train.select_dtypes(include=['category']).columns.tolist()
+    train_pool = Pool(X_train, y_train, cat_features=cat_features)
+    val_pool = Pool(X_val, y_val, cat_features=cat_features)
+
+    model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train,
+                                                                                                       X_val, y_train,
+                                                                                                       y_val)
+
+    auc_diff = abs(train_auc[-1] - val_auc[-1])
+
+    if accuracy > 0.65 and (auc_diff < 0.10):
+        best_accuracy = accuracy
+        best_auc_diff = auc_diff
+        model_filename = f'models/catboost/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.cbm'
+        model.save_model(model_filename)
+        plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
+                    auc if auc is not None else 0)
+
+    return accuracy
+
+
+def optimize_model(X_train, X_val, y_train, y_val, per_float_feature_quantization, n_rounds=1,
+                   n_trials_per_round=10000):
+    global best_accuracy, best_auc
+
+    for round in range(n_rounds):
+        print(f"Starting optimization round {round + 1}/{n_rounds}")
+
+        if round == 0:
+            study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
+            study.optimize(
+                lambda trial: objective(trial, X_train, X_val, y_train, y_val, per_float_feature_quantization),
+                n_trials=n_trials_per_round)
+        else:
+            new_ranges = adjust_hyperparameter_ranges(study)
+
+            def objective_with_new_ranges(trial):
+                params = {}
+                for k, v in new_ranges.items():
+                    if v['type'] == 'int':
+                        params[k] = trial.suggest_int(k, v['low'], v['high'])
+                    elif v['type'] == 'float':
+                        params[k] = trial.suggest_float(k, max(v['low'], 1e-5), min(v['high'], 100.0), log=True)
+                    elif v['type'] == 'categorical':
+                        params[k] = trial.suggest_categorical(k, v['choices'])
+                return objective(trial, X_train, X_val, y_train, y_val, per_float_feature_quantization, params)
+
+            study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
+            study.optimize(objective_with_new_ranges, n_trials=n_trials_per_round)
+
+        print(f"Round {round + 1} best accuracy: {study.best_value:.4f}")
+        print(f"Round {round + 1} best parameters: {study.best_params}")
+
+    return study.best_trial
+
+
+def get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val, n_features,
+                                 per_float_feature_quantization):
+    model = CatBoostClassifier()
+    model.load_model(model_path)
+
+    feature_importance = model.get_feature_importance()
     feature_names = X_train.columns
-    feature_importance_list = list(zip(feature_names, importances))
-    feature_importance_list.sort(key=lambda x: x[1], reverse=True)
-    print("Most Important Features:")
-    for feature, importance in feature_importance_list:
-        print(f'{feature}: {importance}')
+    feature_importance = sorted(zip(feature_names, feature_importance), key=lambda x: x[1], reverse=True)
+
+    top_n_features = [feature for feature, _ in feature_importance[:n_features]]
+
+    print(f"Top {n_features} features:")
+    for feature, importance in feature_importance[:n_features]:
+        print(f"{feature}: {importance}")
+
+    X_train_filtered = X_train[top_n_features]
+    X_val_filtered = X_val[top_n_features]
+
+    print(f"\nRetraining model with top {n_features} features...")
+    best_trial = optimize_model(X_train_filtered, X_val_filtered, y_train, y_val, per_float_feature_quantization)
+
+    return best_trial.params, best_trial.value
+
+
+if __name__ == "__main__":
+    input_thread = threading.Thread(target=user_input_thread, daemon=True)
+    input_thread.start()
+
+    # Specify your golden features
+    golden_features = ['current_fight_open_odds_diff', 'total_strikes_landed_diff_fighter_avg_last_3']
+
+    X_train, X_val, y_train, y_val, per_float_feature_quantization = get_train_val_data(golden_features)
+    print("Starting initial optimization and evaluation...")
+
+    best_trial = optimize_model(X_train, X_val, y_train, y_val, per_float_feature_quantization)
+    best_params = best_trial.params
+    best_accuracy = best_trial.value
+
+    # Create and evaluate the best model
+    best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train, y_val)
+    best_auc = auc
+

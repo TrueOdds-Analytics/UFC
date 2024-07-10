@@ -1,187 +1,326 @@
-import pandas as pd
 import numpy as np
+import pandas as pd
+import optuna
 from optuna.samplers import TPESampler
-import joblib
-import optuna.importance
-import lightgbm as lgb
-from sklearn.metrics import accuracy_score
-from sklearn.feature_selection import SelectFromModel
 from optuna.pruners import MedianPruner
+import lightgbm as lgb
+from sklearn.metrics import accuracy_score, roc_auc_score
+import matplotlib.pyplot as plt
+import shap
+import threading
+import time
+import sys
 
+# Global variables
+should_pause = False
 best_accuracy = 0
-best_model_state = None
+best_auc = 0
+best_auc_diff = 0
 
-def objective(trial):
-    global best_accuracy, best_model_state, best_train_accuracy, best_train_losses, best_test_accuracy, best_test_losses
+def user_input_thread():
+    global should_pause
+    while True:
+        user_input = input("Press 'p' to pause/resume or 'q' to quit: ")
+        if user_input.lower() == 'p':
+            should_pause = not should_pause
+            print("Paused" if should_pause else "Resumed")
+        elif user_input.lower() == 'q':
+            print("Quitting...")
+            should_pause = True
+            break
 
-    search_space = {
-        "verbosity": -1,
-        'lambda_l1': trial.suggest_float('lambda_l1', 1e-3, 10.0, log=True),
-        'lambda_l2': trial.suggest_float('lambda_l2', 1e-3, 10.0, log=True),
-        'device_type': trial.suggest_categorical('device_type', ['gpu']),
-        "objective": trial.suggest_categorical("objective", ["binary"]),
-        "num_threads": trial.suggest_categorical("num_threads", [-1]),
-        "learning_rate": trial.suggest_float("learning_rate", 0.001, 0.1, log=True),
-        "min_child_samples": trial.suggest_int("min_child_samples", 1, 100),
-        "max_depth": trial.suggest_int("max_depth", 1, 20),
-        "num_leaves": trial.suggest_int("num_leaves", 2, 256),
-        "subsample": trial.suggest_float("subsample", 0.1, 1.0, log=True),
-        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.1, 1.0, log=True),
-        "min_child_weight": trial.suggest_float("min_child_weight", 1e-8, 10.0, log=True),
-        "n_estimators": trial.suggest_int("n_estimators", 100, 500),
-        "boost_from_average": trial.suggest_categorical("boost_from_average", [False]),
-        "random_state": trial.suggest_int("random_state", 1, 1000),
-    }
+def get_train_val_data():
+    train_data = pd.read_csv('../data/train test data/train_data.csv')
+    val_data = pd.read_csv('../data/train test data/val_data.csv')
 
-    X_train, X_test, y_train, y_test = get_train_test_data()
+    train_labels = train_data['winner']
+    val_labels = val_data['winner']
+    train_data = train_data.drop(['winner'], axis=1)
+    val_data = val_data.drop(['winner'], axis=1)
+    columns_to_drop = ['fighter', 'fighter_b', 'fight_date', 'current_fight_date']
+    train_data = train_data.drop(columns=columns_to_drop)
+    val_data = val_data.drop(columns=columns_to_drop)
 
-    model = lgb.LGBMClassifier(**search_space)
-    model.fit(
-        X_train, y_train,
-        eval_set=[(X_test, y_test)]
+    # Shuffle data
+    train_data = train_data.sample(frac=1, random_state=42).reset_index(drop=True)
+    train_labels = train_labels.sample(frac=1, random_state=42).reset_index(drop=True)
+    val_data = val_data.sample(frac=1, random_state=42).reset_index(drop=True)
+    val_labels = val_labels.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    # Convert specified columns to category type
+    category_columns = [
+        'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
+        'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
+        'result_fight_2', 'winner_fight_2', 'weight_class_fight_2', 'scheduled_rounds_fight_2',
+        'result_b_fight_2', 'winner_b_fight_2', 'weight_class_b_fight_2', 'scheduled_rounds_b_fight_2',
+        'result_fight_3', 'winner_fight_3', 'weight_class_fight_3', 'scheduled_rounds_fight_3',
+        'result_b_fight_3', 'winner_b_fight_3', 'weight_class_b_fight_3', 'scheduled_rounds_b_fight_3'
+    ]
+
+    for df in [train_data, val_data]:
+        df[category_columns] = df[category_columns].astype("category")
+
+    return train_data, val_data, train_labels, val_labels
+
+def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, accuracy, auc):
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
+
+    ax1.plot(train_losses, label='Train Loss')
+    ax1.plot(val_losses, label='Validation Loss')
+    ax1.set_xlabel('Number of iterations')
+    ax1.set_ylabel('Log Loss')
+    ax1.set_title(
+        f'Learning Curves - Log Loss (Features removed: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
+    ax1.legend()
+    ax1.grid()
+
+    ax2.plot(train_auc, label='Train AUC')
+    ax2.plot(val_auc, label='Validation AUC')
+    ax2.set_xlabel('Number of iterations')
+    ax2.set_ylabel('AUC')
+    ax2.set_title(
+        f'Learning Curves - AUC (Features removed: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
+    ax2.legend()
+    ax2.grid()
+
+    plt.tight_layout()
+    plt.show()
+
+def create_shap_graph(model_path, X_train):
+    # Load the model from the file
+    model = lgb.Booster(model_file=model_path)
+
+    # Create the SHAP explainer
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_train)
+
+    mean_abs_shap_values = np.abs(shap_values).mean(axis=0)
+    feature_importance = sorted(zip(X_train.columns, mean_abs_shap_values), key=lambda x: x[1], reverse=True)
+
+    top_50_features = feature_importance[:50]
+    print("Most influential features:")
+    for feature, importance in top_50_features:
+        print(f"{feature}: {importance}")
+
+    top_50_df = pd.DataFrame(top_50_features, columns=["Feature", "Importance"])
+
+    plt.figure(figsize=(12, 20))
+    plt.barh(top_50_df["Feature"], top_50_df["Importance"], color='blue')
+    plt.xlabel('Mean Absolute SHAP Value')
+    plt.ylabel('Features')
+    plt.title("SHAP Values for LightGBM model")
+    plt.gca().invert_yaxis()
+    plt.tight_layout()
+    plt.show()
+
+def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
+    train_data = lgb.Dataset(X_train, label=y_train, categorical_feature='auto')
+    val_data = lgb.Dataset(X_val, label=y_val, categorical_feature='auto', reference=train_data)
+
+    callbacks = [
+        lgb.early_stopping(stopping_rounds=250, verbose=False),
+        lgb.log_evaluation(period=0)  # Suppress default logging
+    ]
+
+    model = lgb.train(
+        params,
+        train_data,
+        num_boost_round=1000,
+        valid_sets=[train_data, val_data],
+        valid_names=['train', 'valid'],
+        callbacks=callbacks
     )
-    y_pred = model.predict(X_test)
-    accuracy = accuracy_score(y_test, y_pred)
 
-    # Update the global best model if the current one is better
-    if accuracy > best_accuracy:
+    results = model.best_score
+    train_losses = model.best_score['train']['binary_logloss']
+    val_losses = model.best_score['valid']['binary_logloss']
+    train_auc = model.best_score['train']['auc']
+    val_auc = model.best_score['valid']['auc']
+
+    y_val_pred = model.predict(X_val, num_iteration=model.best_iteration)
+    y_val_pred_binary = (y_val_pred > 0.5).astype(int)
+    accuracy = accuracy_score(y_val, y_val_pred_binary)
+
+    try:
+        auc = roc_auc_score(y_val, y_val_pred)
+    except ValueError as e:
+        print(f"Error calculating AUC: {str(e)}")
+        print(f"Unique values in y_val: {np.unique(y_val)}")
+        print(f"Shape of predict_proba: {y_val_pred.shape}")
+        auc = None
+
+    return model, accuracy, auc, [train_losses], [val_losses], [train_auc], [val_auc]
+
+
+def adjust_hyperparameter_ranges(study, num_best_trials=20):
+    trials = sorted(study.trials, key=lambda t: t.value, reverse=True)
+    best_trials = trials[:num_best_trials]
+
+    new_ranges = {}
+    for param_name in study.best_params.keys():
+        values = [t.params[param_name] for t in best_trials if param_name in t.params]
+        if values:
+            if isinstance(study.best_params[param_name], int):
+                new_ranges[param_name] = {
+                    'type': 'int',
+                    'low': max(min(values) - 1, 1),
+                    'high': min(max(values) + 1, 10)
+                }
+            elif isinstance(study.best_params[param_name], float):
+                new_ranges[param_name] = {
+                    'type': 'float',
+                    'low': max(min(values) * 0.8, 0.00001),
+                    'high': min(max(values) * 1.2, 150.0)
+                }
+            else:  # For categorical parameters
+                new_ranges[param_name] = {
+                    'type': 'categorical',
+                    'choices': list(set(values))
+                }
+
+    return new_ranges
+
+def objective(trial, X_train, X_val, y_train, y_val, params=None):
+    if params is None:
+        params = {
+            'lambda_l1': trial.suggest_float('lambda_l1', 1e-8, 10.0, log=True),
+            'lambda_l2': trial.suggest_float('lambda_l2', 1e-8, 10.0, log=True),
+            'num_leaves': trial.suggest_int('num_leaves', 2, 256),
+            'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
+            'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
+            'bagging_freq': trial.suggest_int('bagging_freq', 1, 7),
+            'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),
+            'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.1, log=True),
+        }
+
+    params.update({
+        'objective': 'binary',
+        'metric': ['binary_logloss', 'auc'],
+        'verbosity': -1,
+        'boosting_type': 'gbdt',
+        'device': 'gpu',  # Use GPU
+        'gpu_platform_id': 0,  # ID of the GPU platform to use
+        'gpu_device_id': 0,   # ID of the GPU device to use
+    })
+
+    model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train,
+                                                                                                       X_val, y_train,
+                                                                                                       y_val)
+
+    # Calculate the difference between train and validation AUC
+    auc_diff = abs(train_auc[-1] - val_auc[-1])
+
+    if accuracy > 0.685 and (auc_diff < 0.10):
         best_accuracy = accuracy
-        best_model_state = model  # Save the best model
+        best_auc_diff = auc_diff
+        model_filename = f'models/lightgbm/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.txt'
+        model.save_model(model_filename)
+        plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
+                    auc if auc is not None else 0)
 
     return accuracy
 
+def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=10000):
+    global best_accuracy, best_auc
 
-def get_train_test_data():
-    # Load train data from CSV
-    train_data = pd.read_csv('../data/train test data/train_data.csv')
-    train_labels = train_data['winner']
-    train_data = train_data.drop(['winner'], axis=1)
+    for round in range(n_rounds):
+        print(f"Starting optimization round {round + 1}/{n_rounds}")
 
-    # Shuffle train data
-    train_data = train_data.sample(frac=1, random_state=20).reset_index(drop=True)
-    train_labels = train_labels.sample(frac=1, random_state=20).reset_index(drop=True)
+        if round == 0:
+            study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
+            study.optimize(lambda trial: objective(trial, X_train, X_val, y_train, y_val), n_trials=n_trials_per_round)
+        else:
+            new_ranges = adjust_hyperparameter_ranges(study)
 
-    # Load test data from CSV
-    test_data = pd.read_csv('data/train test data/test_data.csv')
-    test_labels = test_data['winner']
-    test_data = test_data.drop(['winner'], axis=1)
+            def objective_with_new_ranges(trial):
+                params = {}
+                for k, v in new_ranges.items():
+                    if v['type'] == 'int':
+                        params[k] = trial.suggest_int(k, v['low'], v['high'])
+                    elif v['type'] == 'float':
+                        if k in ['feature_fraction', 'bagging_fraction']:
+                            params[k] = trial.suggest_float(k, max(v['low'], 0.1), min(v['high'], 1.0))
+                        elif k == 'learning_rate':
+                            params[k] = trial.suggest_float(k, max(v['low'], 1e-5), min(v['high'], 1.0), log=True)
+                        else:
+                            params[k] = trial.suggest_float(k, max(v['low'], 1e-5), min(v['high'], 100.0), log=True)
+                    elif v['type'] == 'categorical':
+                        params[k] = trial.suggest_categorical(k, v['choices'])
+                return objective(trial, X_train, X_val, y_train, y_val, params)
 
-    # Shuffle test data
-    test_data = test_data.sample(frac=1, random_state=20).reset_index(drop=True)
-    test_labels = test_labels.sample(frac=1, random_state=20).reset_index(drop=True)
+            study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
+            study.optimize(objective_with_new_ranges, n_trials=n_trials_per_round)
 
-    X_train = train_data
-    y_train = train_labels
+        print(f"Round {round + 1} best accuracy: {study.best_value:.4f}")
+        print(f"Round {round + 1} best parameters: {study.best_params}")
 
-    X_test = test_data
-    y_test = test_labels
+    return study.best_trial
 
-    return X_train, X_test, y_train, y_test
+def get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val, n_features):
+    # Load the model from the file
+    model = lgb.Booster(model_file=model_path)
 
-def threshold_selector(clf, X_train, y_train, X_test, y_test, early_stopping_rounds=10):
-    X_train = X_train.values
-    X_test = X_test.values
-    thresholds = np.arange(0.0, 1.0, 0.0001)
-    avgs = []
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X_train)
 
-    # Ensure clf is prefit and has feature importances
-    if hasattr(clf, 'feature_importances_'):
-        importances = clf.feature_importances_
-        sorted_indices = np.argsort(importances)[::-1]  # Sort in descending order
-        sorted_importances = importances[sorted_indices]
+    mean_abs_shap_values = np.abs(shap_values).mean(axis=0)
+    feature_importance = sorted(zip(X_train.columns, mean_abs_shap_values), key=lambda x: x[1], reverse=True)
 
-        print("Feature importances (sorted):")
-        for idx in sorted_indices:
-            print(f"Feature {idx}: {importances[idx]}")
+    top_n_features = [feature for feature, _ in feature_importance[:n_features]]
 
-        print(f"Sum of feature importances: {np.sum(importances)}")
-    else:
-        print("The classifier does not have feature importances.")
+    print(f"Top {n_features} features:")
+    for feature, importance in feature_importance[:n_features]:
+        print(f"{feature}: {importance}")
 
-    for thresh in thresholds:
-        loopavg = []
-        # Run each threshold 1x for the avg
-        for x in range(1):
-            selection = SelectFromModel(clf, threshold=thresh, prefit=True)
-            select_X_train = selection.transform(X_train)
-            select_X_test = selection.transform(X_test)
-            n_selected_features = select_X_train.shape[1]
+    X_train_filtered = X_train[top_n_features]
+    X_val_filtered = X_val[top_n_features]
 
-            if n_selected_features < 10:
-                print(f"Stopping as n_selected_features < 10 (n={n_selected_features})")
-                break
+    print(f"\nRetraining model with top {n_features} features...")
+    best_trial = optimize_model(X_train_filtered, X_val_filtered, y_train, y_val)
 
-            model = lgb.LGBMClassifier(
-                verbosity=0,
-                reg_lambda=0.06149361099544647,
-                reg_alpha=0.045998526993829864,
-                tree_method="gpu_hist",
-                objective="binary:logistic",
-                n_jobs=-1,
-                learning_rate=0.02920212897819158,
-                min_child_weight=5,
-                max_depth=18,
-                max_delta_step=3,
-                subsample=0.2705154119188745,
-                colsample_bytree=0.7402834256314674,
-                gamma=0.017109525533870292,
-                n_estimators=7295,
-                eta=0.12635351933273808,
-                random_state=42
-            )
-            # Set early stopping rounds
-            model.set_params(early_stopping_rounds=early_stopping_rounds)
-
-            model.fit(select_X_train, y_train.values.ravel(), eval_set=[(select_X_test, y_test)], verbose=False)
-            ypred = model.predict(select_X_test)
-            accuracy = accuracy_score(y_test, ypred)
-            print(f"Thresh={thresh:.4f}, n={n_selected_features}, Accuracy: {accuracy * 100.0:.2f}")
-            loopavg.append(accuracy)
-
-        if n_selected_features < 10:
-            break
-
-        avgs.append((thresh, np.mean(loopavg)))
-
-    best_thresh, best_accuracy = max(avgs, key=lambda x: x[1])
-    print(f"Best threshold: {best_thresh:.4f}, Best accuracy: {best_accuracy:.4f}")
-
-    selection = SelectFromModel(clf, threshold=best_thresh, prefit=True)
-    select_X_train = selection.transform(X_train)
-    select_X_test = selection.transform(X_test)
-    selected_model = lgb.LGBMClassifier(**clf.get_params())
-    selected_model.set_params(early_stopping_rounds=early_stopping_rounds)
-    selected_model.fit(select_X_train, y_train.values.ravel(), eval_set=[(select_X_test, y_test)], verbose=False)
-
-    return selected_model, best_accuracy
-
+    return best_trial.params, best_trial.value
 
 if __name__ == "__main__":
-    sampler = TPESampler()
-    study = optuna.create_study(direction="maximize", sampler=sampler, pruner=MedianPruner())
+    input_thread = threading.Thread(target=user_input_thread, daemon=True)
+    input_thread.start()
+
+    X_train, X_val, y_train, y_val = get_train_val_data()
+    print("Starting initial optimization and evaluation...")
     try:
-        study.optimize(objective, n_trials=100000)
+        best_trial = optimize_model(X_train, X_val, y_train, y_val)
+        best_params = best_trial.params
+        best_accuracy = best_trial.value
+
+        # Create and evaluate the best model
+        best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train,
+                                                                              y_val)
+        best_auc = auc
+        print("Initial optimization completed.")
+        print(f"Best model validation accuracy: {best_accuracy:.4f}")
+        print(f"Best model validation AUC: {best_auc:.4f}")
+        print("Best parameters:", best_params)
+        print("--------------------")
+
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
 
-    print("Number of finished trials: ", len(study.trials))
-    print("Best trial: ", study.best_trial.params)
-    print("Best value: ", study.best_value)
+        # Uncomment the following lines if you want to create a SHAP graph for the best model
+        # print("Creating SHAP graph for the best model")
+        # X_train, X_val, y_train, y_val = get_train_val_data()
+        # model_path = f'models/lightgbm/model_0.6866_342_features_auc_diff_0.0616_good.txt'
+        # create_shap_graph(model_path, X_train)
+        # print("SHAP graph creation completed.")
+        # print("--------------------")
 
-    best_model = best_model_state
-    print(f"Best model accuracy: {best_accuracy}")
-
-    # Save the best model as a file
-    joblib.dump(best_model, f'models/best_model_{best_accuracy}.pkl')
-    loaded_model = joblib.load(f'models/best_model_0.676923076923077.pkl')
-    # Run threshold selector using the best model
-    X_train, X_test, y_train, y_test = get_train_test_data()
-    selected_model = threshold_selector(loaded_model, X_train, y_train, X_test, y_test)
-
-    importances = selected_model.feature_importances_
-    feature_names = X_train.columns
-    feature_importance_list = list(zip(feature_names, importances))
-    feature_importance_list.sort(key=lambda x: x[1], reverse=True)
-    print("Top 50 Most Important Features:")
-    for feature, importance in feature_importance_list[:50]:
-        print(f'{feature}: {importance}')
+        # Uncomment the following lines if you want to retrain with top features
+        # n_features = 100
+        #
+        # X_train, X_val, y_train, y_val = get_train_val_data()
+        # model_path = 'models/lightgbm/model_0.6683_338_features.txt'
+        # retrained_best_params, retrained_accuracy = get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val,
+        #                                                                          n_features)
+        #
+        # print("--------------------")
+        # print("Retraining with top features completed.")
+        # print(f"Retrained model validation accuracy: {retrained_accuracy:.4f}")
+        # print("Retrained model best parameters:", retrained_best_params)
