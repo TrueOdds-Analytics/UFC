@@ -72,11 +72,13 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
     # Sort the test_data by date
     test_data = test_data.sort_values('current_fight_date')
 
-    # Initialize daily bankrolls and stakes
+    # Initialize daily tracking
     daily_bankrolls = {}
     daily_kelly_bankrolls = {}
     daily_fixed_stakes = {}
     daily_kelly_stakes = {}
+    daily_fixed_profits = {}
+    daily_kelly_profits = {}
 
     current_date = None
     date_bankroll = initial_bankroll
@@ -91,16 +93,20 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
         processed_fights.add(fight_id)
 
-        # If it's a new date, update the bankrolls and reset daily stakes
+        # If it's a new date, update the bankrolls and reset daily tracking
         if fight_date != current_date:
             if current_date is not None:
-                daily_bankrolls[current_date] = date_bankroll
-                daily_kelly_bankrolls[current_date] = date_kelly_bankroll
+                current_bankroll = date_bankroll + daily_fixed_profits.get(current_date, 0)
+                kelly_bankroll = date_kelly_bankroll + daily_kelly_profits.get(current_date, 0)
+                daily_bankrolls[current_date] = current_bankroll
+                daily_kelly_bankrolls[current_date] = kelly_bankroll
             current_date = fight_date
             date_bankroll = current_bankroll
             date_kelly_bankroll = kelly_bankroll
             daily_fixed_stakes[current_date] = 0
             daily_kelly_stakes[current_date] = 0
+            daily_fixed_profits[current_date] = 0
+            daily_kelly_profits[current_date] = 0
 
         true_winner = row['fighter'] if y_test.iloc[i] == 1 else row['fighter_b']
         winning_probability = max(y_pred_proba[i])
@@ -108,16 +114,15 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
         if winning_probability >= confidence_threshold:
             confident_predictions += 1
-            odds = row['current_fight_open_odds'] if predicted_winner == row['fighter'] else row[
-                'current_fight_open_odds_b']
+            odds = row['current_fight_open_odds'] if predicted_winner == row['fighter'] else row['current_fight_open_odds_b']
 
             # Compounding Fixed Fraction Betting
             available_fixed_bankroll = date_bankroll - daily_fixed_stakes[current_date]
-            stake = min(available_fixed_bankroll * fixed_bet_fraction, available_fixed_bankroll)
+            stake = min(date_bankroll * fixed_bet_fraction, available_fixed_bankroll)
             if stake <= 0:
                 continue  # Skip this bet if no funds are available
             daily_fixed_stakes[current_date] += stake
-            profit = calculate_profit(odds, stake)
+            fixed_profit = calculate_profit(odds, stake)
             total_volume += stake
 
             # Fractional Kelly Criterion Betting
@@ -149,27 +154,27 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
                 'Odds': odds,
                 'Fixed Fraction Bankroll Before': f"${date_bankroll:.2f}",
                 'Fixed Fraction Stake': f"${stake:.2f}",
-                'Fixed Fraction Potential Profit': f"${profit:.2f}",
+                'Fixed Fraction Potential Profit': f"${fixed_profit:.2f}",
                 'Kelly Bankroll Before': f"${date_kelly_bankroll:.2f}",
                 'Fractional Kelly Stake': f"${kelly_stake:.2f}",
                 'Fractional Kelly Potential Profit': f"${kelly_profit:.2f}"
             }
 
             if predicted_winner == true_winner:
-                current_bankroll += profit
-                kelly_bankroll += kelly_profit
+                daily_fixed_profits[current_date] += fixed_profit
+                daily_kelly_profits[current_date] += kelly_profit
                 correct_bets += 1
                 correct_confident_predictions += 1
-                bet_result['Fixed Fraction Profit'] = profit
+                bet_result['Fixed Fraction Profit'] = fixed_profit
                 bet_result['Kelly Profit'] = kelly_profit
             else:
-                current_bankroll -= stake
-                kelly_bankroll -= kelly_stake
+                daily_fixed_profits[current_date] -= stake
+                daily_kelly_profits[current_date] -= kelly_stake
                 bet_result['Fixed Fraction Profit'] = -stake
                 bet_result['Kelly Profit'] = -kelly_stake
 
-            bet_result['Fixed Fraction Bankroll After'] = f"${current_bankroll:.2f}"
-            bet_result['Kelly Bankroll After'] = f"${kelly_bankroll:.2f}"
+            bet_result['Fixed Fraction Bankroll After'] = f"${(date_bankroll + daily_fixed_profits[current_date]):.2f}"
+            bet_result['Kelly Bankroll After'] = f"${(date_kelly_bankroll + daily_kelly_profits[current_date]):.2f}"
 
             bet_result['Fixed Fraction ROI'] = (bet_result['Fixed Fraction Profit'] / date_bankroll) * 100
             bet_result['Kelly ROI'] = (bet_result['Kelly Profit'] / date_kelly_bankroll) * 100
@@ -178,6 +183,8 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
     # Add the last day's results
     if current_date is not None:
+        current_bankroll = date_bankroll + daily_fixed_profits.get(current_date, 0)
+        kelly_bankroll = date_kelly_bankroll + daily_kelly_profits.get(current_date, 0)
         daily_bankrolls[current_date] = current_bankroll
         daily_kelly_bankrolls[current_date] = kelly_bankroll
 
@@ -233,7 +240,6 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
     return (current_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
             correct_confident_predictions, kelly_bankroll, kelly_total_volume)
-
 
 def print_betting_results(total_fights, confident_predictions, correct_confident_predictions, total_bets, correct_bets,
                           initial_bankroll, final_bankroll, total_volume, confidence_threshold,
