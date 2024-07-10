@@ -340,9 +340,6 @@ def main(optimize_threshold=True, manual_threshold=None):
 
     test_data = pd.read_csv('data/train test data/test_data.csv')
 
-    # Remove duplicate fights
-    # test_data = test_data.drop_duplicates(subset=['fighter', 'fighter_b'], keep='first')
-
     y_test = test_data['winner']
 
     display_columns = ['current_fight_date', 'fighter', 'fighter_b']
