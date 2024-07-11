@@ -272,12 +272,12 @@ def split_train_val_test(matchup_data_file):
     # Ensure 'current_fight_date' is in datetime format
     matchup_df['current_fight_date'] = pd.to_datetime(matchup_df['current_fight_date'])
 
-    start_date = '2023-06-01'
+    start_date = '2023-07-01'
     end_date = '2023-12-31'  # Change this to your desired end date
 
     test_data = matchup_df[(matchup_df['current_fight_date'] >= start_date) &
                            (matchup_df['current_fight_date'] <= end_date)].copy()
-    remaining_data = matchup_df[matchup_df['current_fight_date'] < '2023-01-01'].copy()
+    remaining_data = matchup_df[matchup_df['current_fight_date'] < start_date].copy()
 
     # Sort remaining data by current_fight_date
     remaining_data = remaining_data.sort_values(by='current_fight_date', ascending=True)

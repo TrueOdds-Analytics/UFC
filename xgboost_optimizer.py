@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 import shap
 import threading
 import time
-import sys
 
 # Global variables
 should_pause = False
@@ -219,10 +218,10 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.685 and (auc_diff < 0.10):
+    if accuracy > 0.63 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
-        model_filename = f'models/xgboost/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.json'
+        model_filename = f'models/xgboost/jun-dec2023/model_{accuracy:.4f}_features_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
@@ -320,7 +319,7 @@ if __name__ == "__main__":
 
     # print("Creating SHAP graph for the best model")
     # X_train, X_val, y_train, y_val = get_train_val_data()
-    # model_path = f'models/xgboost/model_0.6866_342_features_auc_diff_0.0616_good.json'
+    # model_path = f'models/xgboost/model_0.6866_342_features_auc_diff_0.0616_good_jan-jun-jan-jun2024.json'
     # create_shap_graph(model_path, X_train)
     # print("SHAP graph creation completed.")
     # print("--------------------")

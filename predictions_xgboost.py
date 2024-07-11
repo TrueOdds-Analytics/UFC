@@ -94,7 +94,7 @@ def predict_outcome(model, specific_data, display_data, fighter_name, opponent_n
 
 # In the main part of the script, update the function call:
 if __name__ == "__main__":
-    model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0616_good_jan-jun-2024.json')
+    model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0616_good_jan-jun-jan-jun2024.json')
     model = load_model(model_path)
 
     console = Console()
