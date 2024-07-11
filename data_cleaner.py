@@ -269,26 +269,29 @@ def split_train_val_test(matchup_data_file):
     # Remove correlated features
     matchup_df, removed_features = remove_correlated_features(matchup_df)
 
-    # Create test set from fights on and after 2024-01-01
-    test_data = matchup_df[matchup_df['current_fight_date'] >= '2024-01-01'].copy()
-    remaining_data = matchup_df[matchup_df['current_fight_date'] < '2024-01-01'].copy()
+    # Ensure 'current_fight_date' is in datetime format
+    matchup_df['current_fight_date'] = pd.to_datetime(matchup_df['current_fight_date'])
 
-    # Sort remaining data by fight_date
-    remaining_data = remaining_data.sort_values(by='fight_date', ascending=True)
+    start_date = '2023-06-01'
+    end_date = '2023-12-31'  # Change this to your desired end date
+
+    test_data = matchup_df[(matchup_df['current_fight_date'] >= start_date) &
+                           (matchup_df['current_fight_date'] <= end_date)].copy()
+    remaining_data = matchup_df[matchup_df['current_fight_date'] < '2023-01-01'].copy()
+
+    # Sort remaining data by current_fight_date
+    remaining_data = remaining_data.sort_values(by='current_fight_date', ascending=True)
 
     # Calculate the index to split the remaining data into train and validation sets
-    split_index = int(len(remaining_data) * 0.90)
+    split_index = int(len(remaining_data) * 0.9)
 
-    # Get the date threshold for splitting the remaining data
-    split_date = remaining_data.iloc[split_index]['fight_date']
-
-    # Split the remaining data into train and validation sets based on the fight date
-    train_data = remaining_data[remaining_data['fight_date'] < split_date].copy()
-    val_data = remaining_data[remaining_data['fight_date'] >= split_date].copy()
+    # Split the remaining data into train and validation sets
+    train_data = remaining_data.iloc[:split_index].copy()
+    val_data = remaining_data.iloc[split_index:].copy()
 
     # Remove duplicate fights from validation and test data
     def remove_duplicates(df):
-        df = df.copy()  # Create a copy to avoid SettingWithCopyWarning
+        df = df.copy()
         df['fight_pair'] = df.apply(lambda row: tuple(sorted([row['fighter'], row['fighter_b']])), axis=1)
         df = df.drop_duplicates(subset=['fight_pair'], keep='first')
         df = df.drop(columns=['fight_pair'])
@@ -311,7 +314,8 @@ def split_train_val_test(matchup_data_file):
     with open('data/train test data/removed_features.txt', 'w') as file:
         file.write(','.join(removed_features))
 
-    print(f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
+    print(
+        f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
     print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}, Test set size: {len(test_data)}")
 
 def create_matchup_data(file_path, tester, name):

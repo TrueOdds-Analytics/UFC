@@ -21,6 +21,7 @@ import lightgbm as lgb
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.calibration import CalibratedClassifierCV
 
+
 def preprocess_data(data):
     category_columns = [
         'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
@@ -65,7 +66,7 @@ def calculate_kelly_fraction(p, b, kelly_fraction):
 
 
 def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial_bankroll=10000, kelly_fraction=0.125,
-                  fixed_bet_fraction=0.001, default_bet=0.05, min_odds=-300, print_fights=True):
+                  fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300, print_fights=True):
     current_bankroll = initial_bankroll
     kelly_bankroll = initial_bankroll
     total_volume = 0
@@ -123,7 +124,8 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
         if winning_probability >= confidence_threshold:
             confident_predictions += 1
-            odds = row['current_fight_open_odds'] if predicted_winner == row['fighter'] else row['current_fight_open_odds_b']
+            odds = row['current_fight_open_odds'] if predicted_winner == row['fighter'] else row[
+                'current_fight_open_odds_b']
 
             # Compounding Fixed Fraction Betting
             available_fixed_bankroll = date_bankroll - daily_fixed_stakes[current_date]
@@ -248,7 +250,33 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
             console.print()
 
     return (current_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
-            correct_confident_predictions, kelly_bankroll, kelly_total_volume)
+            correct_confident_predictions, kelly_bankroll, kelly_total_volume, daily_bankrolls, daily_kelly_bankrolls)
+
+
+def calculate_monthly_roi(daily_bankrolls, initial_bankroll):
+    monthly_roi = {}
+    monthly_profit = {}
+    current_month = None
+    month_start_bankroll = initial_bankroll
+
+    for date, bankroll in sorted(daily_bankrolls.items()):
+        month = date[:7]  # Extract YYYY-MM
+        if month != current_month:
+            if current_month is not None:
+                monthly_profit[current_month] = bankroll - month_start_bankroll
+            current_month = month
+            month_start_bankroll = bankroll
+
+    # Calculate profit for the last month
+    if current_month is not None:
+        monthly_profit[current_month] = bankroll - month_start_bankroll
+
+    # Calculate ROI for each month
+    for month, profit in monthly_profit.items():
+        roi = (profit / initial_bankroll) * 100
+        monthly_roi[month] = roi
+
+    return monthly_roi, monthly_profit
 
 def print_betting_results(total_fights, confident_predictions, correct_confident_predictions, total_bets, correct_bets,
                           initial_bankroll, final_bankroll, total_volume, confidence_threshold,
@@ -347,14 +375,16 @@ def print_overall_metrics(y_test, y_pred, y_pred_proba):
 def evaluate_threshold(threshold, y_test, y_pred_proba, test_data_with_display, INITIAL_BANKROLL, KELLY_FRACTION,
                        FIXED_BET_FRACTION):
     (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
-     correct_confident_predictions, kelly_final_bankroll, kelly_total_volume) = evaluate_bets(
+     correct_confident_predictions, kelly_final_bankroll, kelly_total_volume,
+     daily_bankrolls, daily_kelly_bankrolls) = evaluate_bets(
         y_test, y_pred_proba, test_data_with_display, threshold, INITIAL_BANKROLL,
-        KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.05, print_fights=False)
+        KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.00, print_fights=False)
 
     kelly_roi = ((kelly_final_bankroll - INITIAL_BANKROLL) / INITIAL_BANKROLL) * 100
 
     return (threshold, kelly_roi, final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
             correct_confident_predictions, kelly_final_bankroll, kelly_total_volume)
+
 
 class LGBMWrapper(BaseEstimator, ClassifierMixin):
     def __init__(self, model):
@@ -387,16 +417,16 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
     FIXED_BET_FRACTION = 0.1
 
     # Load and preprocess data
-    train_data = pd.read_csv('data/train test data/train_data.csv')
+    val_data = pd.read_csv('data/train test data/val_data.csv')
     test_data = pd.read_csv('data/train test data/test_data.csv')
 
     display_columns = ['current_fight_date', 'fighter', 'fighter_b']
-    y_train = train_data['winner']
+    y_val = val_data['winner']
     y_test = test_data['winner']
-    X_train = train_data.drop(['winner'] + display_columns, axis=1)
+    X_val = val_data.drop(['winner'] + display_columns, axis=1)
     X_test = test_data.drop(['winner'] + display_columns, axis=1)
 
-    X_train = preprocess_data(X_train)
+    X_val = preprocess_data(X_val)
     X_test = preprocess_data(X_test)
 
     display_data = test_data[display_columns]
@@ -404,15 +434,16 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 
     # Load and optionally calibrate model
     if model_type == 'xgboost':
-        model_path = os.path.abspath('models/xgboost/model_0.6866_342_features_auc_diff_0.0585.json')
+        model_path = (os.path.abspath
+                      ('models/xgboost/January - June 2024/model_0.6866_342_features_auc_diff_0.0616_good.json'))
         model = load_model(model_path, 'xgboost')
         expected_features = model.get_booster().feature_names
-        X_train = X_train.reindex(columns=expected_features)
+        X_val = X_val.reindex(columns=expected_features)
         X_test = X_test.reindex(columns=expected_features)
 
         if use_calibration:
             calibrated_model = CalibratedClassifierCV(model, cv='prefit', method='sigmoid')
-            calibrated_model.fit(X_train, y_train)
+            calibrated_model.fit(X_val, y_val)
             y_pred_proba = calibrated_model.predict_proba(X_test)
         else:
             y_pred_proba = model.predict_proba(X_test)
@@ -421,15 +452,15 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
         model_path = os.path.abspath('models/lightgbm/model_0.7313_342_features_auc_diff_0.0398.txt')
         model = load_model(model_path, 'lightgbm')
         expected_features = model.feature_name()
-        X_train = X_train.reindex(columns=expected_features)
+        X_val = X_val.reindex(columns=expected_features)
         X_test = X_test.reindex(columns=expected_features)
 
         lgb_wrapper = LGBMWrapper(model)
-        lgb_wrapper.fit(X_train, y_train)  # Fit the wrapper to set classes_
+        lgb_wrapper.fit(X_val, y_val)  # Fit the wrapper to set classes_
 
         if use_calibration:
             calibrated_model = CalibratedClassifierCV(lgb_wrapper, cv='prefit', method='sigmoid')
-            calibrated_model.fit(X_train, y_train)
+            calibrated_model.fit(X_val, y_val)
             y_pred_proba = calibrated_model.predict_proba(X_test)
         else:
             y_pred_proba = lgb_wrapper.predict_proba(X_test)
@@ -460,15 +491,34 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
             raise ValueError("If optimize_threshold is False, you must provide a manual_threshold value.")
         best_threshold = manual_threshold
 
-    # Evaluate bets and print results
     bet_results = evaluate_bets(y_test, y_pred_proba, test_data_with_display, best_threshold, INITIAL_BANKROLL,
                                 KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.00, print_fights=True)
 
     (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
-     correct_confident_predictions, kelly_final_bankroll, kelly_total_volume) = bet_results
+     correct_confident_predictions, kelly_final_bankroll, kelly_total_volume,
+     daily_bankrolls, daily_kelly_bankrolls) = bet_results
 
     earliest_fight_date = test_data['current_fight_date'].min()
 
+    # Calculate and print monthly ROIs
+    fixed_monthly_roi, fixed_monthly_profit = calculate_monthly_roi(daily_bankrolls, INITIAL_BANKROLL)
+    kelly_monthly_roi, kelly_monthly_profit = calculate_monthly_roi(daily_kelly_bankrolls, INITIAL_BANKROLL)
+
+    console = Console()
+    console.print("\nMonthly ROI (based on initial investment):")
+    table = Table()
+    table.add_column("Month", style="cyan")
+    table.add_column("Fixed Fraction ROI", justify="right", style="magenta")
+    table.add_column("Kelly ROI", justify="right", style="green")
+
+    for month in sorted(fixed_monthly_roi.keys()):
+        fixed_monthly = f"{fixed_monthly_roi[month]:.2f}%"
+        kelly_monthly = f"{kelly_monthly_roi[month]:.2f}%"
+        table.add_row(month, fixed_monthly , kelly_monthly)
+
+    console.print(table)
+
+    # Print betting results
     print_betting_results(len(test_data), confident_predictions, correct_confident_predictions, total_bets,
                           correct_bets, INITIAL_BANKROLL, final_bankroll, total_volume, best_threshold,
                           kelly_final_bankroll, kelly_total_volume, KELLY_FRACTION, FIXED_BET_FRACTION,
@@ -493,4 +543,4 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 if __name__ == "__main__":
     main(optimize_threshold=True, model_type='xgboost', use_calibration=True)
     # To run with a manually set threshold:
-    # main(optimize_threshold=False, manual_threshold=0.65)
+    # main(optimize_threshold=False, manual_threshold=0.65, model_type='xgboost', use_calibration=True)
