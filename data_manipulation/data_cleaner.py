@@ -181,12 +181,21 @@ def combine_rounds_stats(file_path):
     # Calculate win and loss streaks for the next fight
     def update_streaks(group):
         group = group.sort_values('fight_date')
-        group['win_streak'] = group['winner'].shift().cumsum().fillna(0).astype(int)
-        group['loss_streak'] = (1 - group['winner']).shift().cumsum().fillna(0).astype(int)
 
-        # Reset streaks after a loss or win respectively
-        group.loc[group['winner'].shift() == 0, 'win_streak'] = 0
-        group.loc[group['winner'].shift() == 1, 'loss_streak'] = 0
+        # Initialize the win and loss streak columns
+        group['win_streak'] = 0
+        group['loss_streak'] = 0
+
+        # Iterate over each row in the group
+        for i in range(1, len(group)):
+            if group.iloc[i]['winner'] == 1:
+                # If the fighter wins, increment the win streak and reset the loss streak
+                group.iloc[i, group.columns.get_loc('win_streak')] = group.iloc[i - 1]['win_streak'] + 1
+                group.iloc[i, group.columns.get_loc('loss_streak')] = 0
+            else:
+                # If the fighter loses, increment the loss streak and reset the win streak
+                group.iloc[i, group.columns.get_loc('loss_streak')] = group.iloc[i - 1]['loss_streak'] + 1
+                group.iloc[i, group.columns.get_loc('win_streak')] = 0
 
         return group
 
@@ -196,7 +205,7 @@ def combine_rounds_stats(file_path):
     final_stats['days_since_last_fight'] = final_stats['days_since_last_fight'].fillna(0)
 
     # Save to new CSV
-    final_stats.to_csv('data/combined_rounds.csv', index=False)
+    final_stats.to_csv('..data/combined_rounds.csv', index=False)
 
     return final_stats
 
@@ -275,7 +284,7 @@ def combine_fighters_stats(file_path):
     final_combined_df = final_combined_df.sort_values(by=['fighter', 'fight_date'], ascending=[True, True])
 
     # Save the combined and sorted DataFrame to a CSV file
-    final_combined_df.to_csv('data/combined_sorted_fighter_stats.csv', index=False)
+    final_combined_df.to_csv('..data/combined_sorted_fighter_stats.csv', index=False)
 
     return final_combined_df
 
@@ -332,9 +341,9 @@ def split_train_val_test(matchup_data_file):
     test_data = test_data.sort_values(by='current_fight_date', ascending=True)
 
     # Save the train, validation, and test data to CSV files
-    train_data.to_csv('data/train test data/train_data.csv', index=False)
-    val_data.to_csv('data/train test data/val_data.csv', index=False)
-    test_data.to_csv('data/train test data/test_data.csv', index=False)
+    train_data.to_csv('..data/train test data/train_data.csv', index=False)
+    val_data.to_csv('..data/train test data/val_data.csv', index=False)
+    test_data.to_csv('..data/train test data/test_data.csv', index=False)
 
     # Save the removed features to a file
     with open('../data/train test data/removed_features.txt', 'w') as file:
@@ -482,9 +491,9 @@ def create_matchup_data(file_path, tester, name):
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
 
     if not name:
-        matchup_df.to_csv(f'data/matchup data/matchup_data_{n_past_fights}_avg.csv', index=False)
+        matchup_df.to_csv(f'..data/matchup data/matchup_data_{n_past_fights}_avg.csv', index=False)
     else:
-        matchup_df.to_csv(f'data/matchup data/matchup_data_{n_past_fights}_avg_name.csv', index=False)
+        matchup_df.to_csv(f'..data/matchup data/matchup_data_{n_past_fights}_avg_name.csv', index=False)
 
     return matchup_df
 
