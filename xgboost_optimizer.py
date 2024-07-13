@@ -293,7 +293,7 @@ if __name__ == "__main__":
 
     print("Creating SHAP graph for the best model")
     X_train, X_val, y_train, y_val = get_train_val_data()
-    model_path = f'models/xgboost/jun2022-jun2024/model_0.7039_auc_diff_0.0117.json'
+    model_path = f'models/xgboost/jun2022-jun2024/model_0.7007_auc_diff_0.0099.json'
     create_shap_graph(model_path, X_train)
     print("SHAP graph creation completed.")
     print("--------------------")
