@@ -266,32 +266,6 @@ def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_roun
     return study.best_trial
 
 
-def get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val, n_features):
-    # Load the model from the file
-    model = xgb.XGBClassifier(enable_categorical=True)
-    model.load_model(model_path)
-
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(X_train)
-
-    mean_abs_shap_values = np.abs(shap_values).mean(axis=0)
-    feature_importance = sorted(zip(X_train.columns, mean_abs_shap_values), key=lambda x: x[1], reverse=True)
-
-    top_n_features = [feature for feature, _ in feature_importance[:n_features]]
-
-    print(f"Top {n_features} features:")
-    for feature, importance in feature_importance[:n_features]:
-        print(f"{feature}: {importance}")
-
-    X_train_filtered = X_train[top_n_features]
-    X_val_filtered = X_val[top_n_features]
-
-    print(f"\nRetraining model with top {n_features} features...")
-    best_trial = optimize_model(X_train_filtered, X_val_filtered, y_train, y_val)
-
-    return best_trial.params, best_trial.value
-
-
 if __name__ == "__main__":
     input_thread = threading.Thread(target=user_input_thread, daemon=True)
     input_thread.start()
@@ -317,21 +291,9 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
 
-    # print("Creating SHAP graph for the best model")
-    # X_train, X_val, y_train, y_val = get_train_val_data()
-    # model_path = f'models/xgboost/jun2022-jun2024/model_0.7007_features_auc_diff_0.0742.json'
-    # create_shap_graph(model_path, X_train)
-    # print("SHAP graph creation completed.")
-    # print("--------------------")
-
-    # n_features = 100
-    #
-    # X_train, X_val, y_train, y_val = get_train_val_data()
-    # model_path = 'models/xgboost/model_0.6683_338_features.json'
-    # retrained_best_params, retrained_accuracy = get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val,
-    #                                                                          n_features)
-    #
-    # print("--------------------")
-    # print("Retraining with top features completed.")
-    # print(f"Retrained model validation accuracy: {retrained_accuracy:.4f}")
-    # print("Retrained model best parameters:", retrained_best_params)
+    print("Creating SHAP graph for the best model")
+    X_train, X_val, y_train, y_val = get_train_val_data()
+    model_path = f'models/xgboost/jun2022-jun2024/style/model_0.6842_features_auc_diff_0.0667.json'
+    create_shap_graph(model_path, X_train)
+    print("SHAP graph creation completed.")
+    print("--------------------")
