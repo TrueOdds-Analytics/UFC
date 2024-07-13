@@ -96,18 +96,8 @@ def combine_rounds_stats(file_path):
     final_stats = final_stats[
         ~final_stats['result'].isin(['DQ', 'Decision - Split ', 'DQ ', 'Could Not Continue ', 'Overturned ', 'Other '])]
 
-    # Consolidate weight classes
-    weight_class_mapping = {
-        'Flyweight': 'Flyweight', 'Bantamweight': 'Bantamweight', 'Featherweight': 'Featherweight',
-        'Lightweight': 'Lightweight', 'Welterweight': 'Welterweight', 'Middleweight': 'Middleweight',
-        'Light Heavyweight': 'Light Heavyweight', 'Heavyweight': 'Heavyweight', 'Tournament': 'Tournament'
-    }
-
-    final_stats['weight_class'] = final_stats['weight_class'].apply(
-        lambda x: next((v for k, v in weight_class_mapping.items() if k in str(x)), x))
-
     # Convert unique strings to integers and create dictionary mappings
-    for column in ['result', 'winner', 'weight_class', 'scheduled_rounds']:
+    for column in ['result', 'winner', 'scheduled_rounds']:
         final_stats[column], unique = pd.factorize(final_stats[column])
         mapping = {index: label for index, label in enumerate(unique)}
         print(f"Mapping for {column}: {mapping}")
@@ -498,8 +488,8 @@ def create_matchup_data(file_path, tester, name):
 
 if __name__ == "__main__":
     combine_rounds_stats('../data/ufc_fight_processed.csv')
-    calculate_elo_ratings('../data/combined_rounds.csv')
-    combine_fighters_stats("../data/combined_rounds.csv")
-    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
-    split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')
+    # calculate_elo_ratings('../data/combined_rounds.csv')
+    # combine_fighters_stats("../data/combined_rounds.csv")
+    # create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    # split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)

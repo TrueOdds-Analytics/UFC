@@ -1,4 +1,6 @@
 import pandas as pd
+from datetime import datetime
+import re
 
 
 def calculate_elo_ratings(file_path, k=20, initial_rating=1500):
@@ -6,15 +8,10 @@ def calculate_elo_ratings(file_path, k=20, initial_rating=1500):
     df = pd.read_csv(file_path)
 
     # Sort the DataFrame by fight date, oldest first
+    df['fight_date'] = pd.to_datetime(df['fight_date'])
     df = df.sort_values(by=['fight_date', 'id'])
 
-    # Weight class mapping and factors
-    weight_class_map = {
-        0: 'Featherweight', 1: 'Lightweight', 2: 'Heavyweight', 3: 'Bantamweight',
-        4: 'Welterweight', 5: 'Light Heavyweight', 6: 'Middleweight', 7: 'Catch Weight Bout',
-        8: 'Open Weight Bout', 9: 'Flyweight', 10: 'Tournament',
-        11: 'UFC Superfight Championship Bout'
-    }
+    # Weight class factors
     weight_class_factors = {
         'Flyweight': {'ko': 1.3, 'decision': 0.7},
         'Bantamweight': {'ko': 1.25, 'decision': 0.80},
@@ -24,16 +21,28 @@ def calculate_elo_ratings(file_path, k=20, initial_rating=1500):
         'Middleweight': {'ko': 1.0, 'decision': 1.0},
         'Light Heavyweight': {'ko': 0.9, 'decision': 1.0},
         'Heavyweight': {'ko': 0.8, 'decision': 1.0},
-        'Catch Weight Bout': {'ko': 1.0, 'decision': 1.0},
-        'Open Weight Bout': {'ko': 1.0, 'decision': 1.0},
+        'Catch Weight': {'ko': 1.0, 'decision': 1.0},
+        'Open Weight': {'ko': 1.0, 'decision': 1.0},
         'Tournament': {'ko': 1.0, 'decision': 1.0},
-        'UFC Superfight Championship Bout': {'ko': 1.0, 'decision': 1.0}
+        'UFC Superfight Championship': {'ko': 1.0, 'decision': 1.0}
     }
+
+    # Title fight factor
+    title_factor = 2
+
+    def get_weight_class_factor(weight_class, is_ko):
+        for key, factors in weight_class_factors.items():
+            if re.search(key, weight_class, re.IGNORECASE):
+                return factors['ko' if is_ko else 'decision']
+        return 1.0  # Default factor if no match is found
+
+    def is_title_fight(weight_class):
+        return 'title' in weight_class.lower()
 
     # Initialize Elo ratings dictionary
     elo_ratings = {}
 
-    # Helper functions
+    # Helper functions (unchanged)
     def get_margin_factor(method):
         margin_factors = {3: 6, 0: 6, 1: 5, 2: 3}
         return margin_factors.get(method, 1.0)
@@ -58,68 +67,63 @@ def calculate_elo_ratings(file_path, k=20, initial_rating=1500):
     total_fights = 0
     fights_with_elo_difference = 0
 
-    # Process each fight row by row
-    for _, fight in df.iterrows():
-        fighter1 = fight
-        fighter2 = df[(df['id'] == fighter1['id']) & (df['fighter'] != fighter1['fighter'])].iloc[0]
+    # Process each row
+    for index, fighter in df.iterrows():
+        # Find opponent data
+        opponent = df[(df['id'] == fighter['id']) & (df['fighter'] != fighter['fighter'])].iloc[0]
 
-        # Get or set initial Elo ratings
-        # Get or set initial Elo ratings
-        fighter1_rating = elo_ratings.get(fighter1['fighter'], initial_rating)
-        fighter2_rating = elo_ratings.get(fighter2['fighter'], initial_rating)
+        # Get fighter and opponent ratings
+        fighter_rating = elo_ratings.get(fighter['fighter'], initial_rating)
+        opponent_rating = elo_ratings.get(opponent['fighter'], initial_rating)
 
-        # Calculate win probabilities
-        fighter1_win_prob = 1 / (1 + 10 ** ((fighter2_rating - fighter1_rating) / 400))
+        # Calculate win probability
+        fighter_win_prob = 1 / (1 + 10 ** ((opponent_rating - fighter_rating) / 400))
 
-        # Update win probability for fighter1 in DataFrame
-        df.loc[df.index == fighter1.name, 'elo_win_probability'] = fighter1_win_prob
+        # Update win probability in DataFrame
+        df.at[index, 'elo_win_probability'] = fighter_win_prob
 
         # Prediction tracking
-        threshold = 50
-        elo_difference = abs(fighter1_rating - fighter2_rating)
+        threshold = -1
+        elo_difference = abs(fighter_rating - opponent_rating)
         if elo_difference > threshold:
             fights_with_elo_difference += 1
-            predicted_winner = 1 if fighter1_rating > fighter2_rating else 0
-            actual_winner = fighter1['winner']
+            predicted_winner = 1 if fighter_rating > opponent_rating else 0
+            actual_winner = fighter['winner']
             if predicted_winner == actual_winner:
                 correct_predictions += 1
             total_predictions += 1
         total_fights += 1
 
-        # Determine the winning and losing fighters
-        if fighter1['winner'] == 1:
-            winner, loser = fighter1, fighter2
-        else:
-            winner, loser = fighter2, fighter1
-
-        winner_rating = elo_ratings.get(winner['fighter'], initial_rating)
-        loser_rating = elo_ratings.get(loser['fighter'], initial_rating)
-
         # Calculate Elo change factors
-        weight_class = weight_class_map[winner['weight_class']]
-        margin_factor = get_margin_factor(winner['result'])
-        is_ko = winner['result'] in [0, 3]
-        weight_class_factor = weight_class_factors[weight_class]['ko' if is_ko else 'decision']
-        age_factor = get_age_factor(winner['age'])
+        weight_class = fighter['weight_class']
+        margin_factor = get_margin_factor(fighter['result'])
+        is_ko = fighter['result'] in [0, 3]
+        weight_class_factor = get_weight_class_factor(weight_class, is_ko)
+        is_title = is_title_fight(weight_class)
+        age_factor = get_age_factor(fighter['age'])
         additional_factor = get_additional_factors(
-            winner['win_streak'], winner['loss_streak'],
-            winner['years_of_experience'], winner['days_since_last_fight']
+            fighter['win_streak'], fighter['loss_streak'],
+            fighter['years_of_experience'], fighter['days_since_last_fight']
         )
 
         # Calculate Elo change
-        expected_score = 1 / (1 + 10 ** ((loser_rating - winner_rating) / 400))
-        actual_score = 1  # Winner always gets a score of 1
-        elo_change = k * margin_factor * weight_class_factor * age_factor * additional_factor * (
+        expected_score = 1 / (1 + 10 ** ((opponent_rating - fighter_rating) / 400))
+        actual_score = 1 if fighter['winner'] == 1 else 0
+
+        # Apply title factor
+        title_multiplier = title_factor if is_title else 1.0
+
+        elo_change = k * margin_factor * weight_class_factor * age_factor * additional_factor * title_multiplier * (
                     actual_score - expected_score)
 
-        # Update Elo ratings for next fight
-        elo_ratings[winner['fighter']] = winner_rating + elo_change
-        elo_ratings[loser['fighter']] = loser_rating - elo_change
+        # Update Elo rating for the fighter
+        new_rating = fighter_rating + elo_change
+        elo_ratings[fighter['fighter']] = new_rating
 
-        # Update 'elo' column in DataFrame for fighter1 with the rating used for this fight
-        df.loc[df.index == fighter1.name, 'elo'] = fighter1_rating
+        # Update 'elo' column in DataFrame for the fighter
+        df.at[index, 'elo'] = fighter_rating
 
-        # Calculate and print statistics
+    # Calculate and print statistics
     prediction_accuracy = (correct_predictions / total_predictions * 100) if total_predictions > 0 else 0
     elo_difference_percentage = (fights_with_elo_difference / total_fights * 100) if total_fights > 0 else 0
 
