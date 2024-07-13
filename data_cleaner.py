@@ -94,10 +94,8 @@ def combine_rounds_stats(file_path):
     final_stats = final_stats[final_columns]
 
     final_stats = final_stats[~final_stats['winner'].isin(['NC/NC', 'D/D'])]
-    # final_stats = final_stats[~final_stats['result'].isin(['DQ', 'DQ ', 'Could Not Continue ',
-    #                                                        'Overturned ', 'Other '])]
-    final_stats = final_stats[~final_stats['result'].isin(['DQ', 'Decision - Split ', 'DQ ', 'Could Not Continue ',
-                                                           'Overturned ', 'Other '])]
+    final_stats = final_stats[
+        ~final_stats['result'].isin(['DQ', 'Decision - Split ', 'DQ ', 'Could Not Continue ', 'Overturned ', 'Other '])]
 
     # Consolidate weight classes
     weight_class_mapping = {
@@ -122,8 +120,7 @@ def combine_rounds_stats(file_path):
     odds_columns = ['Open', 'Closing Range Start', 'Closing Range End', 'Movement']
     odds_mappings = {
         col: cleaned_odds_df.set_index(['Matchup', 'Event']).apply(lambda x: {'odds': x[col], 'Date': x['Date']},
-                                                                   axis=1).to_dict() for col in odds_columns
-    }
+                                                                   axis=1).to_dict() for col in odds_columns}
 
     # Split the dataframe into chunks
     num_cores = multiprocessing.cpu_count()
@@ -153,15 +150,6 @@ def combine_rounds_stats(file_path):
     for col in odds_columns:
         final_stats[f'new_{col}'] = new_odds[col]
 
-    # Compare new odds with original odds if they existed
-    if 'open_odds' in final_stats.columns:
-        final_stats['original_open_odds'] = final_stats['open_odds']
-        odds_diff = final_stats[final_stats['original_open_odds'] != final_stats['new_Open']]
-        print(f"Number of rows with different odds: {len(odds_diff)}")
-        print(odds_diff[['fighter', 'event', 'original_open_odds', 'new_Open']])
-    else:
-        print("No original odds to compare with. New odds have been added.")
-
     # Update the 'open_odds' column with the new odds and add new columns
     final_stats['open_odds'] = final_stats['new_Open']
     final_stats['closing_range_start'] = final_stats['new_Closing Range Start']
@@ -169,19 +157,43 @@ def combine_rounds_stats(file_path):
     final_stats['movement'] = final_stats['new_Movement']
 
     # Drop temporary columns
-    columns_to_drop = ['new_Open', 'new_Closing Range Start', 'new_Closing Range End', 'new_Movement']
-    if 'original_open_odds' in final_stats.columns:
-        columns_to_drop.append('original_open_odds')
-    final_stats = final_stats.drop(columns=columns_to_drop)
-
-    # Drop the 'dob' column
-    final_stats = final_stats.drop(columns=['dob'], errors='ignore')
+    columns_to_drop = ['new_Open', 'new_Closing Range Start', 'new_Closing Range End', 'new_Movement', 'dob']
+    final_stats = final_stats.drop(columns=columns_to_drop, errors='ignore')
 
     # Identify and drop duplicate columns
     duplicate_columns = final_stats.columns[final_stats.columns.duplicated()]
     final_stats = final_stats.loc[:, ~final_stats.columns.duplicated()]
 
     print(f"Dropped duplicate columns: {list(duplicate_columns)}")
+
+    # Sort the dataframe by fighter and fight date
+    final_stats = final_stats.sort_values(['fighter', 'fight_date'])
+
+    # Calculate years of experience and days since last fight
+    def calculate_experience_and_days(group):
+        group = group.sort_values('fight_date')
+        group['years_of_experience'] = (group['fight_date'] - group['fight_date'].iloc[0]).dt.days / 365.25
+        group['days_since_last_fight'] = (group['fight_date'] - group['fight_date'].shift()).dt.days
+        return group
+
+    final_stats = final_stats.groupby('fighter', group_keys=False).apply(calculate_experience_and_days)
+
+    # Calculate win and loss streaks for the next fight
+    def update_streaks(group):
+        group = group.sort_values('fight_date')
+        group['win_streak'] = group['winner'].shift().cumsum().fillna(0).astype(int)
+        group['loss_streak'] = (1 - group['winner']).shift().cumsum().fillna(0).astype(int)
+
+        # Reset streaks after a loss or win respectively
+        group.loc[group['winner'].shift() == 0, 'win_streak'] = 0
+        group.loc[group['winner'].shift() == 1, 'loss_streak'] = 0
+
+        return group
+
+    final_stats = final_stats.groupby('fighter', group_keys=False).apply(update_streaks)
+
+    # Fill NaN values in the new columns
+    final_stats['days_since_last_fight'] = final_stats['days_since_last_fight'].fillna(0)
 
     # Save to new CSV
     final_stats.to_csv('data/combined_rounds.csv', index=False)
@@ -239,7 +251,8 @@ def combine_fighters_stats(file_path):
         'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
     ]
 
-    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end', 'elo']
+    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end', 'elo', 'elo_win_probability',
+                     'years_of_experience', 'win_streak', 'loss_streak', 'days_since_last_fight']
 
     # Generate the columns to differentiate using list comprehension
     columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in
@@ -388,13 +401,18 @@ def create_matchup_data(file_path, tester, name):
 
         # Retrieve the current fight Elo ratings for fighter A and fighter B
         current_fight_elo_a = current_fight['elo']
-        current_fight_elo_b = df.loc[(df['fighter'] == opponent_name) & (df['fight_date'] == current_fight['fight_date']), 'elo'].values[0]
+        current_fight_elo_b = current_fight['elo_b']
         current_fight_elo_diff = current_fight_elo_a - current_fight_elo_b
+
+        current_fight_elo_a_win_chance = current_fight['elo_win_probability']
+        current_fight_elo_b_win_chance = current_fight['elo_win_probability_b']
+        current_fight_elo_chance_diff = current_fight_elo_a_win_chance - current_fight_elo_b_win_chance
 
         combined_features = np.concatenate(
             [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds,
              [current_fight_odds_diff], current_fight_ages, [current_fight_age_diff],
-             [current_fight_elo_a, current_fight_elo_b, current_fight_elo_diff]])  # Add Elo features
+             [current_fight_elo_a, current_fight_elo_b, current_fight_elo_diff,
+              current_fight_elo_a_win_chance, current_fight_elo_b_win_chance, current_fight_elo_chance_diff]])
         combined_row = np.concatenate([combined_features, labels])
 
         most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
@@ -420,7 +438,9 @@ def create_matchup_data(file_path, tester, name):
                                           'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
                                           'current_fight_age_diff',
-                                          'current_fight_elo_a', 'current_fight_elo_b', 'current_fight_elo_diff'] + \
+                                          'current_fight_elo_a', 'current_fight_elo_b', 'current_fight_elo_diff',
+                                          'current_fight_elo_a_win_chance', 'current_fight_elo_b_win_chance',
+                                          'current_fight_elo_chance_diff'] + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
     else:
         column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for
@@ -430,7 +450,9 @@ def create_matchup_data(file_path, tester, name):
                                           'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
                                           'current_fight_age_diff',
-                                          'current_fight_elo_a', 'current_fight_elo_b', 'current_fight_elo_diff'] + \
+                                          'current_fight_elo_a', 'current_fight_elo_b', 'current_fight_elo_diff',
+                                          'current_fight_elo_a_win_chance', 'current_fight_elo_b_win_chance',
+                                          'current_fight_elo_chance_diff'] + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
 
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
@@ -539,9 +561,9 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('data/ufc_fight_processed.csv')
-    calculate_elo_ratings('data/combined_rounds.csv')
-    combine_fighters_stats("data/combined_rounds.csv")
+    # combine_rounds_stats('data/ufc_fight_processed.csv')
+    # calculate_elo_ratings('data/combined_rounds.csv')
+    # combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)

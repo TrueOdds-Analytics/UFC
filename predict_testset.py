@@ -461,7 +461,7 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 
     # Load and calibrate model
     if model_type == 'xgboost':
-        model_path = os.path.abspath('models/xgboost/jun2022-jun2024/model_0.7007_features_auc_diff_0.0484.json')
+        model_path = os.path.abspath('models/xgboost/jun2022-jun2024/elo/model_0.7072_auc_diff_0.0841.json')
         model = load_model(model_path, 'xgboost')
         expected_features = model.get_booster().feature_names
     elif model_type == 'lightgbm':
@@ -560,6 +560,7 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 
 if __name__ == "__main__":
     # main(optimize_threshold=True, model_type='xgboost', use_calibration=True, initial_bankroll=10000, kelly_fraction=1, fixed_bet_fraction=0.1, max_bet_percentage=0.2)
+
     # To run with a manually set threshold:
     main(optimize_threshold=False, manual_threshold=0.5, model_type='xgboost',
     use_calibration=True, initial_bankroll=10000, kelly_fraction=1, fixed_bet_fraction=0.1, max_bet_percentage=0.2)
