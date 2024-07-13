@@ -280,9 +280,6 @@ def combine_fighters_stats(file_path):
 def split_train_val_test(matchup_data_file):
     # Load the matchup data
     matchup_df = pd.read_csv(matchup_data_file)
-
-    matchup_df = matchup_df.loc[:, ~matchup_df.columns.str.contains('fight_outcome_elo')]
-
     # Remove correlated features
     matchup_df, removed_features = remove_correlated_features(matchup_df)
 
@@ -489,9 +486,9 @@ def create_matchup_data(file_path, tester, name):
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('../data/ufc_fight_processed.csv')
-    calculate_elo_ratings('../data/combined_rounds.csv')
-    combine_fighters_stats("../data/combined_rounds.csv")
-    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    # combine_rounds_stats('../data/ufc_fight_processed.csv')
+    # calculate_elo_ratings('../data/combined_rounds.csv')
+    # combine_fighters_stats("../data/combined_rounds.csv")
+    # create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)

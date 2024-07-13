@@ -187,8 +187,8 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
 
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 20, 25, log=True),
-            'alpha': trial.suggest_float('alpha', 20, 25, log=True),
+            'lambda': trial.suggest_float('lambda', 15, 20, log=True),
+            'alpha': trial.suggest_float('alpha', 15, 20, log=True),
             'min_child_weight': trial.suggest_float('min_child_weight', 1, 10.0),
             'max_depth': trial.suggest_int('max_depth', 1, 6),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
@@ -218,7 +218,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.76 and (auc_diff < 0.10):
+    if accuracy > 0.70 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
         model_filename = f'models/xgboost/jun2022-jun2024/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
@@ -293,7 +293,7 @@ if __name__ == "__main__":
 
     print("Creating SHAP graph for the best model")
     X_train, X_val, y_train, y_val = get_train_val_data()
-    model_path = f'models/xgboost/jun2022-jun2024/model_0.7632_auc_diff_0.0439.json'
+    model_path = f'models/xgboost/jun2022-jun2024/model_0.7039_auc_diff_0.0117.json'
     create_shap_graph(model_path, X_train)
     print("SHAP graph creation completed.")
     print("--------------------")
