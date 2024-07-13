@@ -386,9 +386,14 @@ def create_matchup_data(file_path, tester, name):
         current_fight_ages = [current_fight['age'], current_fight['age_b']]
         current_fight_age_diff = current_fight['age'] - current_fight['age_b']
 
+        # Get the current fight styles and calculate the style difference
+        current_fight_styles = [current_fight['Style'], current_fight['Style_b']]
+        current_fight_style_diff = current_fight['Style'] - current_fight['Style_b']
+
         combined_features = np.concatenate(
             [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds,
-             [current_fight_odds_diff], current_fight_ages, [current_fight_age_diff]])
+             [current_fight_odds_diff], current_fight_ages, [current_fight_age_diff],
+             current_fight_styles, [current_fight_style_diff]])
         combined_row = np.concatenate([combined_features, labels])
 
         most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
@@ -413,7 +418,9 @@ def create_matchup_data(file_path, tester, name):
                        results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
                                           'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
-                                          'current_fight_age_diff'] + \
+                                          'current_fight_age_diff',
+                                          'current_fight_style', 'current_fight_style_b',
+                                          'current_fight_style_diff'] + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
     else:
         column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for
@@ -422,7 +429,9 @@ def create_matchup_data(file_path, tester, name):
                        results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
                                           'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
-                                          'current_fight_age_diff'] + \
+                                          'current_fight_age_diff',
+                                          'current_fight_style', 'current_fight_style_b',
+                                          'current_fight_style_diff'] + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
 
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
@@ -532,8 +541,8 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 if __name__ == "__main__":
     # combine_rounds_stats('data/ufc_fight_processed.csv')
-    create_fighter_styles()
-    combine_fighters_stats("data/combined_rounds.csv")
+    # create_fighter_styles()
+    # combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)
