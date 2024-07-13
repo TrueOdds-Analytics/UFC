@@ -131,13 +131,14 @@ def calculate_elo_ratings(file_path, k=20, initial_rating=1500):
 
     print("\nFighters with the Highest Elo Ratings:")
     print("-------------------------------------")
-    top_fighters = pd.Series(elo_ratings).sort_values(ascending=False).head(25)
+    top_fighters = pd.Series(elo_ratings).sort_values(ascending=False).head(50)
     print(top_fighters)
 
     # Save the updated DataFrame
     df.to_csv(file_path, index=False)
 
     return df
+
 
 if __name__ == "__main__":
     file_path = "data/combined_rounds.csv"

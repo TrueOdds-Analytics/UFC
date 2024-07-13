@@ -408,11 +408,32 @@ def create_matchup_data(file_path, tester, name):
         current_fight_elo_b_win_chance = current_fight['elo_win_probability_b']
         current_fight_elo_chance_diff = current_fight_elo_a_win_chance - current_fight_elo_b_win_chance
 
+        # Add new features
+        current_fight_win_streak_a = current_fight['win_streak']
+        current_fight_win_streak_b = current_fight['win_streak_b']
+        current_fight_win_streak_diff = current_fight_win_streak_a - current_fight_win_streak_b
+
+        current_fight_loss_streak_a = current_fight['loss_streak']
+        current_fight_loss_streak_b = current_fight['loss_streak_b']
+        current_fight_loss_streak_diff = current_fight_loss_streak_a - current_fight_loss_streak_b
+
+        current_fight_years_experience_a = current_fight['years_of_experience']
+        current_fight_years_experience_b = current_fight['years_of_experience_b']
+        current_fight_years_experience_diff = current_fight_years_experience_a - current_fight_years_experience_b
+
+        current_fight_days_since_last_a = current_fight['days_since_last_fight']
+        current_fight_days_since_last_b = current_fight['days_since_last_fight_b']
+        current_fight_days_since_last_diff = current_fight_days_since_last_a - current_fight_days_since_last_b
+
         combined_features = np.concatenate(
             [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds,
              [current_fight_odds_diff], current_fight_ages, [current_fight_age_diff],
              [current_fight_elo_a, current_fight_elo_b, current_fight_elo_diff,
-              current_fight_elo_a_win_chance, current_fight_elo_b_win_chance, current_fight_elo_chance_diff]])
+              current_fight_elo_a_win_chance, current_fight_elo_b_win_chance, current_fight_elo_chance_diff,
+              current_fight_win_streak_a, current_fight_win_streak_b, current_fight_win_streak_diff,
+              current_fight_loss_streak_a, current_fight_loss_streak_b, current_fight_loss_streak_diff,
+              current_fight_years_experience_a, current_fight_years_experience_b, current_fight_years_experience_diff,
+              current_fight_days_since_last_a, current_fight_days_since_last_b, current_fight_days_since_last_diff]])
         combined_row = np.concatenate([combined_features, labels])
 
         most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
@@ -430,6 +451,15 @@ def create_matchup_data(file_path, tester, name):
         results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}",
                             f"scheduled_rounds_b_fight_{i}"]
 
+    new_columns = ['current_fight_elo_a', 'current_fight_elo_b', 'current_fight_elo_diff',
+                   'current_fight_elo_a_win_chance', 'current_fight_elo_b_win_chance', 'current_fight_elo_chance_diff',
+                   'current_fight_win_streak_a', 'current_fight_win_streak_b', 'current_fight_win_streak_diff',
+                   'current_fight_loss_streak_a', 'current_fight_loss_streak_b', 'current_fight_loss_streak_diff',
+                   'current_fight_years_experience_a', 'current_fight_years_experience_b',
+                   'current_fight_years_experience_diff',
+                   'current_fight_days_since_last_a', 'current_fight_days_since_last_b',
+                   'current_fight_days_since_last_diff']
+
     if not name:
         column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in
                                          features_to_include] + \
@@ -437,10 +467,7 @@ def create_matchup_data(file_path, tester, name):
                        results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
                                           'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
-                                          'current_fight_age_diff',
-                                          'current_fight_elo_a', 'current_fight_elo_b', 'current_fight_elo_diff',
-                                          'current_fight_elo_a_win_chance', 'current_fight_elo_b_win_chance',
-                                          'current_fight_elo_chance_diff'] + \
+                                          'current_fight_age_diff'] + new_columns + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
     else:
         column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for
@@ -449,10 +476,7 @@ def create_matchup_data(file_path, tester, name):
                        results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
                                           'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
-                                          'current_fight_age_diff',
-                                          'current_fight_elo_a', 'current_fight_elo_b', 'current_fight_elo_diff',
-                                          'current_fight_elo_a_win_chance', 'current_fight_elo_b_win_chance',
-                                          'current_fight_elo_chance_diff'] + \
+                                          'current_fight_age_diff'] + new_columns + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
 
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
@@ -564,6 +588,6 @@ if __name__ == "__main__":
     # combine_rounds_stats('data/ufc_fight_processed.csv')
     # calculate_elo_ratings('data/combined_rounds.csv')
     # combine_fighters_stats("data/combined_rounds.csv")
-    create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
+    # create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)
