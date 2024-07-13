@@ -4,7 +4,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
 
-def create_fighter_styles(input_file='data/combined_rounds.csv', n_clusters=5):
+def create_fighter_styles(input_file='../data/combined_rounds.csv', n_clusters=5):
     # Read the CSV file
     df = pd.read_csv(input_file)
 

@@ -186,8 +186,8 @@ if __name__ == "__main__":
     # print(odds_df)
 
     # Clean the fight odds data
-    input_file = "data/odds data/fight_odds.csv"
-    output_file = "data/odds data/cleaned_fight_odds.csv"
+    input_file = "../data/odds data/fight_odds.csv"
+    output_file = "../data/odds data/cleaned_fight_odds.csv"
     cleaned_odds_df = clean_fight_odds_from_csv(input_file, output_file)
 
     print(cleaned_odds_df)

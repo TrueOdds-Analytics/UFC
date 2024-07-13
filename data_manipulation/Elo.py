@@ -141,5 +141,5 @@ def calculate_elo_ratings(file_path, k=20, initial_rating=1500):
 
 
 if __name__ == "__main__":
-    file_path = "data/combined_rounds.csv"
+    file_path = "../data/combined_rounds.csv"
     calculate_elo_ratings(file_path)

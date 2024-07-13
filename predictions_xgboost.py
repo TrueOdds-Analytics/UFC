@@ -1,4 +1,4 @@
-from data_cleaner import create_specific_matchup_data
+from data_manipulation.data_cleaner import create_specific_matchup_data
 from predict_testset import *
 
 

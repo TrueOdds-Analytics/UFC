@@ -4,7 +4,7 @@ import time
 import warnings
 from tqdm import tqdm
 from helper import *
-from Elo import *
+from data_manipulation.Elo import *
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -12,7 +12,7 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 def combine_rounds_stats(file_path):
     # Load UFC stats and fighter stats
     ufc_stats = pd.read_csv(file_path)
-    fighter_stats = pd.read_csv('data/general data/fighter_stats.csv')
+    fighter_stats = pd.read_csv('../data/general data/fighter_stats.csv')
 
     # Preprocess UFC stats
     ufc_stats['fighter'] = ufc_stats['fighter'].astype(str).str.lower()
@@ -114,7 +114,7 @@ def combine_rounds_stats(file_path):
         print(f"Mapping for {column}: {mapping}")
 
     # Load the cleaned fight odds data
-    cleaned_odds_df = pd.read_csv('data/odds data/cleaned_fight_odds.csv')
+    cleaned_odds_df = pd.read_csv('../data/odds data/cleaned_fight_odds.csv')
 
     # Create mapping dictionaries for each odds column
     odds_columns = ['Open', 'Closing Range Start', 'Closing Range End', 'Movement']
@@ -337,7 +337,7 @@ def split_train_val_test(matchup_data_file):
     test_data.to_csv('data/train test data/test_data.csv', index=False)
 
     # Save the removed features to a file
-    with open('data/train test data/removed_features.txt', 'w') as file:
+    with open('../data/train test data/removed_features.txt', 'w') as file:
         file.write(','.join(removed_features))
 
     print(
@@ -566,7 +566,7 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
 
     # Load the removed features from the file
-    with open('data/train test data/removed_features.txt', 'r') as file:
+    with open('../data/train test data/removed_features.txt', 'r') as file:
         removed_features = file.read().split(',')
 
     # Drop the specified columns from the removed features
@@ -585,9 +585,9 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('data/ufc_fight_processed.csv')
-    calculate_elo_ratings('data/combined_rounds.csv')
-    combine_fighters_stats("data/combined_rounds.csv")
-    create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
-    split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')
+    combine_rounds_stats('../data/ufc_fight_processed.csv')
+    calculate_elo_ratings('../data/combined_rounds.csv')
+    combine_fighters_stats("../data/combined_rounds.csv")
+    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)
