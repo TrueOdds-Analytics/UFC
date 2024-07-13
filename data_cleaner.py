@@ -276,7 +276,7 @@ def split_train_val_test(matchup_data_file):
     # Ensure 'current_fight_date' is in datetime format
     matchup_df['current_fight_date'] = pd.to_datetime(matchup_df['current_fight_date'])
 
-    start_date = '2023-01-01'
+    start_date = '2022-06-01'
     end_date = '2024-6-30'  # Change this to your desired end date
 
     # Convert start_date to datetime
@@ -359,9 +359,9 @@ def create_matchup_data(file_path, tester, name):
         fighter_features = fighter_df[features_to_include].mean().values
         opponent_features = opponent_df[features_to_include].mean().values
 
-        results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(3).values.flatten()
+        results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(tester).values.flatten()
         results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
-            3).values.flatten()
+            tester).values.flatten()
 
         labels = current_fight[method_columns].values
 
@@ -399,7 +399,7 @@ def create_matchup_data(file_path, tester, name):
             matchup_data.append([fighter_name, opponent_name, most_recent_date] + combined_row.tolist() + [current_fight_date])
 
     results_columns = []
-    for i in range(1, 4):
+    for i in range(1, tester + 1):
         results_columns += [f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}",
                             f"scheduled_rounds_fight_{i}"]
         results_columns += [f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}",
@@ -409,8 +409,7 @@ def create_matchup_data(file_path, tester, name):
         column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in
                                          features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include] + \
-                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
-                                          'current_fight_open_odds_diff',
+                       results_columns + ['current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
                                           'current_fight_age_diff'] + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
@@ -418,8 +417,7 @@ def create_matchup_data(file_path, tester, name):
         column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for
                                                                  feature in features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include] + \
-                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
-                                          'current_fight_open_odds_diff',
+                       results_columns + ['current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
                                           'current_fight_age_diff'] + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
@@ -530,8 +528,8 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('data/ufc_fight_processed.csv')
-    combine_fighters_stats("data/combined_rounds.csv")
+    # combine_rounds_stats('data/ufc_fight_processed.csv')
+    # combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)
