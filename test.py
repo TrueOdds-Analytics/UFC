@@ -38,7 +38,7 @@ def main():
     X_test = preprocess_data(X_test)
 
     # Load model
-    model_path = os.path.abspath('models/xgboost/jan-jun2023/model_0.7179_features_auc_diff_0.0643.json')
+    model_path = os.path.abspath('models/xgboost/jun2022-jun2024/model_0.7632_auc_diff_0.0994.json')
     model = load_model(model_path)
 
     # Ensure X_test has the same features as the model expects
