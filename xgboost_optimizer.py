@@ -218,10 +218,10 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.63 and (auc_diff < 0.10):
+    if accuracy > 0.68 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
-        model_filename = f'models/xgboost/jun-dec2023/model_{accuracy:.4f}_features_auc_diff_{auc_diff:.4f}.json'
+        model_filename = f'models/xgboost/2023-2024jun/model_{accuracy:.4f}_features_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)

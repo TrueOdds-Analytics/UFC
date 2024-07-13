@@ -114,9 +114,6 @@ def combine_rounds_stats(file_path):
         mapping = {index: label for index, label in enumerate(unique)}
         print(f"Mapping for {column}: {mapping}")
 
-    # Drop fights before 2014
-    final_stats = final_stats[final_stats['fight_date'] >= '2014-01-01']
-
     # Load the cleaned fight odds data
     cleaned_odds_df = pd.read_csv('data/odds data/cleaned_fight_odds.csv')
 
@@ -199,30 +196,37 @@ def combine_fighters_stats(file_path):
     df = df.drop(columns=[col for col in df.columns if 'event' in col.lower()])
 
     # Sort by fight ID and fighter identifier to ensure consistent ordering
-    fighter_identifier = 'fighter'
-    df = df.sort_values(by=['id', fighter_identifier])
+    df = df.sort_values(by=['id', 'fighter'])
 
-    # Generate column names for the second fighter's stats
-    cols_fighter_1 = [col for col in df.columns if col != 'id']
-    cols_fighter_2 = [f"{col}_b" for col in cols_fighter_1]
+    # Create a dictionary to store fights by ID
+    fights_dict = {}
 
-    # Split the DataFrame into two, one for each fighter in a fight
-    df_fighter_1 = df.iloc[::2].reset_index(drop=True)
-    df_fighter_2 = df.iloc[1::2].reset_index(drop=True).rename(columns=dict(zip(cols_fighter_1, cols_fighter_2)))
+    # Group fights by ID
+    for _, row in df.iterrows():
+        fight_id = row['id']
+        if fight_id not in fights_dict:
+            fights_dict[fight_id] = []
+        fights_dict[fight_id].append(row)
 
-    # Merge the two DataFrames side-by-side, aligning by the fight ID
-    combined_df = pd.concat([df_fighter_1, df_fighter_2], axis=1)
+    # Combine fights and create mirrored versions
+    combined_fights = []
+    for fight_id, fighters in fights_dict.items():
+        if len(fighters) == 2:
+            fighter_1, fighter_2 = fighters
 
-    # Create a mirrored DataFrame where the roles of Fighter 1 and Fighter 2 are reversed
-    mirrored_cols_fighter_1 = [f"{col}_b" for col in cols_fighter_1]
-    mirrored_cols_fighter_2 = cols_fighter_1
+            # Original combination
+            combined_fight = pd.concat([pd.Series(fighter_1), pd.Series(fighter_2).add_suffix('_b')])
+            combined_fights.append(combined_fight)
 
-    df_fighter_1_mirror = df_fighter_1.rename(columns=dict(zip(cols_fighter_1, mirrored_cols_fighter_1)))
-    df_fighter_2_mirror = df_fighter_2.rename(columns=dict(zip(mirrored_cols_fighter_1, mirrored_cols_fighter_2)))
-    mirrored_combined_df = pd.concat([df_fighter_2_mirror, df_fighter_1_mirror], axis=1)
+            # Mirrored combination
+            mirrored_fight = pd.concat([pd.Series(fighter_2), pd.Series(fighter_1).add_suffix('_b')])
+            combined_fights.append(mirrored_fight)
 
-    # Concatenate both the original and mirrored DataFrames
-    final_combined_df = pd.concat([combined_df, mirrored_combined_df], ignore_index=True)
+    # Create the final combined DataFrame
+    final_combined_df = pd.DataFrame(combined_fights)
+
+    # Reset the index
+    final_combined_df = final_combined_df.reset_index(drop=True)
 
     # Define the base columns to differentiate
     base_columns = [
@@ -272,18 +276,26 @@ def split_train_val_test(matchup_data_file):
     # Ensure 'current_fight_date' is in datetime format
     matchup_df['current_fight_date'] = pd.to_datetime(matchup_df['current_fight_date'])
 
-    start_date = '2023-07-01'
-    end_date = '2023-12-31'  # Change this to your desired end date
+    start_date = '2023-01-01'
+    end_date = '2024-6-30'  # Change this to your desired end date
+
+    # Convert start_date to datetime
+    start_date = pd.to_datetime(start_date)
+
+    # Calculate the date 10 years before the start date
+    ten_years_before = start_date - pd.DateOffset(years=10)
 
     test_data = matchup_df[(matchup_df['current_fight_date'] >= start_date) &
                            (matchup_df['current_fight_date'] <= end_date)].copy()
-    remaining_data = matchup_df[matchup_df['current_fight_date'] < start_date].copy()
+
+    remaining_data = matchup_df[(matchup_df['current_fight_date'] >= ten_years_before) &
+                                (matchup_df['current_fight_date'] < start_date)].copy()
 
     # Sort remaining data by current_fight_date
     remaining_data = remaining_data.sort_values(by='current_fight_date', ascending=True)
 
     # Calculate the index to split the remaining data into train and validation sets
-    split_index = int(len(remaining_data) * 0.9)
+    split_index = int(len(remaining_data) * 0.8)
 
     # Split the remaining data into train and validation sets
     train_data = remaining_data.iloc[:split_index].copy()
@@ -518,8 +530,8 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 
 if __name__ == "__main__":
-    # combine_rounds_stats('data/ufc_fight_processed.csv')
-    # combine_fighters_stats("data/combined_rounds.csv")
-    # create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
+    combine_rounds_stats('data/ufc_fight_processed.csv')
+    combine_fighters_stats("data/combined_rounds.csv")
+    create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)

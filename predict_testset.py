@@ -5,7 +5,7 @@ import os
 import numpy as np
 import multiprocessing as mp
 from functools import partial
-from sklearn.model_selection import KFold
+
 from sklearn.utils.validation import check_is_fitted
 from tqdm import tqdm
 from rich.table import Table
@@ -64,7 +64,6 @@ def calculate_kelly_fraction(p, b, kelly_fraction):
     full_kelly = max(0, (p - (q / b)))  # Ensure non-negative fraction
     return full_kelly * kelly_fraction  # Apply fractional Kelly
 
-
 def print_fight_results(confident_bets):
     console = Console(width=160)
     for bet in confident_bets:
@@ -99,8 +98,7 @@ def print_fight_results(confident_bets):
         fight_info = Group(
             Text(f"True Winner: {bet['True Winner'].title()}", style="green"),
             Text(f"Predicted Winner: {bet['Predicted Winner'].title()}", style="blue"),
-            Text(f"Confidence: {bet['Confidence']}", style="yellow"),
-            Text(f"Threshold: {bet['Threshold']}", style="magenta")
+            Text(f"Confidence: {bet['Confidence']}", style="yellow")
         )
 
         main_panel = Panel(
@@ -116,31 +114,9 @@ def print_fight_results(confident_bets):
         console.print(main_panel, style="magenta")
         console.print()
 
-
-def adaptive_threshold(y_true, y_pred_proba, initial_threshold=0.6, window_size=100, min_threshold=0.5,
-                       max_threshold=0.75, adjustment=0.01):
-    thresholds = [initial_threshold]
-    for i in range(1, len(y_true)):
-        if i < window_size:
-            recent_performance = y_true[:i] == (y_pred_proba[:i, 1] > thresholds[-1])
-        else:
-            recent_performance = y_true[i - window_size:i] == (y_pred_proba[i - window_size:i, 1] > thresholds[-1])
-
-        accuracy = np.mean(recent_performance)
-        if accuracy < 0.5:
-            thresholds.append(min(thresholds[-1] + adjustment, max_threshold))
-        elif accuracy > 0.7:
-            thresholds.append(max(thresholds[-1] - adjustment, min_threshold))
-        else:
-            thresholds.append(thresholds[-1])
-
-    return thresholds
-
-
-def evaluate_bets_adaptive(y_true, y_pred_proba, data, initial_threshold=0.6, initial_bankroll=10000,
-                           kelly_fraction=0.125, fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300,
-                           print_fights=True, max_bet_percentage=0.20, window_size=100, threshold_step=0.01,
-                           initial_recent_performance=None, is_validation=False):
+def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial_bankroll=10000, kelly_fraction=0.125,
+                  fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300, print_fights=True,
+                  max_bet_percentage=0.20):
     current_bankroll = initial_bankroll
     kelly_bankroll = initial_bankroll
     total_volume = 0
@@ -153,6 +129,10 @@ def evaluate_bets_adaptive(y_true, y_pred_proba, data, initial_threshold=0.6, in
     confident_bets = []
     processed_fights = set()
 
+    # Sort the test_data by date
+    test_data = test_data.sort_values('current_fight_date')
+
+    # Initialize daily tracking
     daily_bankrolls = {}
     daily_kelly_bankrolls = {}
     daily_fixed_stakes = {}
@@ -164,12 +144,7 @@ def evaluate_bets_adaptive(y_true, y_pred_proba, data, initial_threshold=0.6, in
     date_bankroll = initial_bankroll
     date_kelly_bankroll = initial_bankroll
 
-    current_threshold = initial_threshold
-    recent_performance = initial_recent_performance if initial_recent_performance is not None else []
-
-    data = data.sort_values('current_fight_date')
-
-    for i, row in data.iterrows():
+    for i, row in test_data.iterrows():
         fight_id = frozenset([row['fighter'], row['fighter_b']])
         fight_date = row['current_fight_date']
 
@@ -178,6 +153,7 @@ def evaluate_bets_adaptive(y_true, y_pred_proba, data, initial_threshold=0.6, in
 
         processed_fights.add(fight_id)
 
+        # If it's a new date, update the bankrolls and reset daily tracking
         if fight_date != current_date:
             if current_date is not None:
                 current_bankroll = date_bankroll + daily_fixed_profits.get(current_date, 0)
@@ -192,102 +168,94 @@ def evaluate_bets_adaptive(y_true, y_pred_proba, data, initial_threshold=0.6, in
             daily_fixed_profits[current_date] = 0
             daily_kelly_profits[current_date] = 0
 
-        true_winner = row['fighter'] if y_true.iloc[i] == 1 else row['fighter_b']
+        true_winner = row['fighter'] if y_test.iloc[i] == 1 else row['fighter_b']
         winning_probability = max(y_pred_proba[i])
         predicted_winner = row['fighter'] if y_pred_proba[i][1] > y_pred_proba[i][0] else row['fighter_b']
 
-        if winning_probability >= current_threshold:
-            confident_predictions += 1
+        # Always count confident predictions
+        confident_predictions += 1
+        if predicted_winner == true_winner:
+            correct_confident_predictions += 1
+
+        # Betting logic
+        if winning_probability >= confidence_threshold:
             odds = row['current_fight_open_odds'] if predicted_winner == row['fighter'] else row[
                 'current_fight_open_odds_b']
 
+            # Compounding Fixed Fraction Betting
             available_fixed_bankroll = date_bankroll - daily_fixed_stakes[current_date]
             max_bet = date_bankroll * max_bet_percentage
             stake = min(date_bankroll * fixed_bet_fraction, available_fixed_bankroll, max_bet)
-            if stake <= 0:
-                continue
-            daily_fixed_stakes[current_date] += stake
-            fixed_profit = calculate_profit(odds, stake)
-            total_volume += stake
 
+            # Fractional Kelly Criterion Betting
             available_kelly_bankroll = date_kelly_bankroll - daily_kelly_stakes[current_date]
             b = odds / 100 if odds > 0 else 100 / abs(odds)
             kelly_bet_size = calculate_kelly_fraction(winning_probability, b, kelly_fraction)
             kelly_stake = min(available_kelly_bankroll * kelly_bet_size, available_kelly_bankroll, max_bet)
 
+            # Set a default bet if the Fractional Kelly Stake is $0.00 and odds are better than min_odds
             if kelly_stake == 0 and odds >= min_odds:
                 kelly_stake = min(available_kelly_bankroll * default_bet, available_kelly_bankroll, max_bet)
 
-            if kelly_stake <= 0:
-                continue
-            daily_kelly_stakes[current_date] += kelly_stake
-            kelly_profit = calculate_profit(odds, kelly_stake)
-            kelly_total_volume += kelly_stake
-            if kelly_stake > 0:
+            if stake > 0 and kelly_stake > 0:
                 total_bets += 1
+                daily_fixed_stakes[current_date] += stake
+                daily_kelly_stakes[current_date] += kelly_stake
+                fixed_profit = calculate_profit(odds, stake)
+                kelly_profit = calculate_profit(odds, kelly_stake)
+                total_volume += stake
+                kelly_total_volume += kelly_stake
 
-            bet_result = {
-                'Fight': i + 1,
-                'Fighter A': row['fighter'],
-                'Fighter B': row['fighter_b'],
-                'Date': fight_date,
-                'True Winner': true_winner,
-                'Predicted Winner': predicted_winner,
-                'Confidence': f"{winning_probability:.2%}",
-                'Threshold': f"{current_threshold:.2%}",
-                'Odds': odds,
-                'Fixed Fraction Bankroll Before': f"${date_bankroll:.2f}",
-                'Fixed Fraction Stake': f"${stake:.2f}",
-                'Fixed Fraction Potential Profit': f"${fixed_profit:.2f}",
-                'Kelly Bankroll Before': f"${date_kelly_bankroll:.2f}",
-                'Fractional Kelly Stake': f"${kelly_stake:.2f}",
-                'Fractional Kelly Potential Profit': f"${kelly_profit:.2f}"
-            }
+                bet_result = {
+                    'Fight': i + 1,
+                    'Fighter A': row['fighter'],
+                    'Fighter B': row['fighter_b'],
+                    'Date': fight_date,
+                    'True Winner': true_winner,
+                    'Predicted Winner': predicted_winner,
+                    'Confidence': f"{winning_probability:.2%}",
+                    'Odds': odds,
+                    'Fixed Fraction Bankroll Before': f"${date_bankroll:.2f}",
+                    'Fixed Fraction Stake': f"${stake:.2f}",
+                    'Fixed Fraction Potential Profit': f"${fixed_profit:.2f}",
+                    'Kelly Bankroll Before': f"${date_kelly_bankroll:.2f}",
+                    'Fractional Kelly Stake': f"${kelly_stake:.2f}",
+                    'Fractional Kelly Potential Profit': f"${kelly_profit:.2f}"
+                }
 
-            if predicted_winner == true_winner:
-                daily_fixed_profits[current_date] += fixed_profit
-                daily_kelly_profits[current_date] += kelly_profit
-                correct_bets += 1
-                correct_confident_predictions += 1
-                bet_result['Fixed Fraction Profit'] = fixed_profit
-                bet_result['Kelly Profit'] = kelly_profit
-                recent_performance.append(1)
-            else:
-                daily_fixed_profits[current_date] -= stake
-                daily_kelly_profits[current_date] -= kelly_stake
-                bet_result['Fixed Fraction Profit'] = -stake
-                bet_result['Kelly Profit'] = -kelly_stake
-                recent_performance.append(0)
+                if predicted_winner == true_winner:
+                    daily_fixed_profits[current_date] += fixed_profit
+                    daily_kelly_profits[current_date] += kelly_profit
+                    correct_bets += 1
+                    bet_result['Fixed Fraction Profit'] = fixed_profit
+                    bet_result['Kelly Profit'] = kelly_profit
+                else:
+                    daily_fixed_profits[current_date] -= stake
+                    daily_kelly_profits[current_date] -= kelly_stake
+                    bet_result['Fixed Fraction Profit'] = -stake
+                    bet_result['Kelly Profit'] = -kelly_stake
 
-            bet_result['Fixed Fraction Bankroll After'] = f"${(date_bankroll + daily_fixed_profits[current_date]):.2f}"
-            bet_result['Kelly Bankroll After'] = f"${(date_kelly_bankroll + daily_kelly_profits[current_date]):.2f}"
+                bet_result[
+                    'Fixed Fraction Bankroll After'] = f"${(date_bankroll + daily_fixed_profits[current_date]):.2f}"
+                bet_result['Kelly Bankroll After'] = f"${(date_kelly_bankroll + daily_kelly_profits[current_date]):.2f}"
 
-            bet_result['Fixed Fraction ROI'] = (bet_result['Fixed Fraction Profit'] / date_bankroll) * 100
-            bet_result['Kelly ROI'] = (bet_result['Kelly Profit'] / date_kelly_bankroll) * 100
+                bet_result['Fixed Fraction ROI'] = (bet_result['Fixed Fraction Profit'] / date_bankroll) * 100
+                bet_result['Kelly ROI'] = (bet_result['Kelly Profit'] / date_kelly_bankroll) * 100
 
-            confident_bets.append(bet_result)
+                confident_bets.append(bet_result)
 
-            if len(recent_performance) > window_size:
-                recent_performance = recent_performance[-window_size:]
-
-            accuracy = sum(recent_performance) / len(recent_performance)
-            if accuracy < 0.5:
-                current_threshold = min(current_threshold + threshold_step, 0.75)
-            elif accuracy > 0.7:
-                current_threshold = max(current_threshold - threshold_step, 0.5)
-
+    # Add the last day's results
     if current_date is not None:
         current_bankroll = date_bankroll + daily_fixed_profits.get(current_date, 0)
         kelly_bankroll = date_kelly_bankroll + daily_kelly_profits.get(current_date, 0)
         daily_bankrolls[current_date] = current_bankroll
         daily_kelly_bankrolls[current_date] = kelly_bankroll
 
-    if print_fights and not is_validation:
+    if print_fights:
         print_fight_results(confident_bets)
 
     return (current_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
-            correct_confident_predictions, kelly_bankroll, kelly_total_volume, daily_bankrolls, daily_kelly_bankrolls,
-            current_threshold, recent_performance)
+            correct_confident_predictions, kelly_bankroll, kelly_total_volume, daily_bankrolls, daily_kelly_bankrolls)
 
 
 def calculate_monthly_roi(daily_bankrolls, initial_bankroll):
@@ -363,7 +331,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
 
     console = Console()
 
-    console.print(Panel(f"Best confidence threshold: {confidence_threshold:.2f}\n"
+    console.print(Panel(f"Best confidence threshold: {confidence_threshold:.4f}\n"
                         f"Best Kelly ROI: {kelly_roi:.2f}%",
                         title="Optimal Parameters"))
 
@@ -433,7 +401,7 @@ def evaluate_threshold(threshold, y_test, y_pred_proba, test_data_with_display, 
                        FIXED_BET_FRACTION, MAX_BET_PERCENTAGE):
     (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
      correct_confident_predictions, kelly_final_bankroll, kelly_total_volume,
-     daily_bankrolls, daily_kelly_bankrolls) = evaluate_bets_adaptive(
+     daily_bankrolls, daily_kelly_bankrolls) = evaluate_bets(
         y_test, y_pred_proba, test_data_with_display, threshold, INITIAL_BANKROLL,
         KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.00, print_fights=False,
         max_bet_percentage=MAX_BET_PERCENTAGE)
@@ -465,8 +433,8 @@ class LGBMWrapper(BaseEstimator, ClassifierMixin):
         return self.classes_[np.argmax(proba, axis=1)]
 
 
-def main(model_type='xgboost', use_calibration=True, max_bet_percentage=0.20, initial_threshold=0.55, window_size=10,
-         threshold_step=0.01):
+def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', use_calibration=True, max_bet_percentage=0.20):
+    # Redirect stdout to capture all output
     old_stdout = sys.stdout
     sys.stdout = mystdout = StringIO()
 
@@ -475,6 +443,7 @@ def main(model_type='xgboost', use_calibration=True, max_bet_percentage=0.20, in
     FIXED_BET_FRACTION = 0.1
     MAX_BET_PERCENTAGE = max_bet_percentage
 
+    # Load and preprocess data
     val_data = pd.read_csv('data/train test data/val_data.csv')
     test_data = pd.read_csv('data/train test data/test_data.csv')
 
@@ -489,10 +458,11 @@ def main(model_type='xgboost', use_calibration=True, max_bet_percentage=0.20, in
 
     display_data = test_data[display_columns]
     test_data_with_display = pd.concat([X_test, display_data], axis=1)
-    val_data_with_display = pd.concat([X_val, val_data[display_columns]], axis=1)
+    test_data_with_display = pd.concat([X_test, display_data], axis=1)
 
+    # Load and calibrate model
     if model_type == 'xgboost':
-        model_path = os.path.abspath('models/xgboost/jan-jun2023/model_0.6923_features_auc_diff_0.0656.json')
+        model_path = os.path.abspath('models/xgboost/jan2023-jun2024/model_0.6822_features_auc_diff_0.0357.json')
         model = load_model(model_path, 'xgboost')
         expected_features = model.get_booster().feature_names
         X_val = X_val.reindex(columns=expected_features)
@@ -501,70 +471,68 @@ def main(model_type='xgboost', use_calibration=True, max_bet_percentage=0.20, in
         if use_calibration:
             calibrated_model = CalibratedClassifierCV(model, cv='prefit', method='sigmoid')
             calibrated_model.fit(X_val, y_val)
-            y_val_pred_proba = calibrated_model.predict_proba(X_val)
-            y_test_pred_proba = calibrated_model.predict_proba(X_test)
+            y_pred_proba = calibrated_model.predict_proba(X_test)
         else:
-            y_val_pred_proba = model.predict_proba(X_val)
-            y_test_pred_proba = model.predict_proba(X_test)
+            y_pred_proba = model.predict_proba(X_test)
 
     elif model_type == 'lightgbm':
-        model_path = os.path.abspath('models/lightgbm/model_0.7015_342_features_auc_diff_0.0801.txt')
+        model_path = os.path.abspath('models/lightgbm/model_0.6838_342_features_auc_diff_0.0956.txt')
         model = load_model(model_path, 'lightgbm')
         expected_features = model.feature_name()
         X_val = X_val.reindex(columns=expected_features)
         X_test = X_test.reindex(columns=expected_features)
 
         lgb_wrapper = LGBMWrapper(model)
-        lgb_wrapper.fit(X_val, y_val)
+        lgb_wrapper.fit(X_val, y_val)  # Fit the wrapper to set classes_
 
         if use_calibration:
             calibrated_model = CalibratedClassifierCV(lgb_wrapper, cv='prefit', method='sigmoid')
             calibrated_model.fit(X_val, y_val)
-            y_val_pred_proba = calibrated_model.predict_proba(X_val)
-            y_test_pred_proba = calibrated_model.predict_proba(X_test)
+            y_pred_proba = calibrated_model.predict_proba(X_test)
         else:
-            y_val_pred_proba = lgb_wrapper.predict_proba(X_val)
-            y_test_pred_proba = lgb_wrapper.predict_proba(X_test)
+            y_pred_proba = lgb_wrapper.predict_proba(X_test)
 
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
 
-    val_results = evaluate_bets_adaptive(y_val, y_val_pred_proba, val_data_with_display,
-                                         initial_threshold=initial_threshold,
-                                         initial_bankroll=INITIAL_BANKROLL,
-                                         kelly_fraction=KELLY_FRACTION,
-                                         fixed_bet_fraction=FIXED_BET_FRACTION,
-                                         default_bet=0.00,
-                                         print_fights=False,
-                                         max_bet_percentage=MAX_BET_PERCENTAGE,
-                                         window_size=window_size,
-                                         threshold_step=threshold_step,
-                                         is_validation=True)
+    # Optimize threshold or use manual threshold
+    if optimize_threshold:
+        print("Evaluating thresholds...")
+        thresholds = np.arange(0.5, 0.75, 0.0001)
 
-    final_threshold = val_results[-2]
-    recent_performance = val_results[-1]
+        evaluate_threshold_partial = partial(evaluate_threshold,
+                                             y_test=y_test,
+                                             y_pred_proba=y_pred_proba,
+                                             test_data_with_display=test_data_with_display,
+                                             INITIAL_BANKROLL=INITIAL_BANKROLL,
+                                             KELLY_FRACTION=KELLY_FRACTION,
+                                             FIXED_BET_FRACTION=FIXED_BET_FRACTION,
+                                             MAX_BET_PERCENTAGE=MAX_BET_PERCENTAGE)
 
-    bet_results = evaluate_bets_adaptive(y_test, y_test_pred_proba, test_data_with_display,
-                                         initial_threshold=final_threshold,
-                                         initial_bankroll=INITIAL_BANKROLL,
-                                         kelly_fraction=KELLY_FRACTION,
-                                         fixed_bet_fraction=FIXED_BET_FRACTION,
-                                         default_bet=0.00,
-                                         print_fights=True,
-                                         max_bet_percentage=MAX_BET_PERCENTAGE,
-                                         window_size=window_size,
-                                         threshold_step=threshold_step,
-                                         initial_recent_performance=recent_performance)
+        with mp.Pool(processes=mp.cpu_count()) as pool:
+            results = list(tqdm(pool.imap(evaluate_threshold_partial, thresholds), total=len(thresholds)))
+
+        best_result = max(results, key=lambda x: x[1])
+        best_threshold, best_kelly_roi, *best_results = best_result
+    else:
+        if manual_threshold is None:
+            raise ValueError("If optimize_threshold is False, you must provide a manual_threshold value.")
+        best_threshold = manual_threshold
+
+    # Evaluate bets using calibrated predictions
+    bet_results = evaluate_bets(y_test, y_pred_proba, test_data_with_display, best_threshold, INITIAL_BANKROLL,
+                                KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.00, print_fights=True,
+                                max_bet_percentage=MAX_BET_PERCENTAGE)
 
     (final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
      correct_confident_predictions, kelly_final_bankroll, kelly_total_volume,
-     daily_bankrolls, daily_kelly_bankrolls, final_threshold, _) = bet_results
+     daily_bankrolls, daily_kelly_bankrolls) = bet_results
 
     earliest_fight_date = test_data['current_fight_date'].min()
 
+    # Calculate and print monthly ROIs
     fixed_monthly_roi, fixed_monthly_profit, fixed_total_roi = calculate_monthly_roi(daily_bankrolls, INITIAL_BANKROLL)
-    kelly_monthly_roi, kelly_monthly_profit, kelly_total_roi = calculate_monthly_roi(daily_kelly_bankrolls,
-                                                                                     INITIAL_BANKROLL)
+    kelly_monthly_roi, kelly_monthly_profit, kelly_total_roi = calculate_monthly_roi(daily_kelly_bankrolls, INITIAL_BANKROLL)
 
     console = Console()
     console.print("\nMonthly ROI (based on monthly performance, calibrated):")
@@ -581,20 +549,22 @@ def main(model_type='xgboost', use_calibration=True, max_bet_percentage=0.20, in
     table.add_row("Total", f"{fixed_total_roi:.2f}%", f"{kelly_total_roi:.2f}%")
     console.print(table)
 
+    # Print betting results
     print_betting_results(len(test_data), confident_predictions, correct_confident_predictions, total_bets,
-                          correct_bets, INITIAL_BANKROLL, final_bankroll, total_volume, final_threshold,
+                          correct_bets, INITIAL_BANKROLL, final_bankroll, total_volume, best_threshold,
                           kelly_final_bankroll, kelly_total_volume, KELLY_FRACTION, FIXED_BET_FRACTION,
                           earliest_fight_date, fixed_total_roi, kelly_total_roi)
 
-    y_pred = (y_test_pred_proba[:, 1] > 0.5).astype(int)
-    print_overall_metrics(y_test, y_pred, y_test_pred_proba)
+    y_pred = (y_pred_proba[:, 1] > 0.5).astype(int)
+    print_overall_metrics(y_test, y_pred, y_pred_proba)
 
+    # Restore stdout and print results
     sys.stdout = old_stdout
     output = mystdout.getvalue()
     console = Console(width=93)
     main_panel = Panel(
         output,
-        title="Past Fight Testing with Adaptive Threshold",
+        title="Past Fight Testing",
         border_style="bold magenta",
         expand=True,
     )
@@ -602,5 +572,6 @@ def main(model_type='xgboost', use_calibration=True, max_bet_percentage=0.20, in
 
 
 if __name__ == "__main__":
-    main(model_type='xgboost', use_calibration=True, max_bet_percentage=0.20,
-         initial_threshold=0.60, window_size=10, threshold_step=0.01)
+    # main(optimize_threshold=True, model_type='xgboost', use_calibration=True, max_bet_percentage=1.0)
+    # To run with a manually set threshold:
+    main(optimize_threshold=False, manual_threshold=0.58, model_type='xgboost', use_calibration=True, max_bet_percentage=0.2)
