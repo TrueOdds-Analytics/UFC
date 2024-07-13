@@ -4,23 +4,9 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
 
-def create_fighter_styles(input_file='data/combined_rounds.csv', n_clusters=10):
+def create_fighter_styles(input_file='data/combined_rounds.csv', n_clusters=5):
     # Read the CSV file
     df = pd.read_csv(input_file)
-
-    # Define style names
-    style_names = {
-        0: "Versatile Combatants",
-        1: "Submission Specialists",
-        2: "Elite Strikers",
-        3: "Striking Technicians",
-        4: "Power Punchers",
-        5: "Grappling Masters",
-        6: "Submission Artists",
-        7: "Balanced Fighters",
-        8: "Wrestling Dominators",
-        9: "Unorthodox Fighters"
-    }
 
     # Select the relevant columns for clustering
     style_columns = [
@@ -82,7 +68,6 @@ def create_fighter_styles(input_file='data/combined_rounds.csv', n_clusters=10):
     for i in range(n_clusters):
         cluster_size = (df['Style'] == i).sum()
         percentage = (cluster_size / total_fights) * 100
-        print(f"\nCluster {i}: {style_names[i]}")
         print(f"Number of fights: {cluster_size}")
         print(f"Percentage: {percentage:.2f}%")
 
