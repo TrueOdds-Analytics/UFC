@@ -4,6 +4,7 @@ import time
 import warnings
 from tqdm import tqdm
 from helper import *
+from styles import *
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -238,7 +239,7 @@ def combine_fighters_stats(file_path):
         'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
     ]
 
-    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end']
+    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end', 'Style']
 
     # Generate the columns to differentiate using list comprehension
     columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in
@@ -409,7 +410,8 @@ def create_matchup_data(file_path, tester, name):
         column_names = ['fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in
                                          features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include] + \
-                       results_columns + ['current_fight_open_odds_diff',
+                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
+                                          'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
                                           'current_fight_age_diff'] + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
@@ -417,7 +419,8 @@ def create_matchup_data(file_path, tester, name):
         column_names = ['fighter', 'fighter_b', 'fight_date'] + [f"{feature}_fighter_avg_last_{n_past_fights}" for
                                                                  feature in features_to_include] + \
                        [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include] + \
-                       results_columns + ['current_fight_open_odds_diff',
+                       results_columns + ['current_fight_open_odds', 'current_fight_open_odds_b',
+                                          'current_fight_open_odds_diff',
                                           'current_fight_age', 'current_fight_age_b',
                                           'current_fight_age_diff'] + \
                        [f"{method}" for method in method_columns] + ['current_fight_date']
@@ -529,7 +532,8 @@ def create_specific_matchup_data(file_path, fighter_name, opponent_name, n_past_
 
 if __name__ == "__main__":
     # combine_rounds_stats('data/ufc_fight_processed.csv')
-    # combine_fighters_stats("data/combined_rounds.csv")
+    create_fighter_styles()
+    combine_fighters_stats("data/combined_rounds.csv")
     create_matchup_data("data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('data/matchup data/matchup_data_3_avg_name.csv')
     # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)
