@@ -165,7 +165,7 @@ def combine_fighters_stats(file_path):
         'takedown_successful', 'takedown_attempted', 'takedown_rate', 'submission_attempt',
         'reversals', 'head_landed', 'head_attempted', 'body_landed', 'body_attempted',
         'leg_landed', 'leg_attempted', 'distance_landed', 'distance_attempted',
-        'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
+        'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted',
     ]
 
     other_columns = ['open_odds', 'closing_range_start', 'closing_range_end', 'pre_fight_elo',
@@ -264,12 +264,12 @@ def split_train_val_test(matchup_data_file):
 
 def create_matchup_data(file_path, tester, name):
     df = pd.read_csv(file_path)
-
     columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
                           'result', 'winner', 'weight_class', 'scheduled_rounds',
                           'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
 
-    features_to_include = [col for col in df.columns if col not in columns_to_exclude and 'age' not in col.lower()]
+    features_to_include = [col for col in df.columns if
+                           col not in columns_to_exclude and col != 'age' and not col.endswith('_age')]
 
     method_columns = ['winner']
 
@@ -408,33 +408,8 @@ def create_matchup_data(file_path, tester, name):
 
 
 if __name__ == "__main__":
-    start_time = time.time()
-    #
-    # print("Starting combine_rounds_stats...")
-    # start_func_time = time.time()
     # combine_rounds_stats('../data/ufc_fight_processed.csv')
-    # end_func_time = time.time()
-    # print(f"combine_rounds_stats completed in {end_func_time - start_func_time:.2f} seconds")
-    #
-    # print("Starting calculate_elo_ratings...")
-    # start_func_time = time.time()
     # calculate_elo_ratings('../data/combined_rounds.csv')
-    # end_func_time = time.time()
-    # print(f"calculate_elo_ratings completed in {end_func_time - start_func_time:.2f} seconds")
-    #
-    # print("Starting combine_fighters_stats...")
-    # start_func_time = time.time()
     # combine_fighters_stats("../data/combined_rounds.csv")
-    # end_func_time = time.time()
-    # print(f"combine_fighters_stats completed in {end_func_time - start_func_time:.2f} seconds")
-    #
-    print("Starting create_matchup_data...")
-    start_func_time = time.time()
     create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
-    end_func_time = time.time()
-    print(f"create_matchup_data completed in {end_func_time - start_func_time:.2f} seconds")
-
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')
-
-    # total_time = time.time() - start_time
-    # print(f"Total execution time: {total_time:.2f} seconds")

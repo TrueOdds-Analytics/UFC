@@ -170,10 +170,11 @@ def remove_correlated_features(matchup_df, correlation_threshold=0.95):
     # Select the upper triangle of the correlation matrix
     upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
 
-    # Find the columns to drop, excluding 'current_fight_open_odds_diff'
+    # Find the columns to drop, excluding 'current_fight_open_odds_diff' and those containing 'damage'
     columns_to_drop = [column for column in upper_tri.columns
                        if any(upper_tri[column] > correlation_threshold)
-                       and column != 'current_fight_open_odds_diff']
+                       and column != 'current_fight_open_odds_diff'
+                       and 'damage' not in column.lower()]
 
     # Drop the highly correlated columns
     matchup_df = matchup_df.drop(columns=columns_to_drop)

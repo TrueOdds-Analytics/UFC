@@ -267,33 +267,33 @@ def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_roun
 
 
 if __name__ == "__main__":
-    input_thread = threading.Thread(target=user_input_thread, daemon=True)
-    input_thread.start()
-
-    X_train, X_val, y_train, y_val = get_train_val_data()
-    print("Starting initial optimization and evaluation...")
-    try:
-        best_trial = optimize_model(X_train, X_val, y_train, y_val)
-        best_params = best_trial.params
-        best_accuracy = best_trial.value
-
-        # Create and evaluate the best model
-        best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train,
-                                                                              y_val)
-        best_auc = auc
-
-        print("Initial optimization completed.")
-        print(f"Best model validation accuracy: {best_accuracy:.4f}")
-        print(f"Best model validation AUC: {best_auc:.4f}")
-        print("Best parameters:", best_params)
-        print("--------------------")
-
-    except KeyboardInterrupt:
-        print("Optimization interrupted by user.")
+    # input_thread = threading.Thread(target=user_input_thread, daemon=True)
+    # input_thread.start()
+    #
+    # X_train, X_val, y_train, y_val = get_train_val_data()
+    # print("Starting initial optimization and evaluation...")
+    # try:
+    #     best_trial = optimize_model(X_train, X_val, y_train, y_val)
+    #     best_params = best_trial.params
+    #     best_accuracy = best_trial.value
+    #
+    #     # Create and evaluate the best model
+    #     best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train,
+    #                                                                           y_val)
+    #     best_auc = auc
+    #
+    #     print("Initial optimization completed.")
+    #     print(f"Best model validation accuracy: {best_accuracy:.4f}")
+    #     print(f"Best model validation AUC: {best_auc:.4f}")
+    #     print("Best parameters:", best_params)
+    #     print("--------------------")
+    #
+    # except KeyboardInterrupt:
+    #     print("Optimization interrupted by user.")
 
     print("Creating SHAP graph for the best model")
     X_train, X_val, y_train, y_val = get_train_val_data()
-    model_path = f'models/xgboost/jun2022-jun2024/model_0.7138_auc_diff_0.0160_good.json'
+    model_path = f'models/xgboost/jun2022-jun2024/model_0.7039_auc_diff_0.0887.json'
     create_shap_graph(model_path, X_train)
     print("SHAP graph creation completed.")
     print("--------------------")
