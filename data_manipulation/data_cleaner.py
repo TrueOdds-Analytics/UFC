@@ -21,24 +21,10 @@ def combine_rounds_stats(file_path):
     # Preprocess fighter stats
     fighter_stats['name'] = fighter_stats['name'].astype(str).str.lower().str.strip()
     fighter_stats['dob'] = fighter_stats['dob'].replace(['--', '', 'NA', 'N/A'], np.nan)
-    print("Original DOB data:")
-    print(fighter_stats['dob'])
 
     # Convert DOB to datetime, handling different formats
-    def parse_date(date_str):
-        if pd.isna(date_str):
-            return pd.NaT
-        try:
-            return pd.to_datetime(date_str, format='%d-%b-%y')
-        except ValueError:
-            try:
-                return pd.to_datetime(date_str, format='%b %d, %Y')
-            except ValueError:
-                return pd.NaT
 
     fighter_stats['dob'] = fighter_stats['dob'].apply(parse_date)
-    print("\nConverted DOB data:")
-    print(fighter_stats['dob'])
 
     # Merge other fighter stats with UFC stats
     ufc_stats = pd.merge(ufc_stats, fighter_stats[['name', 'dob']], left_on='fighter', right_on='name', how='left')
@@ -46,9 +32,6 @@ def combine_rounds_stats(file_path):
     # Calculate age
     ufc_stats['age'] = (ufc_stats['fight_date'] - ufc_stats['dob']).dt.days / 365.25
     ufc_stats['age'] = ufc_stats['age'].fillna(np.nan).round().astype(float)
-
-    print("\nSample of merged data with age:")
-    print(ufc_stats[['fighter', 'knockdowns', 'dob', 'age']].head())
 
     # Drop unnecessary columns and rows
     ufc_stats = ufc_stats.drop(['round', 'location', 'name'], axis=1)
@@ -70,6 +53,17 @@ def combine_rounds_stats(file_path):
     # Aggregate numeric columns by fight ID and fighter identifier
     aggregated_stats = ufc_stats.groupby(['id', fighter_identifier], as_index=False)[numeric_columns].sum()
 
+    # Calculate damage given
+    aggregated_stats['damage_given'] = aggregated_stats.apply(calculate_damage_score, axis=1)
+
+    # Calculate damage taken (by looking at the opponent's damage given)
+    damage_taken = aggregated_stats.groupby('id').apply(get_damage_taken).reset_index()
+    damage_taken = damage_taken.melt(id_vars='id', var_name='fighter', value_name='damage_taken')
+    aggregated_stats = pd.merge(aggregated_stats, damage_taken, on=['id', 'fighter'], how='left')
+
+    # Add damage columns to numeric_columns
+    numeric_columns = list(numeric_columns) + ['damage_given', 'damage_taken']
+
     # Recalculate percentage columns
     aggregated_stats['significant_strikes_rate'] = (aggregated_stats['significant_strikes_landed'] / aggregated_stats[
         'significant_strikes_attempted']).fillna(0)
@@ -85,25 +79,9 @@ def combine_rounds_stats(file_path):
     merged_stats = pd.merge(aggregated_stats, non_numeric_data, on=['id', fighter_identifier], how='left')
     merged_stats = pd.merge(merged_stats, max_round_time, on='id', how='left')
 
-    # Function to cumulatively sum numeric stats and create career stats columns
-    def aggregate_up_to_previous_fight(group):
-        group = group.sort_values('fight_date')
-        cumulative_stats = group[numeric_columns].shift().cumsum(skipna=True).fillna(0)
-        fight_count = group.groupby('fighter').cumcount()
-
-        for col in numeric_columns:
-            group[f"{col}_career"] = cumulative_stats[col]
-            group[f"{col}_career_avg"] = (cumulative_stats[col] / fight_count).fillna(0)
-
-        group['significant_strikes_rate_career'] = (
-                    cumulative_stats['significant_strikes_landed'] / cumulative_stats['significant_strikes_attempted']).fillna(0)
-        group['takedown_rate_career'] = (
-                    cumulative_stats['takedown_successful'] / cumulative_stats['takedown_attempted']).fillna(0)
-
-        return group
-
-    # Apply the aggregation function for each fighter up to the previous fight
-    final_stats = merged_stats.groupby(fighter_identifier, group_keys=False).apply(aggregate_up_to_previous_fight)
+    # Apply the aggregation function for each fighter
+    final_stats = merged_stats.groupby(fighter_identifier, group_keys=False).apply(
+        lambda x: aggregate_fighter_stats(x, numeric_columns))
 
     # Reorder columns
     common_columns = ufc_stats.columns.intersection(final_stats.columns)
@@ -178,35 +156,9 @@ def combine_rounds_stats(file_path):
     final_stats = final_stats.sort_values(['fighter', 'fight_date'])
 
     # Calculate years of experience and days since last fight
-    def calculate_experience_and_days(group):
-        group = group.sort_values('fight_date')
-        group['years_of_experience'] = (group['fight_date'] - group['fight_date'].iloc[0]).dt.days / 365.25
-        group['days_since_last_fight'] = (group['fight_date'] - group['fight_date'].shift()).dt.days
-        return group
-
     final_stats = final_stats.groupby('fighter', group_keys=False).apply(calculate_experience_and_days)
 
     # Calculate win and loss streaks for the next fight
-    def update_streaks(group):
-        group = group.sort_values('fight_date')
-
-        # Initialize the win and loss streak columns with 0 for the first fight
-        group['win_streak'] = 0
-        group['loss_streak'] = 0
-
-        # Iterate over each row in the group, starting from the second row
-        for i in range(1, len(group)):
-            if group.iloc[i - 1]['winner'] == 1:
-                # If the fighter won the previous fight, increment the win streak and reset the loss streak
-                group.iloc[i, group.columns.get_loc('win_streak')] = group.iloc[i - 1]['win_streak'] + 1
-                group.iloc[i, group.columns.get_loc('loss_streak')] = 0
-            else:
-                # If the fighter lost the previous fight, increment the loss streak and reset the win streak
-                group.iloc[i, group.columns.get_loc('loss_streak')] = group.iloc[i - 1]['loss_streak'] + 1
-                group.iloc[i, group.columns.get_loc('win_streak')] = 0
-
-        return group
-
     final_stats = final_stats.groupby('fighter', group_keys=False).apply(update_streaks)
 
     # Fill NaN values in the new columns
@@ -216,6 +168,7 @@ def combine_rounds_stats(file_path):
     final_stats.to_csv('../data/combined_rounds.csv', index=False)
 
     return final_stats
+
 
 def combine_fighters_stats(file_path):
     # Load the data
@@ -361,6 +314,7 @@ def split_train_val_test(matchup_data_file):
         f"Train, validation, and test data saved successfully. {len(removed_features)} correlated features were removed.")
     print(f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}, Test set size: {len(test_data)}")
 
+
 def create_matchup_data(file_path, tester, name):
     df = pd.read_csv(file_path)
 
@@ -390,7 +344,8 @@ def create_matchup_data(file_path, tester, name):
         fighter_features = fighter_df[features_to_include].mean().values
         opponent_features = opponent_df[features_to_include].mean().values
 
-        results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(tester).values.flatten()
+        results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(
+            tester).values.flatten()
         results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
             tester).values.flatten()
 
@@ -424,6 +379,10 @@ def create_matchup_data(file_path, tester, name):
         current_fight_elo_b_win_chance = 1 / (1 + 10 ** ((current_fight['elo'] - current_fight['elo_b']) / 400))
         current_fight_elo_chance_diff = current_fight_elo_a_win_chance - current_fight_elo_b_win_chance
 
+        current_fight_elo_last_3_a = current_fight['fight_outcome_elo_fighter_avg_last_3']
+        current_fight_elo_last_3_b = current_fight['fight_outcome_elo_fighter_b_avg_last_3']
+        current_fight_elo_last_3_diff = current_fight_elo_last_3_a - current_fight_elo_last_3_b
+
         current_fight_win_streak_a = current_fight['win_streak']
         current_fight_win_streak_b = current_fight['win_streak_b']
         current_fight_win_streak_diff = current_fight_win_streak_a - current_fight_win_streak_b
@@ -445,6 +404,7 @@ def create_matchup_data(file_path, tester, name):
              [current_fight_odds_diff], current_fight_ages, [current_fight_age_diff],
              [current_fight_elo_a, current_fight_elo_b, current_fight_elo_diff,
               current_fight_elo_a_win_chance, current_fight_elo_b_win_chance, current_fight_elo_chance_diff,
+              current_fight_elo_last_3_a, current_fight_elo_last_3_b, current_fight_elo_last_3_diff,
               current_fight_win_streak_a, current_fight_win_streak_b, current_fight_win_streak_diff,
               current_fight_loss_streak_a, current_fight_loss_streak_b, current_fight_loss_streak_diff,
               current_fight_years_experience_a, current_fight_years_experience_b, current_fight_years_experience_diff,
@@ -457,7 +417,8 @@ def create_matchup_data(file_path, tester, name):
         if not name:
             matchup_data.append([most_recent_date] + combined_row.tolist() + [current_fight_date])
         else:
-            matchup_data.append([fighter_name, opponent_name, most_recent_date] + combined_row.tolist() + [current_fight_date])
+            matchup_data.append(
+                [fighter_name, opponent_name, most_recent_date] + combined_row.tolist() + [current_fight_date])
 
     results_columns = []
     for i in range(1, tester + 1):
@@ -468,6 +429,7 @@ def create_matchup_data(file_path, tester, name):
 
     new_columns = ['current_fight_elo_a', 'current_fight_elo_b', 'current_fight_elo_diff',
                    'current_fight_elo_a_win_chance', 'current_fight_elo_b_win_chance', 'current_fight_elo_chance_diff',
+                   'current_fight_elo_last_3_a', 'current_fight_elo_last_3_b', 'current_fight_elo_last_3_diff',
                    'current_fight_win_streak_a', 'current_fight_win_streak_b', 'current_fight_win_streak_diff',
                    'current_fight_loss_streak_a', 'current_fight_loss_streak_b', 'current_fight_loss_streak_diff',
                    'current_fight_years_experience_a', 'current_fight_years_experience_b',
@@ -505,9 +467,8 @@ def create_matchup_data(file_path, tester, name):
 
 
 if __name__ == "__main__":
-    # combine_rounds_stats('../data/ufc_fight_processed.csv')
-    # calculate_elo_ratings('../data/combined_rounds.csv')
-    # combine_fighters_stats("../data/combined_rounds.csv")
+    combine_rounds_stats('../data/ufc_fight_processed.csv')
+    calculate_elo_ratings('../data/combined_rounds.csv')
+    combine_fighters_stats("../data/combined_rounds.csv")
     create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')
-    # create_specific_matchup_data("data/combined_sorted_fighter_stats.csv", "leon edwards", "Belal Muhammad", 3, True)

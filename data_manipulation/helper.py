@@ -3,27 +3,89 @@ import numpy as np
 import pandas as pd
 
 
-def parse_date(date_input):
-    if isinstance(date_input, pd.Timestamp):
-        return date_input.to_pydatetime()
-    elif isinstance(date_input, str):
-        date_formats = [
-            "%b %d %Y", "%b %dst %Y", "%b %dnd %Y", "%b %drd %Y", "%b %dth %Y",
-            "%B %d %Y", "%B %dst %Y", "%B %dnd %Y", "%B %drd %Y", "%B %dth %Y",
-            "%Y-%m-%d"
-        ]
-        for date_format in date_formats:
-            try:
-                return datetime.strptime(date_input, date_format)
-            except ValueError:
-                continue
-        print(f"Unable to parse date: {date_input}")
-        return None
-    elif isinstance(date_input, datetime):
-        return date_input
+def calculate_damage_score(row):
+    weights = {
+        'knockdowns': 15,
+        'significant_strikes_landed': 5,
+        'total_strikes_landed': 1,
+        'head_landed': 3,
+        'body_landed': 2,
+        'leg_landed': 1.5,
+        'distance_landed': 2,
+        'clinch_landed': 1.5,
+        'ground_landed': 1
+    }
+    return sum(row[col] * weight for col, weight in weights.items())
+
+
+def get_damage_taken(group):
+    if len(group) == 2:
+        return pd.Series({
+            group.iloc[0]['fighter']: group.iloc[1]['damage_given'],
+            group.iloc[1]['fighter']: group.iloc[0]['damage_given']
+        })
+    elif len(group) == 1:
+        return pd.Series({group.iloc[0]['fighter']: 0})  # Assume no damage taken if only one fighter
     else:
-        print(f"Unexpected date type: {type(date_input)}")
-        return None
+        return pd.Series()  # Return empty series for any other case
+
+
+def aggregate_fighter_stats(group, numeric_columns):
+    group = group.sort_values('fight_date')
+    cumulative_stats = group[numeric_columns].cumsum(skipna=True)
+    fight_count = group.groupby('fighter').cumcount() + 1  # Add 1 to include current fight
+
+    for col in numeric_columns:
+        group[f"{col}_career"] = cumulative_stats[col]
+        group[f"{col}_career_avg"] = (cumulative_stats[col] / fight_count).fillna(0)
+
+    group['significant_strikes_rate_career'] = (
+            cumulative_stats['significant_strikes_landed'] / cumulative_stats['significant_strikes_attempted']).fillna(
+        0)
+    group['takedown_rate_career'] = (
+            cumulative_stats['takedown_successful'] / cumulative_stats['takedown_attempted']).fillna(0)
+
+    return group
+
+
+def calculate_experience_and_days(group):
+    group = group.sort_values('fight_date')
+    group['years_of_experience'] = (group['fight_date'] - group['fight_date'].iloc[0]).dt.days / 365.25
+    group['days_since_last_fight'] = (group['fight_date'] - group['fight_date'].shift()).dt.days
+    return group
+
+
+def update_streaks(group):
+    group = group.sort_values('fight_date')
+
+    # Initialize the win and loss streak columns with 0 for the first fight
+    group['win_streak'] = 0
+    group['loss_streak'] = 0
+
+    # Iterate over each row in the group, starting from the second row
+    for i in range(1, len(group)):
+        if group.iloc[i - 1]['winner'] == 1:
+            # If the fighter won the previous fight, increment the win streak and reset the loss streak
+            group.iloc[i, group.columns.get_loc('win_streak')] = group.iloc[i - 1]['win_streak'] + 1
+            group.iloc[i, group.columns.get_loc('loss_streak')] = 0
+        else:
+            # If the fighter lost the previous fight, increment the loss streak and reset the win streak
+            group.iloc[i, group.columns.get_loc('loss_streak')] = group.iloc[i - 1]['loss_streak'] + 1
+            group.iloc[i, group.columns.get_loc('win_streak')] = 0
+
+    return group
+
+
+def parse_date(date_str):
+    if pd.isna(date_str):
+        return pd.NaT
+    try:
+        return pd.to_datetime(date_str, format='%d-%b-%y')
+    except ValueError:
+        try:
+            return pd.to_datetime(date_str, format='%b %d, %Y')
+        except ValueError:
+            return pd.NaT
 
 
 def get_odds(row, odds_mappings, odds_columns):

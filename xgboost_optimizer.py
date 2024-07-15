@@ -103,7 +103,7 @@ def create_shap_graph(model_path, X_train):
 
     top_50_features = feature_importance[:50]
     print("Most influential features:")
-    for feature, importance in top_50_features:
+    for feature, importance in feature_importance[:320]:
         print(f"{feature}: {importance}")
 
     top_50_df = pd.DataFrame(top_50_features, columns=["Feature", "Importance"])
@@ -293,7 +293,7 @@ if __name__ == "__main__":
 
     print("Creating SHAP graph for the best model")
     X_train, X_val, y_train, y_val = get_train_val_data()
-    model_path = f'models/xgboost/jun2022-jun2024/model_0.7007_auc_diff_0.0099.json'
+    model_path = f'models/xgboost/jun2022-jun2024/model_0.7138_auc_diff_0.0160_good.json'
     create_shap_graph(model_path, X_train)
     print("SHAP graph creation completed.")
     print("--------------------")

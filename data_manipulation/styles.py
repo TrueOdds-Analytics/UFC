@@ -3,7 +3,6 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 
-
 def create_fighter_styles(input_file='../data/combined_rounds.csv', n_clusters=5):
     # Read the CSV file
     df = pd.read_csv(input_file)
@@ -46,8 +45,12 @@ def create_fighter_styles(input_file='../data/combined_rounds.csv', n_clusters=5
     kmeans = KMeans(n_clusters=n_clusters, random_state=42)
     cluster_labels = kmeans.fit_predict(X_scaled)
 
+    # Generate unique integer labels
+    unique_labels = np.random.choice(range(100, 1000), size=n_clusters, replace=False)
+    label_mapping = dict(zip(range(n_clusters), unique_labels))
+
     # Add cluster labels to the DataFrame
-    df.loc[X.index, 'Style'] = cluster_labels
+    df.loc[X.index, 'Style'] = [label_mapping[label] for label in cluster_labels]
 
     # Fill NaN values in the Style column
     df['Style'] = df['Style'].fillna(-1).astype(int)
@@ -65,14 +68,15 @@ def create_fighter_styles(input_file='../data/combined_rounds.csv', n_clusters=5
 
     # Print number of fighters and percentage for each cluster
     total_fights = len(df)
-    for i in range(n_clusters):
-        cluster_size = (df['Style'] == i).sum()
+    for i, unique_label in label_mapping.items():
+        cluster_size = (df['Style'] == unique_label).sum()
         percentage = (cluster_size / total_fights) * 100
+        print(f"Style {unique_label}:")
         print(f"Number of fights: {cluster_size}")
         print(f"Percentage: {percentage:.2f}%")
 
         # Get top 5 unique fighters closest to this style
-        cluster_df = df[df['Style'] == i]
+        cluster_df = df[df['Style'] == unique_label]
         top_fighters = (
             cluster_df.groupby('fighter')
             .size()
@@ -83,5 +87,9 @@ def create_fighter_styles(input_file='../data/combined_rounds.csv', n_clusters=5
         for fighter, count in top_fighters.items():
             last_fight = cluster_df[cluster_df['fighter'] == fighter].iloc[-1]
             print(f"{fighter} (last fight date: {last_fight['fight_date']}): {count} fights")
+        print()
 
     return df
+
+if __name__ == "__main__":
+    create_fighter_styles()
