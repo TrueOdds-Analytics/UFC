@@ -1,11 +1,20 @@
-from datetime import datetime
 import numpy as np
 import pandas as pd
+from datetime import timedelta
+
+
+def get_opponent(fighter, fight_id, ufc_stats):
+    fight_fighters = ufc_stats[ufc_stats['id'] == fight_id]['fighter'].unique()
+    if len(fight_fighters) < 2:
+        return None
+    return fight_fighters[0] if fight_fighters[0] != fighter else fight_fighters[1]
 
 
 def calculate_damage_score(row):
     weights = {
         'knockdowns': 15,
+        'submission_attempt': 15,
+        'takedown_rate': 10,
         'significant_strikes_landed': 5,
         'total_strikes_landed': 1,
         'head_landed': 3,
@@ -25,25 +34,32 @@ def get_damage_taken(group):
             group.iloc[1]['fighter']: group.iloc[0]['damage_given']
         })
     elif len(group) == 1:
-        return pd.Series({group.iloc[0]['fighter']: 0})  # Assume no damage taken if only one fighter
+        # If there's only one fighter, assume no damage taken
+        return pd.Series({group.iloc[0]['fighter']: 0})
     else:
-        return pd.Series()  # Return empty series for any other case
+        # For any other case, return an empty Series
+        return pd.Series()
 
 
 def aggregate_fighter_stats(group, numeric_columns):
     group = group.sort_values('fight_date')
     cumulative_stats = group[numeric_columns].cumsum(skipna=True)
-    fight_count = group.groupby('fighter').cumcount() + 1  # Add 1 to include current fight
+    fight_count = group.groupby('fighter').cumcount() + 1
 
     for col in numeric_columns:
         group[f"{col}_career"] = cumulative_stats[col]
         group[f"{col}_career_avg"] = (cumulative_stats[col] / fight_count).fillna(0)
 
     group['significant_strikes_rate_career'] = (
-            cumulative_stats['significant_strikes_landed'] / cumulative_stats['significant_strikes_attempted']).fillna(
-        0)
+            cumulative_stats['significant_strikes_landed'] / cumulative_stats['significant_strikes_attempted']).fillna(0)
     group['takedown_rate_career'] = (
             cumulative_stats['takedown_successful'] / cumulative_stats['takedown_attempted']).fillna(0)
+
+    # Ensure damage_given and damage_taken are included
+    group['damage_given_career'] = cumulative_stats['damage_given']
+    group['damage_taken_career'] = cumulative_stats['damage_taken']
+    group['damage_given_career_avg'] = (cumulative_stats['damage_given'] / fight_count).fillna(0)
+    group['damage_taken_career_avg'] = (cumulative_stats['damage_taken'] / fight_count).fillna(0)
 
     return group
 
@@ -88,53 +104,58 @@ def parse_date(date_str):
             return pd.NaT
 
 
-def get_odds(row, odds_mappings, odds_columns):
-    fighter = row['fighter'].lower() if isinstance(row['fighter'], str) else row['fighter'].iloc[0].lower()
-    event = row['event'].lower() if isinstance(row['event'], str) else row['event'].iloc[0].lower()
-    fight_date = row['fight_date'] if isinstance(row['fight_date'], pd.Timestamp) else row['fight_date'].iloc[0]
-    fight_date = parse_date(fight_date)
+def preprocess_odds_mappings(odds_mappings):
+    processed_mappings = {}
+    for odds_type, mappings in odds_mappings.items():
+        processed_mappings[odds_type] = {}
+        for (matchup, event_name), odds_data in mappings.items():
+            fighters = [str(f).strip().lower() for f in matchup.split('vs')]
+            event_key = str(event_name).lower()
+            odds_date = pd.to_datetime(odds_data['Date'])
+            odds = odds_data['odds']
 
-    odds_values = {}
+            for fighter in fighters:
+                if fighter not in processed_mappings[odds_type]:
+                    processed_mappings[odds_type][fighter] = []
+                processed_mappings[odds_type][fighter].append((event_key, odds_date, odds))
+
+    return processed_mappings
+
+
+def get_odds_efficient(df, processed_odds_mappings, odds_columns):
+    odds_values = pd.DataFrame(index=df.index, columns=odds_columns)
 
     for odds_type in odds_columns:
-        for key, odds_data in odds_mappings[odds_type].items():
-            if isinstance(key, tuple) and len(key) == 2:
-                matchup, event_name = key
-                odds = odds_data['odds']
-                odds_date = parse_date(odds_data['Date'])
-            else:
-                continue
+        fighter_odds = processed_odds_mappings[odds_type]
 
-            matchup_lower = matchup.lower()
-            event_name_lower = event_name.lower()
+        for idx, row in df.iterrows():
+            fighter = row['fighter']
+            event = row['event']
+            fight_date = row['fight_date']
 
-            if fighter in matchup_lower:
-                # Check if the event names match
-                if event == event_name_lower:
-                    # If event names match, also check if the years match
-                    if odds_date and fight_date and odds_date.year == fight_date.year:
-                        odds_values[odds_type] = odds
+            if isinstance(fighter, pd.Series):
+                fighter = fighter.iloc[0]
+            if isinstance(event, pd.Series):
+                event = event.iloc[0]
+            if isinstance(fight_date, pd.Series):
+                fight_date = fight_date.iloc[0]
+
+            fighter = str(fighter).lower()
+            event = str(event).lower()
+            fight_date = pd.to_datetime(fight_date)
+
+            if fighter in fighter_odds:
+                for event_key, odds_date, odds in fighter_odds[fighter]:
+                    if (event == event_key and odds_date.year == fight_date.year) or \
+                            (abs((odds_date - fight_date).days) <= 1 and odds_date.year == fight_date.year):
+                        odds_values.at[idx, odds_type] = odds
                         break
 
-                # If event names don't match exactly, check for partial matches
-                elif odds_date and fight_date and odds_date.year == fight_date.year:
-                    # Check if the dates are exactly the same
-                    if odds_date == fight_date:
-                        odds_values[odds_type] = odds
-                        break
-                    # If not exact, allow for a 1-day difference
-                    elif abs((odds_date - fight_date).days) <= 1:
-                        odds_values[odds_type] = odds
-                        break
-
-        if odds_type not in odds_values:
-            odds_values[odds_type] = None
-
-    return pd.Series(odds_values)
+    return odds_values
 
 
 def process_chunk(chunk, odds_mappings, odds_columns):
-    result = chunk.apply(lambda row: get_odds(row, odds_mappings, odds_columns), axis=1)
+    result = chunk.apply(lambda row: get_odds_efficient(row, odds_mappings, odds_columns), axis=1)
     return result, len(chunk)
 
 
