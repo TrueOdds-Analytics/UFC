@@ -11,22 +11,28 @@ def combine_rounds_stats(file_path):
     ufc_stats = pd.read_csv(file_path)
     fighter_stats = pd.read_csv('../data/general data/fighter_stats.csv')
 
+    # Preprocessing
     ufc_stats['fighter'] = ufc_stats['fighter'].astype(str).str.lower()
     ufc_stats['fight_date'] = pd.to_datetime(ufc_stats['fight_date'])
-
     fighter_stats['name'] = fighter_stats['name'].astype(str).str.lower().str.strip()
     fighter_stats['dob'] = fighter_stats['dob'].replace(['--', '', 'NA', 'N/A'], np.nan).apply(parse_date)
 
+    # Merge fighter stats
     ufc_stats = pd.merge(ufc_stats, fighter_stats[['name', 'dob']], left_on='fighter', right_on='name', how='left')
     ufc_stats['age'] = (ufc_stats['fight_date'] - ufc_stats['dob']).dt.days / 365.25
     ufc_stats['age'] = ufc_stats['age'].fillna(np.nan).round().astype(float)
 
+    # Set negative age values to NaN
+    ufc_stats.loc[ufc_stats['age'] < 0, 'age'] = np.nan
+
+    # Data cleaning
     ufc_stats = ufc_stats.drop(['round', 'location', 'name'], axis=1)
     ufc_stats = ufc_stats[~ufc_stats['weight_class'].str.contains("Women's")]
 
     numeric_columns = ufc_stats.select_dtypes(include='number').columns.drop(['id', 'last_round', 'age'])
     fighter_identifier = 'fighter'
 
+    # Convert time to seconds
     ufc_stats['time'] = pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.second + \
                         pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.minute * 60
 
@@ -34,19 +40,8 @@ def combine_rounds_stats(file_path):
     max_round_time = ufc_stats.groupby('id').agg({'last_round': 'max', 'time': 'max'}).reset_index()
     aggregated_stats = ufc_stats.groupby(['id', fighter_identifier])[numeric_columns].sum().reset_index()
 
-    print("Calculating damage given...")
-    aggregated_stats['damage_given'] = aggregated_stats.apply(calculate_damage_score, axis=1)
 
-    print("Calculating damage taken...")
-    damage_given_dict = aggregated_stats.set_index(['id', 'fighter'])['damage_given'].to_dict()
-    aggregated_stats['damage_taken'] = aggregated_stats.apply(
-        lambda row: damage_given_dict.get((row['id'], get_opponent(row['fighter'], row['id'], ufc_stats)), 0)
-        if get_opponent(row['fighter'], row['id'], ufc_stats) is not None else 0,
-        axis=1
-    )
-
-    numeric_columns = list(numeric_columns) + ['damage_given', 'damage_taken']
-
+    # Calculate rates
     aggregated_stats['significant_strikes_rate'] = (aggregated_stats['significant_strikes_landed'] /
                                                     aggregated_stats['significant_strikes_attempted']).fillna(0)
     aggregated_stats['takedown_rate'] = (aggregated_stats['takedown_successful'] /
@@ -64,11 +59,24 @@ def combine_rounds_stats(file_path):
     final_stats = merged_stats.groupby(fighter_identifier, group_keys=False).apply(
         lambda x: aggregate_fighter_stats(x, numeric_columns))
 
-    damage_columns = ['damage_given', 'damage_taken', 'damage_given_career', 'damage_taken_career',
-                      'damage_given_career_avg', 'damage_taken_career_avg']
+    # Calculate per-minute stats
+    print("Calculating per-minute stats...")
+    final_stats['fight_duration_minutes'] = final_stats['time'] / 60
+    final_stats['significant_strikes_landed_per_min'] = (
+            final_stats['significant_strikes_landed'] / final_stats['fight_duration_minutes']).fillna(0)
+    final_stats['significant_strikes_attempted_per_min'] = (
+            final_stats['significant_strikes_attempted'] / final_stats['fight_duration_minutes']).fillna(0)
+    final_stats['total_strikes_landed_per_min'] = (
+            final_stats['total_strikes_landed'] / final_stats['fight_duration_minutes']).fillna(0)
+    final_stats['total_strikes_attempted_per_min'] = (
+            final_stats['total_strikes_attempted'] / final_stats['fight_duration_minutes']).fillna(0)
+
+
     common_columns = ufc_stats.columns.intersection(final_stats.columns)
     career_columns = [col for col in final_stats.columns if col.endswith('_career') or col.endswith('_career_avg')]
-    final_columns = ['fighter', 'age'] + list(common_columns) + career_columns + damage_columns
+    per_minute_columns = ['significant_strikes_landed_per_min', 'significant_strikes_attempted_per_min',
+                          'total_strikes_landed_per_min', 'total_strikes_attempted_per_min']
+    final_columns = ['fighter', 'age'] + list(common_columns) + career_columns + per_minute_columns
     final_stats = final_stats[final_columns]
 
     final_stats = final_stats[~final_stats['winner'].isin(['NC/NC', 'D/D'])]
@@ -165,12 +173,15 @@ def combine_fighters_stats(file_path):
         'takedown_successful', 'takedown_attempted', 'takedown_rate', 'submission_attempt',
         'reversals', 'head_landed', 'head_attempted', 'body_landed', 'body_attempted',
         'leg_landed', 'leg_attempted', 'distance_landed', 'distance_attempted',
-        'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted',
-        'damage_given', 'damage_taken'
+        'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
     ]
 
-    other_columns = ['open_odds', 'closing_range_start', 'closing_range_end', 'pre_fight_elo',
-                     'years_of_experience', 'win_streak', 'loss_streak', 'days_since_last_fight']
+    other_columns = [
+        'open_odds', 'closing_range_start', 'closing_range_end', 'pre_fight_elo',
+        'years_of_experience', 'win_streak', 'loss_streak', 'days_since_last_fight',
+        'significant_strikes_landed_per_min', 'significant_strikes_attempted_per_min',
+        'total_strikes_landed_per_min', 'total_strikes_attempted_per_min'
+    ]
 
     # Generate the columns to differentiate using list comprehension
     columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in
@@ -323,8 +334,10 @@ def create_matchup_data(file_path, tester, name):
         current_fight_pre_fight_elo_b = current_fight['pre_fight_elo_b']
         current_fight_pre_fight_elo_diff = current_fight['pre_fight_elo_diff']
 
-        current_fight_pre_fight_elo_a_win_chance = 1 / (1 + 10 ** ((current_fight['pre_fight_elo_b'] - current_fight['pre_fight_elo']) / 400))
-        current_fight_pre_fight_elo_b_win_chance = 1 / (1 + 10 ** ((current_fight['pre_fight_elo'] - current_fight['pre_fight_elo_b']) / 400))
+        current_fight_pre_fight_elo_a_win_chance = 1 / (
+                    1 + 10 ** ((current_fight['pre_fight_elo_b'] - current_fight['pre_fight_elo']) / 400))
+        current_fight_pre_fight_elo_b_win_chance = 1 / (
+                    1 + 10 ** ((current_fight['pre_fight_elo'] - current_fight['pre_fight_elo_b']) / 400))
         current_fight_pre_fight_elo_chance_diff = current_fight_pre_fight_elo_a_win_chance - current_fight_pre_fight_elo_b_win_chance
 
         current_fight_win_streak_a = current_fight['win_streak']
@@ -347,7 +360,8 @@ def create_matchup_data(file_path, tester, name):
             [fighter_features, opponent_features, results_fighter, results_opponent, current_fight_odds,
              [current_fight_odds_diff], current_fight_ages, [current_fight_age_diff],
              [current_fight_pre_fight_elo_a, current_fight_pre_fight_elo_b, current_fight_pre_fight_elo_diff,
-              current_fight_pre_fight_elo_a_win_chance, current_fight_pre_fight_elo_b_win_chance, current_fight_pre_fight_elo_chance_diff,
+              current_fight_pre_fight_elo_a_win_chance, current_fight_pre_fight_elo_b_win_chance,
+              current_fight_pre_fight_elo_chance_diff,
               current_fight_win_streak_a, current_fight_win_streak_b, current_fight_win_streak_diff,
               current_fight_loss_streak_a, current_fight_loss_streak_b, current_fight_loss_streak_diff,
               current_fight_years_experience_a, current_fight_years_experience_b, current_fight_years_experience_diff,
@@ -371,7 +385,8 @@ def create_matchup_data(file_path, tester, name):
                             f"scheduled_rounds_b_fight_{i}"]
 
     new_columns = ['current_fight_pre_fight_elo_a', 'current_fight_pre_fight_elo_b', 'current_fight_pre_fight_elo_diff',
-                   'current_fight_pre_fight_elo_a_win_chance', 'current_fight_pre_fight_elo_b_win_chance', 'current_fight_pre_fight_elo_chance_diff',
+                   'current_fight_pre_fight_elo_a_win_chance', 'current_fight_pre_fight_elo_b_win_chance',
+                   'current_fight_pre_fight_elo_chance_diff',
                    'current_fight_win_streak_a', 'current_fight_win_streak_b', 'current_fight_win_streak_diff',
                    'current_fight_loss_streak_a', 'current_fight_loss_streak_b', 'current_fight_loss_streak_diff',
                    'current_fight_years_experience_a', 'current_fight_years_experience_b',
