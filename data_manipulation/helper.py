@@ -14,7 +14,7 @@ def calculate_damage_score(row):
     weights = {
         'knockdowns': 15,
         'submission_attempt': 15,
-        'takedown_rate': 10,
+        'takedown_successful': 10,
         'significant_strikes_landed': 5,
         'total_strikes_landed': 1,
         'head_landed': 3,
