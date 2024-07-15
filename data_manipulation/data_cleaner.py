@@ -1,6 +1,7 @@
 import warnings
 from helper import *
 from data_manipulation.Elo import *
+import time
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -319,7 +320,7 @@ def create_matchup_data(file_path, tester, name):
 
         current_fight_pre_fight_elo_a = current_fight['pre_fight_elo']
         current_fight_pre_fight_elo_b = current_fight['pre_fight_elo_b']
-        current_fight_pre_fight_elo_diff = current_fight['pre_fight_elo_difference']
+        current_fight_pre_fight_elo_diff = current_fight['pre_fight_elo_diff']
 
         current_fight_pre_fight_elo_a_win_chance = 1 / (1 + 10 ** ((current_fight['pre_fight_elo_b'] - current_fight['pre_fight_elo']) / 400))
         current_fight_pre_fight_elo_b_win_chance = 1 / (1 + 10 ** ((current_fight['pre_fight_elo'] - current_fight['pre_fight_elo_b']) / 400))
@@ -370,7 +371,6 @@ def create_matchup_data(file_path, tester, name):
 
     new_columns = ['current_fight_pre_fight_elo_a', 'current_fight_pre_fight_elo_b', 'current_fight_pre_fight_elo_diff',
                    'current_fight_pre_fight_elo_a_win_chance', 'current_fight_pre_fight_elo_b_win_chance', 'current_fight_pre_fight_elo_chance_diff',
-                   'current_fight_pre_fight_elo_last_3_a', 'current_fight_pre_fight_elo_last_3_b', 'current_fight_pre_fight_elo_last_3_diff',
                    'current_fight_win_streak_a', 'current_fight_win_streak_b', 'current_fight_win_streak_diff',
                    'current_fight_loss_streak_a', 'current_fight_loss_streak_b', 'current_fight_loss_streak_diff',
                    'current_fight_years_experience_a', 'current_fight_years_experience_b',
@@ -408,8 +408,33 @@ def create_matchup_data(file_path, tester, name):
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('../data/ufc_fight_processed.csv')
+    start_time = time.time()
+    #
+    # print("Starting combine_rounds_stats...")
+    # start_func_time = time.time()
+    # combine_rounds_stats('../data/ufc_fight_processed.csv')
+    # end_func_time = time.time()
+    # print(f"combine_rounds_stats completed in {end_func_time - start_func_time:.2f} seconds")
+    #
+    # print("Starting calculate_elo_ratings...")
+    # start_func_time = time.time()
     # calculate_elo_ratings('../data/combined_rounds.csv')
+    # end_func_time = time.time()
+    # print(f"calculate_elo_ratings completed in {end_func_time - start_func_time:.2f} seconds")
+    #
+    # print("Starting combine_fighters_stats...")
+    # start_func_time = time.time()
     # combine_fighters_stats("../data/combined_rounds.csv")
-    # create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
-    # split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')
+    # end_func_time = time.time()
+    # print(f"combine_fighters_stats completed in {end_func_time - start_func_time:.2f} seconds")
+    #
+    print("Starting create_matchup_data...")
+    start_func_time = time.time()
+    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    end_func_time = time.time()
+    print(f"create_matchup_data completed in {end_func_time - start_func_time:.2f} seconds")
+
+    split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')
+
+    # total_time = time.time() - start_time
+    # print(f"Total execution time: {total_time:.2f} seconds")
