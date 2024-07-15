@@ -84,7 +84,7 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
         opponent_fights = fight_counts.get(opponent['fighter'], 0)
 
         # Store pre-fight Elo
-        df.at[index, 'elo'] = fighter_rating
+        df.at[index, 'pre_fight_elo'] = fighter_rating
 
         # Calculate Elo change factors
         weight_class_factor = get_weight_class_factor(fighter['weight_class'], fighter['result'])
@@ -122,7 +122,7 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
     for index, fighter in df.iterrows():
         opponent = df[(df['id'] == fighter['id']) & (df['fighter'] != fighter['fighter'])].iloc[0]
 
-        elo_difference = fighter['elo'] - opponent['elo']
+        elo_difference = fighter['pre_fight_elo'] - opponent['pre_fight_elo']
         df.at[index, 'elo_difference'] = elo_difference
 
         if abs(elo_difference) > threshold:
