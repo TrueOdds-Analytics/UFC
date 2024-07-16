@@ -71,12 +71,18 @@ def combine_rounds_stats(file_path):
     final_stats['total_strikes_attempted_per_min'] = (
             final_stats['total_strikes_attempted'] / final_stats['fight_duration_minutes']).fillna(0)
 
+    # More rate calculations
+    final_stats["total_strikes_rate"] = (
+        (final_stats["total_strikes_landed"] / final_stats["total_strikes_attempted"]).fillna(0))
+
+    final_stats["combined_success_rate"] = (final_stats["takedown_rate"] + final_stats["total_strikes_rate"]) / 2
 
     common_columns = ufc_stats.columns.intersection(final_stats.columns)
     career_columns = [col for col in final_stats.columns if col.endswith('_career') or col.endswith('_career_avg')]
     per_minute_columns = ['significant_strikes_landed_per_min', 'significant_strikes_attempted_per_min',
                           'total_strikes_landed_per_min', 'total_strikes_attempted_per_min']
-    final_columns = ['fighter', 'age'] + list(common_columns) + career_columns + per_minute_columns
+    rate_columns = ['total_strikes_rate', 'combined_success_rate']
+    final_columns = ['fighter', 'age'] + list(common_columns) + career_columns + per_minute_columns + rate_columns
     final_stats = final_stats[final_columns]
 
     final_stats = final_stats[~final_stats['winner'].isin(['NC/NC', 'D/D'])]
