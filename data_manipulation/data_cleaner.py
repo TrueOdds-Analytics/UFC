@@ -29,17 +29,21 @@ def combine_rounds_stats(file_path):
     ufc_stats = ufc_stats.drop(['round', 'location', 'name'], axis=1)
     ufc_stats = ufc_stats[~ufc_stats['weight_class'].str.contains("Women's")]
 
-    numeric_columns = ufc_stats.select_dtypes(include='number').columns.drop(['id', 'last_round', 'age'])
-    fighter_identifier = 'fighter'
-
     # Convert time to seconds
     ufc_stats['time'] = pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.second + \
                         pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.minute * 60
 
+    fighter_identifier = 'fighter'
+
+    # Identify numeric columns including 'time'
+    numeric_columns = ufc_stats.select_dtypes(include=['int64', 'float64']).columns.tolist()
+    numeric_columns = [col for col in numeric_columns if col not in ['id', 'last_round', 'age']]
+    if 'time' not in numeric_columns:
+        numeric_columns.append('time')
+
     print("Aggregating stats...")
     max_round_time = ufc_stats.groupby('id').agg({'last_round': 'max', 'time': 'max'}).reset_index()
     aggregated_stats = ufc_stats.groupby(['id', fighter_identifier])[numeric_columns].sum().reset_index()
-
 
     # Calculate rates
     aggregated_stats['significant_strikes_rate'] = (aggregated_stats['significant_strikes_landed'] /
@@ -47,7 +51,8 @@ def combine_rounds_stats(file_path):
     aggregated_stats['takedown_rate'] = (aggregated_stats['takedown_successful'] /
                                          aggregated_stats['takedown_attempted']).fillna(0)
 
-    non_numeric_columns = ufc_stats.select_dtypes(exclude='number').columns.difference(['id', fighter_identifier])
+    non_numeric_columns = ufc_stats.select_dtypes(exclude=['int64', 'float64']).columns.difference(
+        ['id', fighter_identifier])
     non_numeric_data = ufc_stats.drop_duplicates(subset=['id', fighter_identifier])[
         ['id', fighter_identifier, 'age'] + list(non_numeric_columns)]
 
@@ -56,6 +61,9 @@ def combine_rounds_stats(file_path):
     merged_stats = pd.merge(merged_stats, max_round_time, on='id', how='left')
 
     print("Calculating career stats...")
+    print("Numeric columns:", numeric_columns)
+    print("Columns in merged_stats:", merged_stats.columns.tolist())
+
     final_stats = merged_stats.groupby(fighter_identifier, group_keys=False).apply(
         lambda x: aggregate_fighter_stats(x, numeric_columns))
 
@@ -126,6 +134,62 @@ def combine_rounds_stats(file_path):
     final_stats = final_stats.groupby('fighter', group_keys=False).apply(update_streaks)
     final_stats['days_since_last_fight'] = final_stats['days_since_last_fight'].fillna(0)
 
+    # Calculate takedowns and knockdowns per 15 minutes
+    print("Calculating takedowns and knockdowns per 15 minutes...")
+    final_stats['time_career_minutes'] = final_stats['time_career'] / 60  # Convert seconds to minutes
+    final_stats['takedowns_per_15min'] = (final_stats['takedown_successful_career'] / final_stats['time_career_minutes']) * 15
+    final_stats['knockdowns_per_15min'] = (final_stats['knockdowns_career'] / final_stats['time_career_minutes']) * 15
+
+    # Handle potential division by zero
+    final_stats['takedowns_per_15min'] = final_stats['takedowns_per_15min'].fillna(0).replace([np.inf, -np.inf], 0)
+    final_stats['knockdowns_per_15min'] = final_stats['knockdowns_per_15min'].fillna(0).replace([np.inf, -np.inf], 0)
+
+    # Calculate total fights, wins, and losses
+    print("Calculating total fights, wins, and losses...")
+    print("Calculating total fights, wins, losses, and fight outcomes...")
+
+    def calculate_fight_stats(group):
+        group = group.sort_values('fight_date').reset_index(drop=True)
+        group['total_fights'] = range(1, len(group) + 1)
+        group['total_wins'] = group['winner'].cumsum()
+        group['total_losses'] = group['total_fights'] - group['total_wins']
+
+        # Initialize new columns
+        for outcome in ['ko', 'submission', 'decision']:
+            group[f'wins_by_{outcome}'] = 0
+            group[f'losses_by_{outcome}'] = 0
+
+        # Cumulative calculation of fight outcomes
+        for i in range(len(group)):
+            if i > 0:  # Copy previous values for cumulative count
+                for col in ['wins_by_ko', 'wins_by_submission', 'wins_by_decision',
+                            'losses_by_ko', 'losses_by_submission', 'losses_by_decision']:
+                    group.loc[i, col] = group.loc[i - 1, col]
+
+            if group.loc[i, 'winner'] == 1:  # Win
+                if group.loc[i, 'result'] in [0, 3]:  # KO/TKO or TKO - Doctor's Stoppage
+                    group.loc[i, 'wins_by_ko'] += 1
+                elif group.loc[i, 'result'] == 1:  # Submission
+                    group.loc[i, 'wins_by_submission'] += 1
+                elif group.loc[i, 'result'] in [2, 4]:  # Decision - Unanimous or Decision - Majority
+                    group.loc[i, 'wins_by_decision'] += 1
+            else:  # Loss
+                if group.loc[i, 'result'] in [0, 3]:  # KO/TKO or TKO - Doctor's Stoppage
+                    group.loc[i, 'losses_by_ko'] += 1
+                elif group.loc[i, 'result'] == 1:  # Submission
+                    group.loc[i, 'losses_by_submission'] += 1
+                elif group.loc[i, 'result'] in [2, 4]:  # Decision - Unanimous or Decision - Majority
+                    group.loc[i, 'losses_by_decision'] += 1
+
+        # Calculate percentages
+        for outcome in ['ko', 'submission', 'decision']:
+            group[f'win_rate_by_{outcome}'] = (group[f'wins_by_{outcome}'] / group['total_wins']).fillna(0)
+            group[f'loss_rate_by_{outcome}'] = (group[f'losses_by_{outcome}'] / group['total_losses']).fillna(0)
+
+        return group
+
+    final_stats = final_stats.groupby('fighter', group_keys=False).apply(calculate_fight_stats)
+
     print("Saving processed data...")
     final_stats.to_csv('../data/combined_rounds.csv', index=False)
 
@@ -186,7 +250,12 @@ def combine_fighters_stats(file_path):
         'open_odds', 'closing_range_start', 'closing_range_end', 'pre_fight_elo',
         'years_of_experience', 'win_streak', 'loss_streak', 'days_since_last_fight',
         'significant_strikes_landed_per_min', 'significant_strikes_attempted_per_min',
-        'total_strikes_landed_per_min', 'total_strikes_attempted_per_min'
+        'total_strikes_landed_per_min', 'total_strikes_attempted_per_min', 'takedowns_per_15min',
+        'knockdowns_per_15min', 'total_fights', 'total_wins', 'total_losses',
+        'wins_by_ko', 'losses_by_ko', 'wins_by_submission', 'losses_by_submission', 'wins_by_decision',
+        'losses_by_decision', 'win_rate_by_ko', 'loss_rate_by_ko', 'win_rate_by_submission', 'loss_rate_by_submission',
+        'win_rate_by_decision', 'loss_rate_by_decision'
+
     ]
 
     # Generate the columns to differentiate using list comprehension
@@ -226,7 +295,7 @@ def split_train_val_test(matchup_data_file):
     matchup_df['current_fight_date'] = pd.to_datetime(matchup_df['current_fight_date'])
 
     start_date = '2022-06-01'
-    end_date = '2024-6-30'  # Change this to your desired end date
+    end_date = '2022-7-30'  # Change this to your desired end date
 
     # Convert start_date to datetime
     start_date = pd.to_datetime(start_date)

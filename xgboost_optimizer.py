@@ -218,7 +218,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.71 and (auc_diff < 0.10):
+    if accuracy > 0.707 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
         model_filename = f'models/xgboost/jun2022-jun2024/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
@@ -303,7 +303,7 @@ if __name__ == "__main__":
 
     print("Creating SHAP graph for the best model")
     X_train, X_val, y_train, y_val = get_train_val_data()
-    model_path = f'models/xgboost/jun2022-jun2024/model_0.7039_auc_diff_0.0252.json'
+    model_path = f'models/xgboost/jun2022-jun2024/model_0.6908_auc_diff_0.0067.json'
     create_shap_graph(model_path, X_train)
     print("SHAP graph creation completed.")
     print("--------------------")
