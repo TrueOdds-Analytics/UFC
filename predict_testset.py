@@ -64,6 +64,7 @@ def calculate_kelly_fraction(p, b, kelly_fraction):
     full_kelly = max(0, (p - (q / b)))  # Ensure non-negative fraction
     return full_kelly * kelly_fraction  # Apply fractional Kelly
 
+
 def print_fight_results(confident_bets):
     console = Console(width=160)
     for bet in confident_bets:
@@ -113,6 +114,7 @@ def print_fight_results(confident_bets):
 
         console.print(main_panel, style="magenta")
         console.print()
+
 
 def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial_bankroll=10000, kelly_fraction=0.125,
                   fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300, print_fights=True,
@@ -433,7 +435,8 @@ class LGBMWrapper(BaseEstimator, ClassifierMixin):
         return self.classes_[np.argmax(proba, axis=1)]
 
 
-def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', use_calibration=True, initial_bankroll=10000, kelly_fraction=1, fixed_bet_fraction=0.1, max_bet_percentage=0.20):
+def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', use_calibration=True,
+         initial_bankroll=10000, kelly_fraction=1, fixed_bet_fraction=0.1, max_bet_percentage=0.20):
     # Redirect stdout to capture all output
     old_stdout = sys.stdout
     sys.stdout = mystdout = StringIO()
@@ -461,7 +464,7 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 
     # Load and calibrate model
     if model_type == 'xgboost':
-        model_path = os.path.abspath('models/xgboost/jun2022-jun2024/model_0.7007_auc_diff_0.0099.json')
+        model_path = os.path.abspath('models/xgboost/jun2022-jun2024/Good acc and loss more data/model_0.7105_auc_diff_0.0190.json')
         model = load_model(model_path, 'xgboost')
         expected_features = model.get_booster().feature_names
     elif model_type == 'lightgbm':
@@ -519,7 +522,8 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 
     # Calculate and print monthly ROIs
     fixed_monthly_roi, fixed_monthly_profit, fixed_total_roi = calculate_monthly_roi(daily_bankrolls, INITIAL_BANKROLL)
-    kelly_monthly_roi, kelly_monthly_profit, kelly_total_roi = calculate_monthly_roi(daily_kelly_bankrolls, INITIAL_BANKROLL)
+    kelly_monthly_roi, kelly_monthly_profit, kelly_total_roi = calculate_monthly_roi(daily_kelly_bankrolls,
+                                                                                     INITIAL_BANKROLL)
 
     console = Console()
     console.print("\nMonthly ROI (based on monthly performance, calibrated):")
@@ -560,8 +564,9 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 
 if __name__ == "__main__":
     # main(optimize_threshold=True, model_type='xgboost', use_calibration=True, initial_bankroll=10000,
-    #      kelly_fraction=1, fixed_bet_fraction=0.1, max_bet_percentage=0.2)
+    #      kelly_fraction=1, fixed_bet_fraction=0.1, max_bet_percentage=1.0)
 
     # To run with a manually set threshold:
-    main(optimize_threshold=False, manual_threshold=0.5, model_type='xgboost',
-    use_calibration=True, initial_bankroll=10000, kelly_fraction=1, fixed_bet_fraction=0.1, max_bet_percentage=1.0)
+    main(optimize_threshold=False, manual_threshold=0.55, model_type='xgboost',
+         use_calibration=True, initial_bankroll=10000, kelly_fraction=1, fixed_bet_fraction=0.1,
+         max_bet_percentage=0.5)

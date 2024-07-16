@@ -72,7 +72,7 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, 
     ax1.set_xlabel('Number of iterations')
     ax1.set_ylabel('Log Loss')
     ax1.set_title(
-        f'Learning Curves - Log Loss (Features removed: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
+        f'Learning Curves - Log Loss (Features: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
     ax1.legend()
     ax1.grid()
 
@@ -218,7 +218,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.70 and (auc_diff < 0.10):
+    if accuracy > 0.71 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
         model_filename = f'models/xgboost/jun2022-jun2024/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
@@ -226,18 +226,19 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
 
-    return accuracy
+    return accuracy  # Return both accuracy and final validation loss
 
 
 def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=10000):
-    global best_accuracy, best_auc
-
     for round in range(n_rounds):
         print(f"Starting optimization round {round + 1}/{n_rounds}")
 
         if round == 0:
-            study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
-            study.optimize(lambda trial: objective(trial, X_train, X_val, y_train, y_val), n_trials=n_trials_per_round)
+            study = optuna.create_study(direction='maximize',
+                                        sampler=TPESampler(),
+                                        pruner=MedianPruner())
+            study.optimize(lambda trial: objective(trial, X_train, X_val, y_train, y_val),
+                           n_trials=n_trials_per_round)
         else:
             new_ranges = adjust_hyperparameter_ranges(study)
 
@@ -267,33 +268,42 @@ def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_roun
 
 
 if __name__ == "__main__":
-    # input_thread = threading.Thread(target=user_input_thread, daemon=True)
-    # input_thread.start()
-    #
-    # X_train, X_val, y_train, y_val = get_train_val_data()
-    # print("Starting initial optimization and evaluation...")
-    # try:
-    #     best_trial = optimize_model(X_train, X_val, y_train, y_val)
-    #     best_params = best_trial.params
-    #     best_accuracy = best_trial.value
-    #
-    #     # Create and evaluate the best model
-    #     best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train,
-    #                                                                           y_val)
-    #     best_auc = auc
-    #
-    #     print("Initial optimization completed.")
-    #     print(f"Best model validation accuracy: {best_accuracy:.4f}")
-    #     print(f"Best model validation AUC: {best_auc:.4f}")
-    #     print("Best parameters:", best_params)
-    #     print("--------------------")
-    #
-    # except KeyboardInterrupt:
-    #     print("Optimization interrupted by user.")
+    input_thread = threading.Thread(target=user_input_thread, daemon=True)
+    input_thread.start()
+
+    X_train, X_val, y_train, y_val = get_train_val_data()
+    print("Starting initial optimization and evaluation...")
+    try:
+        study = optimize_model(X_train, X_val, y_train, y_val)
+        best_trials = study.best_trials
+
+        print("Initial optimization completed.")
+        for trial in best_trials:
+            print(f"Best accuracy: {trial.values[0]:.4f}")
+            print(f"Best loss: {trial.values[1]:.4f}")
+            print("Parameters:", trial.params)
+            print("--------------------")
+
+        # You might want to choose one of the best trials based on your criteria
+        best_trial = best_trials[0]  # For example, choosing the first Pareto-optimal solution
+        best_params = best_trial.params
+
+        # Create and evaluate the best model
+        best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train,
+                                                                              y_val)
+        best_auc = auc
+
+        print(f"Best model validation accuracy: {accuracy:.4f}")
+        print(f"Best model validation AUC: {auc:.4f}")
+        print("Best parameters:", best_params)
+        print("--------------------")
+
+    except KeyboardInterrupt:
+        print("Optimization interrupted by user.")
 
     print("Creating SHAP graph for the best model")
     X_train, X_val, y_train, y_val = get_train_val_data()
-    model_path = f'models/xgboost/jun2022-jun2024/model_0.7039_auc_diff_0.0887.json'
+    model_path = f'models/xgboost/jun2022-jun2024/model_0.7039_auc_diff_0.0252.json'
     create_shap_graph(model_path, X_train)
     print("SHAP graph creation completed.")
     print("--------------------")

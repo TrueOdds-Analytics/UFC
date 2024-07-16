@@ -10,37 +10,6 @@ def get_opponent(fighter, fight_id, ufc_stats):
     return fight_fighters[0] if fight_fighters[0] != fighter else fight_fighters[1]
 
 
-def calculate_damage_score(row):
-    weights = {
-        'knockdowns': 15,
-        'submission_attempt': 15,
-        'takedown_successful': 10,
-        'significant_strikes_landed': 5,
-        'total_strikes_landed': 1,
-        'head_landed': 3,
-        'body_landed': 2,
-        'leg_landed': 1.5,
-        'distance_landed': 2,
-        'clinch_landed': 1.5,
-        'ground_landed': 1
-    }
-    return sum(row[col] * weight for col, weight in weights.items())
-
-
-def get_damage_taken(group):
-    if len(group) == 2:
-        return pd.Series({
-            group.iloc[0]['fighter']: group.iloc[1]['damage_given'],
-            group.iloc[1]['fighter']: group.iloc[0]['damage_given']
-        })
-    elif len(group) == 1:
-        # If there's only one fighter, assume no damage taken
-        return pd.Series({group.iloc[0]['fighter']: 0})
-    else:
-        # For any other case, return an empty Series
-        return pd.Series()
-
-
 def aggregate_fighter_stats(group, numeric_columns):
     group = group.sort_values('fight_date')
     cumulative_stats = group[numeric_columns].cumsum(skipna=True)
@@ -51,15 +20,14 @@ def aggregate_fighter_stats(group, numeric_columns):
         group[f"{col}_career_avg"] = (cumulative_stats[col] / fight_count).fillna(0)
 
     group['significant_strikes_rate_career'] = (
-            cumulative_stats['significant_strikes_landed'] / cumulative_stats['significant_strikes_attempted']).fillna(0)
+            cumulative_stats['significant_strikes_landed'] / cumulative_stats['significant_strikes_attempted']).fillna(
+        0)
     group['takedown_rate_career'] = (
             cumulative_stats['takedown_successful'] / cumulative_stats['takedown_attempted']).fillna(0)
+    group['total_strikes_rate_career'] = (
+            cumulative_stats['total_strikes_landed'] / cumulative_stats['total_strikes_attempted']).fillna(0)
+    group["combined_success_rate_career"] = (group["takedown_rate_career"] + group["total_strikes_rate_career"]) / 2
 
-    # Ensure damage_given and damage_taken are included
-    group['damage_given_career'] = cumulative_stats['damage_given']
-    group['damage_taken_career'] = cumulative_stats['damage_taken']
-    group['damage_given_career_avg'] = (cumulative_stats['damage_given'] / fight_count).fillna(0)
-    group['damage_taken_career_avg'] = (cumulative_stats['damage_taken'] / fight_count).fillna(0)
 
     return group
 
@@ -170,11 +138,11 @@ def remove_correlated_features(matchup_df, correlation_threshold=0.95):
     # Select the upper triangle of the correlation matrix
     upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
 
-    # Find the columns to drop, excluding 'current_fight_open_odds_diff' and those containing 'damage'
+    # Find the columns to drop, excluding 'current_fight_open_odds_diff'
     columns_to_drop = [column for column in upper_tri.columns
                        if any(upper_tri[column] > correlation_threshold)
                        and column != 'current_fight_open_odds_diff'
-                       and 'damage' not in column.lower()]
+                       ]
 
     # Drop the highly correlated columns
     matchup_df = matchup_df.drop(columns=columns_to_drop)
