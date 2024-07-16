@@ -74,7 +74,8 @@ def print_fight_results(confident_bets):
         formatted_date = date_obj.strftime('%B %d, %Y')
 
         fixed_panel = Panel(
-            f"Bankroll Before: {bet['Fixed Fraction Bankroll Before']}\n"
+            f"Starting Bankroll: {bet['Fixed Fraction Starting Bankroll']}\n"
+            f"Available Bankroll: {bet['Fixed Fraction Available Bankroll']}\n"
             f"Stake: {bet['Fixed Fraction Stake']}\n"
             f"Potential Profit: {bet['Fixed Fraction Potential Profit']}\n"
             f"Bankroll After: {bet['Fixed Fraction Bankroll After']}\n"
@@ -85,7 +86,8 @@ def print_fight_results(confident_bets):
             width=42
         )
         kelly_panel = Panel(
-            f"Bankroll Before: {bet['Kelly Bankroll Before']}\n"
+            f"Starting Bankroll: {bet['Kelly Starting Bankroll']}\n"
+            f"Available Bankroll: {bet['Kelly Available Bankroll']}\n"
             f"Stake: {bet['Fractional Kelly Stake']}\n"
             f"Potential Profit: {bet['Fractional Kelly Potential Profit']}\n"
             f"Bankroll After: {bet['Kelly Bankroll After']}\n"
@@ -186,18 +188,19 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
             # Compounding Fixed Fraction Betting
             available_fixed_bankroll = date_bankroll - daily_fixed_stakes[current_date]
-            max_bet = date_bankroll * max_bet_percentage
-            stake = min(date_bankroll * fixed_bet_fraction, available_fixed_bankroll, max_bet)
+            fixed_max_bet = date_bankroll * max_bet_percentage
+            kelly_max_bet = date_kelly_bankroll * max_bet_percentage
+            stake = min(date_bankroll * fixed_bet_fraction, available_fixed_bankroll, fixed_max_bet)
 
             # Fractional Kelly Criterion Betting
             available_kelly_bankroll = date_kelly_bankroll - daily_kelly_stakes[current_date]
             b = odds / 100 if odds > 0 else 100 / abs(odds)
             kelly_bet_size = calculate_kelly_fraction(winning_probability, b, kelly_fraction)
-            kelly_stake = min(available_kelly_bankroll * kelly_bet_size, available_kelly_bankroll, max_bet)
+            kelly_stake = min(available_kelly_bankroll * kelly_bet_size, available_kelly_bankroll, kelly_max_bet)
 
             # Set a default bet if the Fractional Kelly Stake is $0.00 and odds are better than min_odds
             if kelly_stake == 0 and odds >= min_odds:
-                kelly_stake = min(available_kelly_bankroll * default_bet, available_kelly_bankroll, max_bet)
+                kelly_stake = min(available_kelly_bankroll * default_bet, available_kelly_bankroll, kelly_max_bet)
 
             if stake > 0 and kelly_stake > 0:
                 total_bets += 1
@@ -217,10 +220,12 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
                     'Predicted Winner': predicted_winner,
                     'Confidence': f"{winning_probability:.2%}",
                     'Odds': odds,
-                    'Fixed Fraction Bankroll Before': f"${date_bankroll:.2f}",
+                    'Fixed Fraction Starting Bankroll': f"${date_bankroll:.2f}",
+                    'Fixed Fraction Available Bankroll': f"${available_fixed_bankroll:.2f}",
                     'Fixed Fraction Stake': f"${stake:.2f}",
                     'Fixed Fraction Potential Profit': f"${fixed_profit:.2f}",
-                    'Kelly Bankroll Before': f"${date_kelly_bankroll:.2f}",
+                    'Kelly Starting Bankroll': f"${date_kelly_bankroll:.2f}",
+                    'Kelly Available Bankroll': f"${available_kelly_bankroll:.2f}",
                     'Fractional Kelly Stake': f"${kelly_stake:.2f}",
                     'Fractional Kelly Potential Profit': f"${kelly_profit:.2f}"
                 }
@@ -464,7 +469,7 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 
     # Load and calibrate model
     if model_type == 'xgboost':
-        model_path = os.path.abspath('models/xgboost/jun2022-jun2024/Good acc and loss more data/model_0.7105_auc_diff_0.0190.json')
+        model_path = os.path.abspath('models/xgboost/jun2022-jun2024/Good acc and loss more data/model_0.7072_auc_diff_0.0181.json')
         model = load_model(model_path, 'xgboost')
         expected_features = model.get_booster().feature_names
     elif model_type == 'lightgbm':
@@ -563,10 +568,9 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 
 
 if __name__ == "__main__":
-    # main(optimize_threshold=True, model_type='xgboost', use_calibration=True, initial_bankroll=10000,
-    #      kelly_fraction=1, fixed_bet_fraction=0.1, max_bet_percentage=1.0)
-
-    # To run with a manually set threshold:
     main(optimize_threshold=False, manual_threshold=0.55, model_type='xgboost',
          use_calibration=True, initial_bankroll=10000, kelly_fraction=1, fixed_bet_fraction=0.1,
-         max_bet_percentage=0.5)
+         max_bet_percentage=0.25)
+
+    # main(optimize_threshold=True, model_type='xgboost', use_calibration=True, initial_bankroll=10000,
+    #      kelly_fraction=1, fixed_bet_fraction=0.1, max_bet_percentage=0.75)
