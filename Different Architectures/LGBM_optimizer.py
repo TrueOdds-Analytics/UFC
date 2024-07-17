@@ -188,8 +188,8 @@ def adjust_hyperparameter_ranges(study, num_best_trials=20):
 def objective(trial, X_train, X_val, y_train, y_val, params=None):
     if params is None:
         params = {
-            'lambda_l1': trial.suggest_float('lambda_l1', 20, 25, log=True),
-            'lambda_l2': trial.suggest_float('lambda_l2', 20, 25, log=True),
+            'lambda_l1': trial.suggest_float('lambda_l1', 15, 20, log=True),
+            'lambda_l2': trial.suggest_float('lambda_l2', 15, 20, log=True),
             'num_leaves': trial.suggest_int('num_leaves', 2, 256),
             'feature_fraction': trial.suggest_float('feature_fraction', 0.4, 1.0),
             'bagging_fraction': trial.suggest_float('bagging_fraction', 0.4, 1.0),
@@ -215,8 +215,8 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.68 and (auc_diff < 0.10):
-        model_filename = f'../models/lightgbm/model_{accuracy:.4f}_{len(X_train.columns)}_features_auc_diff_{auc_diff:.4f}.txt'
+    if accuracy > 0.70 and (auc_diff < 0.10):
+        model_filename = f'../models/lightgbm/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.txt'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
@@ -225,7 +225,6 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
 
 
 def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=10000):
-
     for round in range(n_rounds):
         print(f"Starting optimization round {round + 1}/{n_rounds}")
 
@@ -309,23 +308,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Optimization interrupted by user.")
 
-        # Uncomment the following lines if you want to create a SHAP graph for the best model
-        # print("Creating SHAP graph for the best model")
-        # X_train, X_val, y_train, y_val = get_train_val_data()
-        # model_path = f'models/lightgbm/model_0.6866_342_features_auc_diff_0.0616_good.txt'
-        # create_shap_graph(model_path, X_train)
-        # print("SHAP graph creation completed.")
-        # print("--------------------")
-
-        # Uncomment the following lines if you want to retrain with top features
-        # n_features = 100
-        #
-        # X_train, X_val, y_train, y_val = get_train_val_data()
-        # model_path = 'models/lightgbm/model_0.6683_338_features.txt'
-        # retrained_best_params, retrained_accuracy = get_top_features_and_retrain(model_path, X_train, X_val, y_train, y_val,
-        #                                                                          n_features)
-        #
-        # print("--------------------")
-        # print("Retraining with top features completed.")
-        # print(f"Retrained model validation accuracy: {retrained_accuracy:.4f}")
-        # print("Retrained model best parameters:", retrained_best_params)

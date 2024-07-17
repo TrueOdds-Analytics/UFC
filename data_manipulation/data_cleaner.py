@@ -295,7 +295,7 @@ def split_train_val_test(matchup_data_file):
     matchup_df['current_fight_date'] = pd.to_datetime(matchup_df['current_fight_date'])
 
     start_date = '2022-06-01'
-    end_date = '2022-7-30'  # Change this to your desired end date
+    end_date = '2024-6-30'  # Change this to your desired end date
 
     # Convert start_date to datetime
     start_date = pd.to_datetime(start_date)
@@ -499,8 +499,8 @@ def create_matchup_data(file_path, tester, name):
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('../data/ufc_fight_processed.csv')
-    calculate_elo_ratings('../data/combined_rounds.csv')
-    combine_fighters_stats("../data/combined_rounds.csv")
-    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    # combine_rounds_stats('../data/ufc_fight_processed.csv')
+    # calculate_elo_ratings('../data/combined_rounds.csv')
+    # combine_fighters_stats("../data/combined_rounds.csv")
+    # create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')

@@ -469,7 +469,7 @@ def main(optimize_threshold=True, manual_threshold=None, model_type='xgboost', u
 
     # Load and calibrate model
     if model_type == 'xgboost':
-        model_path = os.path.abspath('models/xgboost/jun2022-jun2024/Good acc and loss more data/model_0.7072_auc_diff_0.0181.json')
+        model_path = os.path.abspath('models/xgboost/jun2022-jun2024/model_0.7270_auc_diff_0.0364.json')
         model = load_model(model_path, 'xgboost')
         expected_features = model.get_booster().feature_names
     elif model_type == 'lightgbm':

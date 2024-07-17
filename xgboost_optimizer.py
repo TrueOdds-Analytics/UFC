@@ -218,7 +218,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.707 and (auc_diff < 0.10):
+    if accuracy > 0.72 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
         model_filename = f'models/xgboost/jun2022-jun2024/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
@@ -274,36 +274,59 @@ if __name__ == "__main__":
     X_train, X_val, y_train, y_val = get_train_val_data()
     print("Starting initial optimization and evaluation...")
     try:
+        # Original training code
         study = optimize_model(X_train, X_val, y_train, y_val)
         best_trials = study.best_trials
 
-        print("Initial optimization completed.")
-        for trial in best_trials:
-            print(f"Best accuracy: {trial.values[0]:.4f}")
-            print(f"Best loss: {trial.values[1]:.4f}")
-            print("Parameters:", trial.params)
-            print("--------------------")
-
-        # You might want to choose one of the best trials based on your criteria
-        best_trial = best_trials[0]  # For example, choosing the first Pareto-optimal solution
-        best_params = best_trial.params
-
-        # Create and evaluate the best model
-        best_model, accuracy, auc, _, _, _, _ = create_fit_and_evaluate_model(best_params, X_train, X_val, y_train,
-                                                                              y_val)
-        best_auc = auc
-
-        print(f"Best model validation accuracy: {accuracy:.4f}")
-        print(f"Best model validation AUC: {auc:.4f}")
-        print("Best parameters:", best_params)
+        model_filename = f'models/xgboost/jun2022-jun2024/model_0.7270_auc_diff_0.0364.json'
+        print("Creating SHAP graph for the best model")
+        create_shap_graph(model_filename, X_train)
+        print("SHAP graph creation completed.")
         print("--------------------")
 
+    #     # New feature selection and optimization process
+    #     num_top_features = 200  # You can change this value as needed
+    #
+    #     # Get feature importance from the best model
+    #     feature_importance = best_model.get_booster().get_score(importance_type='gain')
+    #     sorted_importance = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
+    #     top_features = [feature for feature, importance in sorted_importance[:num_top_features]]
+    #
+    #     print(f"Top {num_top_features} features selected: {top_features}")
+    #
+    #     # Filter the data to include only the top features
+    #     X_train_top = X_train[top_features]
+    #     X_val_top = X_val[top_features]
+    #
+    #     # Run Optuna study with top features
+    #     print(f"Starting Optuna study with top {num_top_features} features...")
+    #     study_top = optimize_model(X_train_top, X_val_top, y_train, y_val, n_rounds=1, n_trials_per_round=10000)
+    #
+    #     print(f"Optuna study with top {num_top_features} features completed.")
+    #     print(f"Best accuracy: {study_top.best_value:.4f}")
+    #     print("Best parameters:", study_top.best_params)
+    #
+    #     # Create and evaluate the best model with top features
+    #     best_model_top, accuracy_top, auc_top, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(
+    #         study_top.best_params, X_train_top, X_val_top, y_train, y_val
+    #     )
+    #
+    #     print(f"Best model (top {num_top_features} features) validation accuracy: {accuracy_top:.4f}")
+    #     print(f"Best model (top {num_top_features} features) validation AUC: {auc_top:.4f}")
+    #     print("--------------------")
+    #
+    #     # Save the best model with top features
+    #     model_filename_top = f'models/xgboost/jun2022-jun2024/model_top{num_top_features}_{accuracy_top:.4f}_auc_diff_{abs(auc_top - study_top.best_value):.4f}.json'
+    #     best_model_top.save_model(model_filename_top)
+    #     print(f"Best model with top {num_top_features} features saved as: {model_filename_top}")
+    #
+    #     # Plot learning curves for the top features model
+    #     plot_losses(train_losses, val_losses, train_auc, val_auc, num_top_features, accuracy_top, auc_top)
+    #
+    #     # Create SHAP graph for the best model with top features
+    #     print(f"Creating SHAP graph for the best model with top {num_top_features} features")
+    #     create_shap_graph(model_filename_top, X_train_top)
+    #     print("SHAP graph creation completed.")
+    #
     except KeyboardInterrupt:
-        print("Optimization interrupted by user.")
-
-    print("Creating SHAP graph for the best model")
-    X_train, X_val, y_train, y_val = get_train_val_data()
-    model_path = f'models/xgboost/jun2022-jun2024/model_0.6908_auc_diff_0.0067.json'
-    create_shap_graph(model_path, X_train)
-    print("SHAP graph creation completed.")
-    print("--------------------")
+        print("Process interrupted by user.")
