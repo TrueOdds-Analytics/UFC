@@ -137,7 +137,8 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
     processed_fights = set()
 
     # Sort the test_data by date
-    test_data = test_data.sort_values('current_fight_date')
+    test_data = test_data.sort_values(by=['current_fight_date', 'fighter', 'fighter_b'], ascending=[True, True, True])
+    test_data = test_data.reset_index(drop=True)
 
     # Initialize daily tracking
     daily_fixed_bankrolls = {}
@@ -149,9 +150,21 @@ def evaluate_bets(y_test, y_pred_proba, test_data, confidence_threshold, initial
 
     current_date = None
 
-    for i, row in test_data.iterrows():
+    for i in range(len(test_data)):
+        row = test_data.iloc[i]
         fight_id = frozenset([row['fighter'], row['fighter_b']])
         fight_date = row['current_fight_date']
+        if fight_date != current_date:
+            if current_date is not None:
+                fixed_bankroll += daily_fixed_profits.get(current_date, 0)
+                kelly_bankroll += daily_kelly_profits.get(current_date, 0)
+                daily_fixed_bankrolls[current_date] = fixed_bankroll
+                daily_kelly_bankrolls[current_date] = kelly_bankroll
+            current_date = fight_date
+            daily_fixed_stakes[current_date] = 0
+            daily_kelly_stakes[current_date] = 0
+            daily_fixed_profits[current_date] = 0
+            daily_kelly_profits[current_date] = 0
 
         if fight_id in processed_fights:
             continue
@@ -283,45 +296,58 @@ def calculate_monthly_roi(daily_bankrolls, initial_bankroll):
     monthly_roi = {}
     monthly_profit = {}
     current_month = None
+    current_bankroll = initial_bankroll
     month_start_bankroll = initial_bankroll
     total_profit = 0
-    last_bankroll = initial_bankroll
 
     print("\nDetailed ROI Calculation:")
-    print(f"{'Month':<10}{'Profit':<15}{'ROI':<10}")
-    print("-" * 35)
+    print(f"{'Month':<10}{'Profit':<15}{'ROI':<10}{'Start Bankroll':<20}{'End Bankroll':<20}")
+    print("-" * 80)
 
-    for date, bankroll in sorted(daily_bankrolls.items()):
+    sorted_dates = sorted(daily_bankrolls.keys())
+    for date in sorted_dates:
+        bankroll = daily_bankrolls[date]
         month = date[:7]  # Extract YYYY-MM
+
         if month != current_month:
             if current_month is not None:
-                profit = bankroll - month_start_bankroll
+                profit = current_bankroll - month_start_bankroll
                 monthly_profit[current_month] = profit
                 total_profit += profit
-                roi = (profit / initial_bankroll) * 100
+                roi = (profit / initial_bankroll) * 100  # ROI based on initial bankroll
                 monthly_roi[current_month] = roi
-                print(f"{current_month:<10}${profit:<14.2f}{roi:<10.2f}%")
-            current_month = month
-            month_start_bankroll = bankroll
-        last_bankroll = bankroll
 
-    # Calculate for the last month
+                print(f"{current_month:<10}${profit:<14.2f}{roi:<10.2f}${month_start_bankroll:<19.2f}${current_bankroll:<19.2f}")
+
+            current_month = month
+            month_start_bankroll = current_bankroll
+
+        current_bankroll = bankroll
+
+    # Handle the last month
     if current_month is not None:
-        profit = last_bankroll - month_start_bankroll
+        profit = current_bankroll - month_start_bankroll
         monthly_profit[current_month] = profit
         total_profit += profit
-        roi = (profit / initial_bankroll) * 100
+        roi = (profit / initial_bankroll) * 100  # ROI based on initial bankroll
         monthly_roi[current_month] = roi
-        print(f"{current_month:<10}${profit:<14.2f}{roi:<10.2f}%")
+
+        print(f"{current_month:<10}${profit:<14.2f}{roi:<10.2f}${month_start_bankroll:<19.2f}${current_bankroll:<19.2f}")
 
     total_roi = (total_profit / initial_bankroll) * 100
     sum_monthly_roi = sum(monthly_roi.values())
 
-    print("-" * 35)
-    print(f"{'Total':<10}${total_profit:<14.2f}{total_roi:<10.2f}%")
+    print("-" * 80)
+    print(f"{'Total':<10}${total_profit:<14.2f}{total_roi:<10.2f}")
     print(f"\nSum of monthly ROIs: {sum_monthly_roi:.2f}%")
     print(f"Total ROI: {total_roi:.2f}%")
     print(f"Difference: {total_roi - sum_monthly_roi:.2f}%")
+
+    # Debug information
+    print("\nDebug Information:")
+    print(f"Number of days in dataset: {len(sorted_dates)}")
+    print(f"First date: {sorted_dates[0]}, Last date: {sorted_dates[-1]}")
+    print(f"Initial bankroll: ${initial_bankroll:.2f}, Final bankroll: ${current_bankroll:.2f}")
 
     return monthly_roi, monthly_profit, total_roi
 
