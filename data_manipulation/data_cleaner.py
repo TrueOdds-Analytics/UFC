@@ -483,8 +483,8 @@ def create_matchup_data(file_path, tester, name):
 
 
 if __name__ == "__main__":
-    # combine_rounds_stats('../data/ufc_fight_processed.csv')
-    # calculate_elo_ratings('../data/combined_rounds.csv')
-    # combine_fighters_stats("../data/combined_rounds.csv")
-    # create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    combine_rounds_stats('../data/ufc_fight_processed.csv')
+    calculate_elo_ratings('../data/combined_rounds.csv')
+    combine_fighters_stats("../data/combined_rounds.csv")
+    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')

@@ -177,13 +177,13 @@ def clean_fight_odds_from_csv(input_csv_path, output_csv_path):
 
 
 if __name__ == "__main__":
-    # combined_rounds_df = pd.read_csv("data/combined_rounds.csv")
-    # fighters = combined_rounds_df["fighter"].unique().tolist()
-    # fighters = list(set(fighters))
-    # scraper = BestFightOddsScraperSelenium(fighters)
-    # odds_df = scraper.scrape()
-    # odds_df.to_csv("data/odds data/fight_odds.csv", index=False)
-    # print(odds_df)
+    combined_rounds_df = pd.read_csv("../data/combined_rounds.csv")
+    fighters = combined_rounds_df["fighter"].unique().tolist()
+    fighters = list(set(fighters))
+    scraper = BestFightOddsScraperSelenium(fighters)
+    odds_df = scraper.scrape()
+    odds_df.to_csv("../data/odds data/fight_odds.csv", index=False)
+    print(odds_df)
 
     # Clean the fight odds data
     input_file = "../data/odds data/fight_odds.csv"
@@ -191,3 +191,4 @@ if __name__ == "__main__":
     cleaned_odds_df = clean_fight_odds_from_csv(input_file, output_file)
 
     print(cleaned_odds_df)
+
