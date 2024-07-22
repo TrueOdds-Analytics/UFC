@@ -236,7 +236,7 @@ def combine_fighters_stats(file_path):
     # Reset the index
     final_combined_df = final_combined_df.reset_index(drop=True)
 
-    # Define the base columns to differentiate
+    # Define the base columns to differentiate and calculate ratios
     base_columns = [
         'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted',
         'significant_strikes_rate', 'total_strikes_landed', 'total_strikes_attempted',
@@ -255,19 +255,20 @@ def combine_fighters_stats(file_path):
         'wins_by_ko', 'losses_by_ko', 'wins_by_submission', 'losses_by_submission', 'wins_by_decision',
         'losses_by_decision', 'win_rate_by_ko', 'loss_rate_by_ko', 'win_rate_by_submission', 'loss_rate_by_submission',
         'win_rate_by_decision', 'loss_rate_by_decision'
-
     ]
 
-    # Generate the columns to differentiate using list comprehension
-    columns_to_diff = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in
-                                                                                  base_columns] + other_columns
+    # Generate the columns to differentiate and calculate ratios using list comprehension
+    columns_to_process = base_columns + [f"{col}_career" for col in base_columns] + [f"{col}_career_avg" for col in base_columns] + other_columns
 
-    # Calculate the differential for each column and store in a new DataFrame
-    diff_df = pd.DataFrame(
-        {f"{col}_diff": final_combined_df[col] - final_combined_df[f"{col}_b"] for col in columns_to_diff})
+    # Calculate the differential and ratio for each column and store in new DataFrames
+    diff_df = pd.DataFrame({f"{col}_diff": final_combined_df[col] - final_combined_df[f"{col}_b"] for col in columns_to_process})
+    ratio_df = pd.DataFrame({f"{col}_ratio": final_combined_df[col] / final_combined_df[f"{col}_b"] for col in columns_to_process})
 
-    # Concatenate the differential DataFrame with the final_combined_df
-    final_combined_df = pd.concat([final_combined_df, diff_df], axis=1)
+    # Replace infinity and NaN values in ratio_df with 0
+    ratio_df = ratio_df.replace([np.inf, -np.inf, np.nan], 0)
+
+    # Concatenate the differential and ratio DataFrames with the final_combined_df
+    final_combined_df = pd.concat([final_combined_df, diff_df, ratio_df], axis=1)
 
     # Filter out rows where the winner column contains 'NC' or 'D'
     final_combined_df = final_combined_df[~final_combined_df['winner'].isin(['NC', 'D'])]
@@ -284,7 +285,7 @@ def combine_fighters_stats(file_path):
     return final_combined_df
 
 
-def split_train_val_test(matchup_data_file):
+def split_train_val_test(matchup_data_file, start_date, end_date):
     # Load the matchup data
     matchup_df = pd.read_csv(matchup_data_file)
 
@@ -293,9 +294,6 @@ def split_train_val_test(matchup_data_file):
 
     # Ensure 'current_fight_date' is in datetime format
     matchup_df['current_fight_date'] = pd.to_datetime(matchup_df['current_fight_date'])
-
-    start_date = '2022-06-01'
-    end_date = '2024-07-30'  # Change this to your desired end date
 
     # Convert start_date to datetime
     start_date = pd.to_datetime(start_date)
@@ -382,7 +380,6 @@ def create_matchup_data(file_path, tester, name):
         results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
             tester).values.flatten()
 
-        # Pad results to ensure consistent length
         results_fighter = np.pad(results_fighter, (0, tester * 4 - len(results_fighter)), 'constant',
                                  constant_values=np.nan)
         results_opponent = np.pad(results_opponent, (0, tester * 4 - len(results_opponent)), 'constant',
@@ -394,22 +391,27 @@ def create_matchup_data(file_path, tester, name):
         if pd.notna(current_fight['open_odds']) and pd.notna(current_fight['open_odds_b']):
             current_fight_odds = [current_fight['open_odds'], current_fight['open_odds_b']]
             current_fight_odds_diff = current_fight['open_odds'] - current_fight['open_odds_b']
+            current_fight_odds_ratio = current_fight['open_odds'] / current_fight['open_odds_b'] if current_fight['open_odds_b'] != 0 else 0
         elif pd.notna(current_fight['open_odds']):
             odds_a = round_to_nearest_5(current_fight['open_odds'])
             odds_b = calculate_complementary_odd(odds_a)
             current_fight_odds = [odds_a, odds_b]
             current_fight_odds_diff = odds_a - odds_b
+            current_fight_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
         elif pd.notna(current_fight['open_odds_b']):
             odds_b = round_to_nearest_5(current_fight['open_odds_b'])
             odds_a = calculate_complementary_odd(odds_b)
             current_fight_odds = [odds_a, odds_b]
             current_fight_odds_diff = odds_a - odds_b
+            current_fight_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
         else:
             current_fight_odds = [-110, -110]
             current_fight_odds_diff = 0
+            current_fight_odds_ratio = 1
 
         current_fight_ages = [current_fight['age'], current_fight['age_b']]
         current_fight_age_diff = current_fight['age'] - current_fight['age_b']
+        current_fight_age_ratio = current_fight['age'] / current_fight['age_b'] if current_fight['age_b'] != 0 else 0
 
         # ELO and other stats
         elo_stats = [
@@ -418,23 +420,28 @@ def create_matchup_data(file_path, tester, name):
             1 / (1 + 10 ** ((current_fight['pre_fight_elo_b'] - current_fight['pre_fight_elo']) / 400)),
             1 / (1 + 10 ** ((current_fight['pre_fight_elo'] - current_fight['pre_fight_elo_b']) / 400)),
         ]
+        elo_ratio = current_fight['pre_fight_elo'] / current_fight['pre_fight_elo_b'] if current_fight['pre_fight_elo_b'] != 0 else 0
 
         other_stats = [
             current_fight['win_streak'], current_fight['win_streak_b'],
             current_fight['win_streak'] - current_fight['win_streak_b'],
+            current_fight['win_streak'] / (current_fight['win_streak_b'] if current_fight['win_streak_b'] != 0 else 1),
             current_fight['loss_streak'], current_fight['loss_streak_b'],
             current_fight['loss_streak'] - current_fight['loss_streak_b'],
+            current_fight['loss_streak'] / (current_fight['loss_streak_b'] if current_fight['loss_streak_b'] != 0 else 1),
             current_fight['years_of_experience'], current_fight['years_of_experience_b'],
             current_fight['years_of_experience'] - current_fight['years_of_experience_b'],
+            current_fight['years_of_experience'] / (current_fight['years_of_experience_b'] if current_fight['years_of_experience_b'] != 0 else 1),
             current_fight['days_since_last_fight'], current_fight['days_since_last_fight_b'],
-            current_fight['days_since_last_fight'] - current_fight['days_since_last_fight_b']
+            current_fight['days_since_last_fight'] - current_fight['days_since_last_fight_b'],
+            current_fight['days_since_last_fight'] / (current_fight['days_since_last_fight_b'] if current_fight['days_since_last_fight_b'] != 0 else 1)
         ]
 
         combined_features = np.concatenate([
             fighter_features, opponent_features, results_fighter, results_opponent,
-            current_fight_odds, [current_fight_odds_diff],
-            current_fight_ages, [current_fight_age_diff],
-            elo_stats, other_stats
+            current_fight_odds, [current_fight_odds_diff, current_fight_odds_ratio],
+            current_fight_ages, [current_fight_age_diff, current_fight_age_ratio],
+            elo_stats, [elo_ratio], other_stats
         ])
 
         combined_row = np.concatenate([combined_features, labels])
@@ -459,17 +466,24 @@ def create_matchup_data(file_path, tester, name):
     new_columns = [
         'current_fight_pre_fight_elo_a', 'current_fight_pre_fight_elo_b', 'current_fight_pre_fight_elo_diff',
         'current_fight_pre_fight_elo_a_win_chance', 'current_fight_pre_fight_elo_b_win_chance',
+        'current_fight_pre_fight_elo_ratio',
         'current_fight_win_streak_a', 'current_fight_win_streak_b', 'current_fight_win_streak_diff',
+        'current_fight_win_streak_ratio',
         'current_fight_loss_streak_a', 'current_fight_loss_streak_b', 'current_fight_loss_streak_diff',
+        'current_fight_loss_streak_ratio',
         'current_fight_years_experience_a', 'current_fight_years_experience_b', 'current_fight_years_experience_diff',
-        'current_fight_days_since_last_a', 'current_fight_days_since_last_b', 'current_fight_days_since_last_diff'
+        'current_fight_years_experience_ratio',
+        'current_fight_days_since_last_a', 'current_fight_days_since_last_b', 'current_fight_days_since_last_diff',
+        'current_fight_days_since_last_ratio'
     ]
 
     base_columns = ['fight_date'] if not name else ['fighter', 'fighter_b', 'fight_date']
     feature_columns = [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in features_to_include] + \
                       [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include]
     odds_age_columns = ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
-                        'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff']
+                        'current_fight_open_odds_ratio',
+                        'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff',
+                        'current_fight_age_ratio']
 
     column_names = base_columns + feature_columns + results_columns + odds_age_columns + new_columns + \
                    [f"{method}" for method in method_columns] + ['current_fight_date']
@@ -483,8 +497,8 @@ def create_matchup_data(file_path, tester, name):
 
 
 if __name__ == "__main__":
-    combine_rounds_stats('../data/ufc_fight_processed.csv')
-    calculate_elo_ratings('../data/combined_rounds.csv')
-    combine_fighters_stats("../data/combined_rounds.csv")
+    # combine_rounds_stats('../data/ufc_fight_processed.csv')
+    # calculate_elo_ratings('../data/combined_rounds.csv')
+    # combine_fighters_stats("../data/combined_rounds.csv")
     create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
-    split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv')
+    split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv', '2022-06-01', '2024-07-30')

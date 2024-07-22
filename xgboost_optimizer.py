@@ -103,7 +103,7 @@ def create_shap_graph(model_path, X_train):
 
     top_50_features = feature_importance[:50]
     print("Most influential features:")
-    for feature, importance in feature_importance[:320]:
+    for feature, importance in feature_importance[:75]:
         print(f"{feature}: {importance}")
 
     top_50_df = pd.DataFrame(top_50_features, columns=["Feature", "Importance"])
@@ -218,10 +218,10 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.62 and (auc_diff < 0.1):
+    if accuracy > 0.70 and (auc_diff < 0.02):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
-        model_filename = f'models/xgboost/jun2020-jun2022/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
+        model_filename = f'models/xgboost/jun2022-july2024/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
@@ -275,10 +275,10 @@ if __name__ == "__main__":
     print("Starting initial optimization and evaluation...")
     try:
         # Original training code
-        study = optimize_model(X_train, X_val, y_train, y_val)
-        best_trials = study.best_trials
+        # study = optimize_model(X_train, X_val, y_train, y_val, 1, 1000)
+        # best_trials = study.best_trials
 
-        model_filename = f'models/xgboost/feb2018-feb2020/model_0.6468_auc_diff_0.0582.json'
+        model_filename = f'models/xgboost/jun2022-july2024/ratio data/model_0.7039_auc_diff_0.0019.json'
         print("Creating SHAP graph for the best model")
         create_shap_graph(model_filename, X_train)
         print("SHAP graph creation completed.")
@@ -288,7 +288,7 @@ if __name__ == "__main__":
         num_top_features = 125  # You can change this value as needed
 
         # Get feature importance from the best model
-        best_model_path = f'models/xgboost/jun2022-jun2024/Good acc and loss total fight data/model_0.7237_auc_diff_0.0184.json'
+        best_model_path = f'models/xgboost/jun2022-july2024/ratio data/model_0.7039_auc_diff_0.0019.json'
         best_model = xgb.XGBClassifier(enable_categorical=True)
         best_model.load_model(best_model_path)
         feature_importance = best_model.get_booster().get_score(importance_type='gain')
@@ -319,7 +319,7 @@ if __name__ == "__main__":
         print("--------------------")
 
         # Save the best model with top features
-        model_filename_top = f'models/xgboost/feb2018-feb2020/model_top{num_top_features}_{accuracy_top:.4f}_auc_diff_{abs(auc_top - study_top.best_value):.4f}.json'
+        model_filename_top = f'models/xgboost/jun2022-july2024/model_top{num_top_features}_{accuracy_top:.4f}_auc_diff_{(auc_top - study_top.best_value):.4f}.json'
         best_model_top.save_model(model_filename_top)
         print(f"Best model with top {num_top_features} features saved as: {model_filename_top}")
 
