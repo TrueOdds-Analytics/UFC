@@ -299,12 +299,12 @@ def split_train_val_test(matchup_data_file, start_date, end_date):
     start_date = pd.to_datetime(start_date)
 
     # Calculate the date 10 years before the start date
-    ten_years_before = start_date - pd.DateOffset(years=10)
+    years_before = start_date - pd.DateOffset(years=10)
 
     test_data = matchup_df[(matchup_df['current_fight_date'] >= start_date) &
                            (matchup_df['current_fight_date'] <= end_date)].copy()
 
-    remaining_data = matchup_df[(matchup_df['current_fight_date'] >= ten_years_before) &
+    remaining_data = matchup_df[(matchup_df['current_fight_date'] >= years_before) &
                                 (matchup_df['current_fight_date'] < start_date)].copy()
 
     # Sort remaining data by current_fight_date
@@ -500,5 +500,5 @@ if __name__ == "__main__":
     # combine_rounds_stats('../data/ufc_fight_processed.csv')
     # calculate_elo_ratings('../data/combined_rounds.csv')
     # combine_fighters_stats("../data/combined_rounds.csv")
-    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    # create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv', '2022-06-01', '2024-07-30')

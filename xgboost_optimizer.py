@@ -200,7 +200,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         }
 
     params.update({
-        'tree_method': 'hist',
+        'tree_method': 'gpu_hist',
         'device': 'cuda',
         'objective': 'binary:logistic',
         'verbosity': 0,
@@ -218,10 +218,10 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.70 and (auc_diff < 0.02):
+    if accuracy > 0.66 and (auc_diff < 0.05):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
-        model_filename = f'models/xgboost/jun2022-july2024/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
+        model_filename = f'models/xgboost/jan2024-july2024/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
@@ -275,8 +275,8 @@ if __name__ == "__main__":
     print("Starting initial optimization and evaluation...")
     try:
         # Original training code
-        # study = optimize_model(X_train, X_val, y_train, y_val, 1, 1000)
-        # best_trials = study.best_trials
+        study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
+        best_trials = study.best_trials
 
         model_filename = f'models/xgboost/jun2022-july2024/ratio data/model_0.7039_auc_diff_0.0019.json'
         print("Creating SHAP graph for the best model")
@@ -288,7 +288,7 @@ if __name__ == "__main__":
         num_top_features = 125  # You can change this value as needed
 
         # Get feature importance from the best model
-        best_model_path = f'models/xgboost/jun2022-july2024/ratio data/model_0.7039_auc_diff_0.0019.json'
+        best_model_path = model_filename
         best_model = xgb.XGBClassifier(enable_categorical=True)
         best_model.load_model(best_model_path)
         feature_importance = best_model.get_booster().get_score(importance_type='gain')

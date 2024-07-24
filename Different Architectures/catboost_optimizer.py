@@ -31,7 +31,9 @@ def user_input_thread():
             break
 
 
-def get_train_val_data(golden_features=[]):
+def get_train_val_data(golden_features=None):
+    if golden_features is None:
+        golden_features = []
     train_data = pd.read_csv('../data/train test data/train_data.csv')
     val_data = pd.read_csv('../data/train test data/val_data.csv')
 
@@ -60,8 +62,7 @@ def get_train_val_data(golden_features=[]):
     ]
 
     for df in [train_data, val_data]:
-        for col in category_columns:
-            df[col] = df[col].astype(str).fillna('Unknown')
+        df[category_columns] = df[category_columns].astype("category")
 
     # Create a list for per-feature quantization
     per_float_feature_quantization = []
