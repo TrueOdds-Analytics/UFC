@@ -150,8 +150,8 @@ def remove_correlated_features(matchup_df, correlation_threshold=0.95):
     return matchup_df, columns_to_drop
 
 
-def round_to_nearest_5(x):
-    return round(x / 5) * 5
+def round_to_nearest_1(x):
+    return round(x)
 
 
 def calculate_complementary_odd(odd):
@@ -167,4 +167,4 @@ def calculate_complementary_odd(odd):
     else:
         complementary_odd = 100 * (1 - complementary_prob) / complementary_prob
 
-    return round_to_nearest_5(complementary_odd)
+    return round_to_nearest_1(complementary_odd)

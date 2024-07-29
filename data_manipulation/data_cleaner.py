@@ -393,13 +393,13 @@ def create_matchup_data(file_path, tester, name):
             current_fight_odds_diff = current_fight['open_odds'] - current_fight['open_odds_b']
             current_fight_odds_ratio = current_fight['open_odds'] / current_fight['open_odds_b'] if current_fight['open_odds_b'] != 0 else 0
         elif pd.notna(current_fight['open_odds']):
-            odds_a = round_to_nearest_5(current_fight['open_odds'])
+            odds_a = round_to_nearest_1(current_fight['open_odds'])
             odds_b = calculate_complementary_odd(odds_a)
             current_fight_odds = [odds_a, odds_b]
             current_fight_odds_diff = odds_a - odds_b
             current_fight_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
         elif pd.notna(current_fight['open_odds_b']):
-            odds_b = round_to_nearest_5(current_fight['open_odds_b'])
+            odds_b = round_to_nearest_1(current_fight['open_odds_b'])
             odds_a = calculate_complementary_odd(odds_b)
             current_fight_odds = [odds_a, odds_b]
             current_fight_odds_diff = odds_a - odds_b
@@ -497,8 +497,8 @@ def create_matchup_data(file_path, tester, name):
 
 
 if __name__ == "__main__":
-    # combine_rounds_stats('../data/ufc_fight_processed.csv')
-    # calculate_elo_ratings('../data/combined_rounds.csv')
-    # combine_fighters_stats("../data/combined_rounds.csv")
-    # create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    combine_rounds_stats('../data/ufc_fight_processed.csv')
+    calculate_elo_ratings('../data/combined_rounds.csv')
+    combine_fighters_stats("../data/combined_rounds.csv")
+    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv', '2024-01-01', '2024-07-30')
