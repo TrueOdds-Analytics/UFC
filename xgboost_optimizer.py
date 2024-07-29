@@ -275,17 +275,17 @@ if __name__ == "__main__":
     print("Starting initial optimization and evaluation...")
     try:
         # Original training code
-        study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
-        best_trials = study.best_trials
+        # study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
+        # best_trials = study.best_trials
 
-        model_filename = f'models/xgboost/jun2022-july2024/ratio data/model_0.7039_auc_diff_0.0019.json'
+        model_filename = f'models/xgboost/jan2024-july2024/baseline/model_0.6647_auc_diff_0.0407.json'
         print("Creating SHAP graph for the best model")
         create_shap_graph(model_filename, X_train)
         print("SHAP graph creation completed.")
         print("--------------------")
 
         # New feature selection and optimization process
-        num_top_features = 125  # You can change this value as needed
+        num_top_features = 50  # You can change this value as needed
 
         # Get feature importance from the best model
         best_model_path = model_filename
