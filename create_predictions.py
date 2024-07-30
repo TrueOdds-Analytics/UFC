@@ -3,6 +3,7 @@ import numpy as np
 from datetime import datetime
 import os
 
+
 def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past_fights=3, output_dir=''):
     df = pd.read_csv(file_path)
     df['fight_date'] = pd.to_datetime(df['fight_date'])
