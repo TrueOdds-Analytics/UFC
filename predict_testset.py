@@ -3,10 +3,7 @@ import xgboost as xgb
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
 import os
 import numpy as np
-import multiprocessing as mp
-from functools import partial
 from sklearn.utils.validation import check_is_fitted
-from tqdm import tqdm
 from rich.table import Table
 from rich.columns import Columns
 from rich.text import Text
@@ -22,15 +19,7 @@ from sklearn.calibration import CalibratedClassifierCV
 
 
 def preprocess_data(data):
-    category_columns = [
-        'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
-        'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
-        'result_fight_2', 'winner_fight_2', 'weight_class_fight_2', 'scheduled_rounds_fight_2',
-        'result_b_fight_2', 'winner_b_fight_2', 'weight_class_b_fight_2', 'scheduled_rounds_b_fight_2',
-        'result_fight_3', 'winner_fight_3', 'weight_class_fight_3', 'scheduled_rounds_fight_3',
-        'result_b_fight_3', 'winner_b_fight_3', 'weight_class_b_fight_3', 'scheduled_rounds_b_fight_3'
-    ]
-
+    category_columns = [col for col in data.columns if col.endswith(('fight_1', 'fight_2', 'fight_3'))]
     data[category_columns] = data[category_columns].astype("category")
     return data
 
@@ -458,21 +447,6 @@ def print_overall_metrics(y_test, y_pred, y_pred_proba):
     console.print(table)
 
 
-def evaluate_threshold(threshold, y_test, y_pred_proba_list, test_data_with_display, INITIAL_BANKROLL, KELLY_FRACTION,
-                       FIXED_BET_FRACTION, MAX_BET_PERCENTAGE, use_ensemble):
-    (final_bankroll, total_volume, correct_bets, total_bets, kelly_final_bankroll, kelly_total_volume,
-     kelly_correct_bets, kelly_total_bets, confident_predictions, correct_confident_predictions,
-     daily_fixed_bankrolls, daily_kelly_bankrolls) = evaluate_bets(
-        y_test, y_pred_proba_list, test_data_with_display, threshold, INITIAL_BANKROLL,
-        KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.00, print_fights=False,
-        max_bet_percentage=MAX_BET_PERCENTAGE, use_ensemble=use_ensemble)
-
-    kelly_roi = ((kelly_final_bankroll - INITIAL_BANKROLL) / INITIAL_BANKROLL) * 100
-
-    return (threshold, kelly_roi, final_bankroll, total_volume, correct_bets, total_bets, confident_predictions,
-            correct_confident_predictions, kelly_final_bankroll, kelly_total_volume)
-
-
 class LGBMWrapper(BaseEstimator, ClassifierMixin):
     def __init__(self, model):
         self.model = model
@@ -493,7 +467,7 @@ class LGBMWrapper(BaseEstimator, ClassifierMixin):
         return self.classes_[np.argmax(proba, axis=1)]
 
 
-def main(optimize_threshold=True, manual_threshold=None, use_calibration=True,
+def main(manual_threshold, use_calibration=True,
          initial_bankroll=10000, kelly_fraction=1, fixed_bet_fraction=0.1,
          max_bet_percentage=0.25, min_odds=-300, use_ensemble=True):
     old_stdout = sys.stdout
@@ -527,14 +501,6 @@ def main(optimize_threshold=True, manual_threshold=None, use_calibration=True,
         'model_0.6677_auc_diff_0.0465.json'
     ]
 
-    # model_files = [
-    #     'model_0.7007_auc_diff_0.0046.json',
-    #     'model_0.7007_auc_diff_0.0058.json',
-    #     'model_0.7039_auc_diff_0.0012.json',
-    #     'model_0.7039_auc_diff_0.0027.json',
-    #     'model_0.7039_auc_diff_0.0033.json'
-    # ]
-
     models = []
     if use_ensemble:
         for model_file in model_files:
@@ -560,29 +526,7 @@ def main(optimize_threshold=True, manual_threshold=None, use_calibration=True,
             y_pred_proba = model.predict_proba(X_test)
         y_pred_proba_list.append(y_pred_proba)
 
-    if optimize_threshold:
-        print("Evaluating thresholds...")
-        thresholds = np.arange(0.5, 0.75, 0.0001)
-
-        evaluate_threshold_partial = partial(evaluate_threshold,
-                                             y_test=y_test,
-                                             y_pred_proba_list=y_pred_proba_list,
-                                             test_data_with_display=test_data_with_display,
-                                             INITIAL_BANKROLL=INITIAL_BANKROLL,
-                                             KELLY_FRACTION=KELLY_FRACTION,
-                                             FIXED_BET_FRACTION=FIXED_BET_FRACTION,
-                                             MAX_BET_PERCENTAGE=MAX_BET_PERCENTAGE,
-                                             use_ensemble=use_ensemble)
-
-        with mp.Pool(processes=mp.cpu_count()) as pool:
-            results = list(tqdm(pool.imap(evaluate_threshold_partial, thresholds), total=len(thresholds)))
-
-        best_result = max(results, key=lambda x: x[1])
-        best_threshold, best_kelly_roi, *_ = best_result
-    else:
-        if manual_threshold is None:
-            raise ValueError("If optimize_threshold is False, you must provide a manual_threshold value.")
-        best_threshold = manual_threshold
+    best_threshold = manual_threshold
 
     bet_results = evaluate_bets(y_test, y_pred_proba_list, test_data_with_display, best_threshold, INITIAL_BANKROLL,
                                 KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.00, print_fights=True,
@@ -638,7 +582,7 @@ def main(optimize_threshold=True, manual_threshold=None, use_calibration=True,
 
 
 if __name__ == "__main__":
-    main(optimize_threshold=False, manual_threshold=0.50,
+    main(manual_threshold=0.50,
          use_calibration=True, initial_bankroll=10000, kelly_fraction=1,
          fixed_bet_fraction=0.1, max_bet_percentage=0.20, min_odds=-500,
          use_ensemble=True)
