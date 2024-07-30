@@ -493,26 +493,26 @@ def main(manual_threshold, use_calibration=True,
     display_data = test_data[display_columns]
     test_data_with_display = pd.concat([X_test, display_data], axis=1)
 
-    # model_files = [
-    #     'model_0.6647_auc_diff_0.0446.json',
-    #     'model_0.6647_auc_diff_0.0448.json',
-    #     'model_0.6677_auc_diff_0.0406.json',
-    #     'model_0.6677_auc_diff_0.0442.json',
-    #     'model_0.6677_auc_diff_0.0465.json'
-    # ]
-
     model_files = [
-        'model_0.7007_auc_diff_0.0046.json',
-        'model_0.7007_auc_diff_0.0058.json',
-        'model_0.7039_auc_diff_0.0012.json',
-        'model_0.7039_auc_diff_0.0027.json',
-        'model_0.7039_auc_diff_0.0033.json'
+        'model_0.6647_auc_diff_0.0446.json',
+        'model_0.6647_auc_diff_0.0448.json',
+        'model_0.6677_auc_diff_0.0406.json',
+        'model_0.6677_auc_diff_0.0442.json',
+        'model_0.6677_auc_diff_0.0465.json'
     ]
+
+    # model_files = [
+    #     'model_0.7007_auc_diff_0.0046.json',
+    #     'model_0.7007_auc_diff_0.0058.json',
+    #     'model_0.7039_auc_diff_0.0012.json',
+    #     'model_0.7039_auc_diff_0.0027.json',
+    #     'model_0.7039_auc_diff_0.0033.json'
+    # ]
 
     models = []
     if use_ensemble:
         for model_file in model_files:
-            model_path = os.path.abspath(f'models/xgboost/jun2022-july2024/ratio data 125/{model_file}')
+            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125/{model_file}')
             model = load_model(model_path, 'xgboost')
             models.append(model)
     else:
