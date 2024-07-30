@@ -20,6 +20,7 @@ import lightgbm as lgb
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.calibration import CalibratedClassifierCV
 
+
 def preprocess_data(data):
     category_columns = [
         'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
@@ -32,6 +33,7 @@ def preprocess_data(data):
 
     data[category_columns] = data[category_columns].astype("category")
     return data
+
 
 def load_model(model_path, model_type='xgboost'):
     if not os.path.exists(model_path):
@@ -49,16 +51,19 @@ def load_model(model_path, model_type='xgboost'):
         print(f"Error loading model: {str(e)}")
         raise
 
+
 def calculate_profit(odds, stake):
     if odds < 0:
         return (100 / abs(odds)) * stake
     else:
         return (odds / 100) * stake
 
+
 def calculate_kelly_fraction(p, b, kelly_fraction):
     q = 1 - p
     full_kelly = max(0, (p - (q / b)))
     return full_kelly * kelly_fraction
+
 
 def print_fight_results(confident_bets):
     console = Console(width=160)
@@ -126,6 +131,7 @@ def print_fight_results(confident_bets):
         console.print(main_panel, style="magenta")
         console.print()
 
+
 def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, initial_bankroll=10000,
                   kelly_fraction=0.125, fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300, print_fights=True,
                   max_bet_percentage=0.20, use_ensemble=True):
@@ -189,7 +195,8 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
         if use_ensemble:
             models_agreeing = sum([1 for y_pred_proba in y_pred_proba_list if
-                                   (y_pred_proba[i][1] > y_pred_proba[i][0]) == (y_pred_proba_avg[1] > y_pred_proba_avg[0])])
+                                   (y_pred_proba[i][1] > y_pred_proba[i][0]) == (
+                                               y_pred_proba_avg[1] > y_pred_proba_avg[0])])
         else:
             models_agreeing = 1
 
@@ -253,7 +260,8 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
                     daily_fixed_profits[current_date] -= fixed_stake
                     bet_result['Fixed Fraction Profit'] = -fixed_stake
 
-                bet_result['Fixed Fraction Bankroll After'] = f"${(fixed_bankroll + daily_fixed_profits[current_date]):.2f}"
+                bet_result[
+                    'Fixed Fraction Bankroll After'] = f"${(fixed_bankroll + daily_fixed_profits[current_date]):.2f}"
                 bet_result['Fixed Fraction ROI'] = (bet_result['Fixed Fraction Profit'] / fixed_bankroll) * 100
 
             if kelly_stake > 0:
@@ -296,6 +304,7 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             confident_predictions, correct_confident_predictions,
             daily_fixed_bankrolls, daily_kelly_bankrolls)
 
+
 def calculate_monthly_roi(daily_bankrolls, initial_bankroll):
     monthly_roi = {}
     monthly_profit = {}
@@ -320,7 +329,8 @@ def calculate_monthly_roi(daily_bankrolls, initial_bankroll):
                 total_profit += profit
                 roi = (profit / initial_bankroll) * 100  # ROI based on initial bankroll
                 monthly_roi[current_month] = roi
-                print(f"{current_month:<10}${profit:<14.2f}{roi:<10.2f}${month_start_bankroll:<19.2f}${current_bankroll:<19.2f}")
+                print(
+                    f"{current_month:<10}${profit:<14.2f}{roi:<10.2f}${month_start_bankroll:<19.2f}${current_bankroll:<19.2f}")
 
             current_month = month
             month_start_bankroll = current_bankroll
@@ -334,7 +344,8 @@ def calculate_monthly_roi(daily_bankrolls, initial_bankroll):
         total_profit += profit
         roi = (profit / initial_bankroll) * 100  # ROI based on initial bankroll
         monthly_roi[current_month] = roi
-        print(f"{current_month:<10}${profit:<14.2f}{roi:<10.2f}${month_start_bankroll:<19.2f}${current_bankroll:<19.2f}")
+        print(
+            f"{current_month:<10}${profit:<14.2f}{roi:<10.2f}${month_start_bankroll:<19.2f}${current_bankroll:<19.2f}")
 
     total_roi = (total_profit / initial_bankroll) * 100
     sum_monthly_roi = sum(monthly_roi.values())
@@ -515,6 +526,14 @@ def main(optimize_threshold=True, manual_threshold=None, use_calibration=True,
         'model_0.6677_auc_diff_0.0442.json',
         'model_0.6677_auc_diff_0.0465.json'
     ]
+
+    # model_files = [
+    #     'model_0.7007_auc_diff_0.0046.json',
+    #     'model_0.7007_auc_diff_0.0058.json',
+    #     'model_0.7039_auc_diff_0.0012.json',
+    #     'model_0.7039_auc_diff_0.0027.json',
+    #     'model_0.7039_auc_diff_0.0033.json'
+    # ]
 
     models = []
     if use_ensemble:
