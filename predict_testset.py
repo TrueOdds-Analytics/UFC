@@ -68,10 +68,16 @@ def print_fight_results(confident_bets):
         date_obj = datetime.datetime.strptime(bet['Date'], '%Y-%m-%d')
         formatted_date = date_obj.strftime('%B %d, %Y')
 
+        # Calculate Fixed Fraction stake as a percentage of starting bankroll
+        fixed_starting_bankroll = float(bet.get('Fixed Fraction Starting Bankroll', '0').replace('$', ''))
+        fixed_stake = float(bet.get('Fixed Fraction Stake', '0').replace('$', ''))
+        fixed_stake_percentage = (fixed_stake / fixed_starting_bankroll) * 100 if fixed_starting_bankroll > 0 else 0
+
         fixed_panel = Panel(
             f"Starting Bankroll: {bet.get('Fixed Fraction Starting Bankroll', 'N/A')}\n"
             f"Available Bankroll: {bet.get('Fixed Fraction Available Bankroll', 'N/A')}\n"
             f"Stake: {bet.get('Fixed Fraction Stake', 'N/A')}\n"
+            f"Stake Percentage: {fixed_stake_percentage:.2f}%\n"
             f"Potential Profit: {bet.get('Fixed Fraction Potential Profit', 'N/A')}\n"
             f"Bankroll After: {bet.get('Fixed Fraction Bankroll After', 'N/A')}\n"
             f"Profit: ${bet.get('Fixed Fraction Profit', 0):.2f}\n"
@@ -80,10 +86,17 @@ def print_fight_results(confident_bets):
             expand=True,
             width=42
         )
+
+        # Calculate Kelly stake as a percentage of starting bankroll
+        kelly_starting_bankroll = float(bet.get('Kelly Starting Bankroll', '0').replace('$', ''))
+        kelly_stake = float(bet.get('Kelly Stake', '0').replace('$', ''))
+        kelly_stake_percentage = (kelly_stake / kelly_starting_bankroll) * 100 if kelly_starting_bankroll > 0 else 0
+
         kelly_panel = Panel(
             f"Starting Bankroll: {bet.get('Kelly Starting Bankroll', 'N/A')}\n"
             f"Available Bankroll: {bet.get('Kelly Available Bankroll', 'N/A')}\n"
             f"Stake: {bet.get('Kelly Stake', 'N/A')}\n"
+            f"Stake Percentage: {kelly_stake_percentage:.2f}%\n"
             f"Potential Profit: {bet.get('Kelly Potential Profit', 'N/A')}\n"
             f"Bankroll After: {bet.get('Kelly Bankroll After', 'N/A')}\n"
             f"Profit: ${bet.get('Kelly Profit', 0):.2f}\n"
@@ -185,7 +198,8 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             correct_confident_predictions += 1
 
         if winning_probability >= confidence_threshold and models_agreeing >= (5 if use_ensemble else 1):
-            odds = row['current_fight_open_odds'] if predicted_winner == row['fighter'] else row['current_fight_open_odds_b']
+            odds = row['current_fight_open_odds'] if predicted_winner == row['fighter'] else row[
+                'current_fight_open_odds_b']
 
             if odds < min_odds:
                 continue
@@ -200,10 +214,11 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
             b = odds / 100 if odds > 0 else 100 / abs(odds)
             kelly_bet_size = calculate_kelly_fraction(winning_probability, b, kelly_fraction)
-            kelly_stake = min(available_kelly_bankroll * kelly_bet_size, available_kelly_bankroll, kelly_max_bet)
+            kelly_stake = kelly_bankroll * kelly_bet_size  # Calculate based on starting bankroll
+            kelly_stake = min(kelly_stake, available_kelly_bankroll, kelly_max_bet)  # Apply limits
 
-            if kelly_stake <= available_kelly_bankroll * default_bet:
-                kelly_stake = min(available_kelly_bankroll * default_bet, available_kelly_bankroll, kelly_max_bet)
+            if kelly_stake <= kelly_bankroll * default_bet:
+                kelly_stake = min(kelly_bankroll * default_bet, available_kelly_bankroll, kelly_max_bet)
 
             bet_result = {
                 'Fight': i + 1,
@@ -508,7 +523,7 @@ def main(optimize_threshold=True, manual_threshold=None, use_calibration=True,
             model = load_model(model_path, 'xgboost')
             models.append(model)
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125/{model_files[1]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125/{model_files[0]}')
         model = load_model(model_path, 'xgboost')
         models.append(model)
 
@@ -607,4 +622,4 @@ if __name__ == "__main__":
     main(optimize_threshold=False, manual_threshold=0.50,
          use_calibration=True, initial_bankroll=10000, kelly_fraction=1,
          fixed_bet_fraction=0.1, max_bet_percentage=0.20, min_odds=-500,
-         use_ensemble=False)  # Set to False to use a single model
+         use_ensemble=True)
