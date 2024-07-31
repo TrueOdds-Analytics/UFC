@@ -489,6 +489,8 @@ def create_matchup_data(file_path, tester, name):
                    [f"{method}" for method in method_columns] + ['current_fight_date']
 
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
+    columns_to_drop = ['fight_date']
+    matchup_df = matchup_df.drop(columns=columns_to_drop, errors='ignore')
 
     output_filename = f'../data/matchup data/matchup_data_{n_past_fights}_avg{"_name" if name else ""}.csv'
     matchup_df.to_csv(output_filename, index=False)
@@ -500,5 +502,5 @@ if __name__ == "__main__":
     # combine_rounds_stats('../data/ufc_fight_processed.csv')
     # calculate_elo_ratings('../data/combined_rounds.csv')
     # combine_fighters_stats("../data/combined_rounds.csv")
-    # create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv', '2024-01-01', '2024-07-30')
