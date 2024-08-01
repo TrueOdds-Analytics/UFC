@@ -346,7 +346,7 @@ def calculate_monthly_roi(daily_bankrolls, initial_bankroll):
     print(f"Difference: {total_roi - sum_monthly_roi:.2f}%")
 
     print("\nDebug Information:")
-    print(f"Number of days in dataset: {len(sorted_dates)}")
+    print(f"Number of events in dataset: {len(sorted_dates)}")
     print(f"First date: {sorted_dates[0]}, Last date: {sorted_dates[-1]}")
     print(f"Initial bankroll: ${initial_bankroll:.2f}, Final bankroll: ${current_bankroll:.2f}")
 
@@ -468,7 +468,7 @@ class LGBMWrapper(BaseEstimator, ClassifierMixin):
 
 
 def main(manual_threshold, use_calibration=True,
-         initial_bankroll=10000, kelly_fraction=1, fixed_bet_fraction=0.1,
+         initial_bankroll=10000, kelly_fraction=1.0, fixed_bet_fraction=0.1,
          max_bet_percentage=0.25, min_odds=-300, use_ensemble=True):
     old_stdout = sys.stdout
     sys.stdout = mystdout = StringIO()
@@ -591,6 +591,6 @@ def main(manual_threshold, use_calibration=True,
 
 if __name__ == "__main__":
     main(manual_threshold=0.50,
-         use_calibration=True, initial_bankroll=10000, kelly_fraction=1,
+         use_calibration=True, initial_bankroll=10000, kelly_fraction=1.0,
          fixed_bet_fraction=0.1, max_bet_percentage=0.20, min_odds=-500,
          use_ensemble=True)

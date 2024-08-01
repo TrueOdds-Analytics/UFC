@@ -372,8 +372,8 @@ def create_matchup_data(file_path, tester, name):
         if len(fighter_df) < n_past_fights or len(opponent_df) < n_past_fights:
             continue
 
-        fighter_features = fighter_df[features_to_include].mean().values
-        opponent_features = opponent_df[features_to_include].mean().values
+        fighter_features = fighter_df.head(n_past_fights)[features_to_include].mean().values
+        opponent_features = opponent_df.head(n_past_fights)[features_to_include].mean().values
 
         results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(
             tester).values.flatten()
@@ -499,8 +499,8 @@ def create_matchup_data(file_path, tester, name):
 
 
 if __name__ == "__main__":
-    # combine_rounds_stats('../data/ufc_fight_processed.csv')
-    # calculate_elo_ratings('../data/combined_rounds.csv')
-    # combine_fighters_stats("../data/combined_rounds.csv")
+    combine_rounds_stats('../data/ufc_fight_processed.csv')
+    calculate_elo_ratings('../data/combined_rounds.csv')
+    combine_fighters_stats("../data/combined_rounds.csv")
     create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv', '2024-01-01', '2024-07-30')
