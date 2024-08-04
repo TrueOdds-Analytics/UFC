@@ -235,12 +235,12 @@ def ensemble_prediction(matchup_df, model_dir, val_data_path, use_calibration=Tr
 
 if __name__ == "__main__":
     file_path = "data/combined_sorted_fighter_stats.csv"
-    fighter_a = "curtis blaydes"
-    fighter_b = "tom aspinall"
+    fighter_a = "azamat murzakanov"
+    fighter_b = "alonzo menifield"
 
     current_fight_data = {
-        'odds': [164, -198],
-        'current_fight_date': '2024-07-27'
+        'odds': [170, -205],
+        'current_fight_date': '2024-08-03'
     }
 
     output_dir = 'data/matchup data'
