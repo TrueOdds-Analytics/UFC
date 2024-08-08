@@ -4,6 +4,7 @@ from data_manipulation.Elo import *
 import time
 
 warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 def combine_rounds_stats(file_path):
@@ -320,7 +321,7 @@ def split_train_val_test(matchup_data_file, start_date, end_date):
     # Remove duplicate fights from validation and test data
     def remove_duplicates(df):
         df = df.copy()
-        df['fight_pair'] = df.apply(lambda row: tuple(sorted([row['fighter'], row['fighter_b']])), axis=1)
+        df['fight_pair'] = df.apply(lambda row: tuple(sorted([row['fighter_a'], row['fighter_b']])), axis=1)
         df = df.drop_duplicates(subset=['fight_pair'], keep='first')
         df = df.drop(columns=['fight_pair'])
         return df.reset_index(drop=True)
@@ -329,9 +330,9 @@ def split_train_val_test(matchup_data_file, start_date, end_date):
     test_data = remove_duplicates(test_data)
 
     # Sort train, validation, and test data by current_fight_date and fighters
-    train_data = train_data.sort_values(by=['current_fight_date', 'fighter', 'fighter_b'], ascending=[True, True, True])
-    val_data = val_data.sort_values(by=['current_fight_date', 'fighter', 'fighter_b'], ascending=[True, True, True])
-    test_data = test_data.sort_values(by=['current_fight_date', 'fighter', 'fighter_b'], ascending=[True, True, True])
+    train_data = train_data.sort_values(by=['current_fight_date', 'fighter_a', 'fighter_b'], ascending=[True, True, True])
+    val_data = val_data.sort_values(by=['current_fight_date', 'fighter_a', 'fighter_b'], ascending=[True, True, True])
+    test_data = test_data.sort_values(by=['current_fight_date', 'fighter_a', 'fighter_b'], ascending=[True, True, True])
 
     # Save the train, validation, and test data to CSV files
     train_data.to_csv('../data/train test data/train_data.csv', index=False)
@@ -361,29 +362,29 @@ def create_matchup_data(file_path, tester, name):
     matchup_data = []
 
     for index, current_fight in df.iterrows():
-        fighter_name = current_fight['fighter']
-        opponent_name = current_fight['fighter_b']
+        fighter_a_name = current_fight['fighter']
+        fighter_b_name = current_fight['fighter_b']
 
-        fighter_df = df[(df['fighter'] == fighter_name) & (df['fight_date'] < current_fight['fight_date'])] \
+        fighter_a_df = df[(df['fighter'] == fighter_a_name) & (df['fight_date'] < current_fight['fight_date'])] \
             .sort_values(by='fight_date', ascending=False).head(n_past_fights)
-        opponent_df = df[(df['fighter'] == opponent_name) & (df['fight_date'] < current_fight['fight_date'])] \
+        fighter_b_df = df[(df['fighter'] == fighter_b_name) & (df['fight_date'] < current_fight['fight_date'])] \
             .sort_values(by='fight_date', ascending=False).head(n_past_fights)
 
-        if len(fighter_df) < n_past_fights or len(opponent_df) < n_past_fights:
+        if len(fighter_a_df) < n_past_fights or len(fighter_b_df) < n_past_fights:
             continue
 
-        fighter_features = fighter_df.head(n_past_fights)[features_to_include].mean().values
-        opponent_features = opponent_df.head(n_past_fights)[features_to_include].mean().values
+        fighter_a_features = fighter_a_df.head(n_past_fights)[features_to_include].mean().values
+        fighter_b_features = fighter_b_df.head(n_past_fights)[features_to_include].mean().values
 
-        results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(
+        results_fighter_a = fighter_a_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(
             tester).values.flatten()
-        results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
+        results_fighter_b = fighter_b_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
             tester).values.flatten()
 
-        results_fighter = np.pad(results_fighter, (0, tester * 4 - len(results_fighter)), 'constant',
-                                 constant_values=np.nan)
-        results_opponent = np.pad(results_opponent, (0, tester * 4 - len(results_opponent)), 'constant',
-                                  constant_values=np.nan)
+        results_fighter_a = np.pad(results_fighter_a, (0, tester * 4 - len(results_fighter_a)), 'constant',
+                                   constant_values=np.nan)
+        results_fighter_b = np.pad(results_fighter_b, (0, tester * 4 - len(results_fighter_b)), 'constant',
+                                   constant_values=np.nan)
 
         labels = current_fight[method_columns].values
 
@@ -391,7 +392,8 @@ def create_matchup_data(file_path, tester, name):
         if pd.notna(current_fight['open_odds']) and pd.notna(current_fight['open_odds_b']):
             current_fight_odds = [current_fight['open_odds'], current_fight['open_odds_b']]
             current_fight_odds_diff = current_fight['open_odds'] - current_fight['open_odds_b']
-            current_fight_odds_ratio = current_fight['open_odds'] / current_fight['open_odds_b'] if current_fight['open_odds_b'] != 0 else 0
+            current_fight_odds_ratio = current_fight['open_odds'] / current_fight['open_odds_b'] if current_fight[
+                                                                                                        'open_odds_b'] != 0 else 0
         elif pd.notna(current_fight['open_odds']):
             odds_a = round_to_nearest_1(current_fight['open_odds'])
             odds_b = calculate_complementary_odd(odds_a)
@@ -420,7 +422,8 @@ def create_matchup_data(file_path, tester, name):
             1 / (1 + 10 ** ((current_fight['pre_fight_elo_b'] - current_fight['pre_fight_elo']) / 400)),
             1 / (1 + 10 ** ((current_fight['pre_fight_elo'] - current_fight['pre_fight_elo_b']) / 400)),
         ]
-        elo_ratio = current_fight['pre_fight_elo'] / current_fight['pre_fight_elo_b'] if current_fight['pre_fight_elo_b'] != 0 else 0
+        elo_ratio = current_fight['pre_fight_elo'] / current_fight['pre_fight_elo_b'] if current_fight[
+                                                                                             'pre_fight_elo_b'] != 0 else 0
 
         other_stats = [
             current_fight['win_streak'], current_fight['win_streak_b'],
@@ -428,17 +431,20 @@ def create_matchup_data(file_path, tester, name):
             current_fight['win_streak'] / (current_fight['win_streak_b'] if current_fight['win_streak_b'] != 0 else 1),
             current_fight['loss_streak'], current_fight['loss_streak_b'],
             current_fight['loss_streak'] - current_fight['loss_streak_b'],
-            current_fight['loss_streak'] / (current_fight['loss_streak_b'] if current_fight['loss_streak_b'] != 0 else 1),
+            current_fight['loss_streak'] / (
+                current_fight['loss_streak_b'] if current_fight['loss_streak_b'] != 0 else 1),
             current_fight['years_of_experience'], current_fight['years_of_experience_b'],
             current_fight['years_of_experience'] - current_fight['years_of_experience_b'],
-            current_fight['years_of_experience'] / (current_fight['years_of_experience_b'] if current_fight['years_of_experience_b'] != 0 else 1),
+            current_fight['years_of_experience'] / (
+                current_fight['years_of_experience_b'] if current_fight['years_of_experience_b'] != 0 else 1),
             current_fight['days_since_last_fight'], current_fight['days_since_last_fight_b'],
             current_fight['days_since_last_fight'] - current_fight['days_since_last_fight_b'],
-            current_fight['days_since_last_fight'] / (current_fight['days_since_last_fight_b'] if current_fight['days_since_last_fight_b'] != 0 else 1)
+            current_fight['days_since_last_fight'] / (
+                current_fight['days_since_last_fight_b'] if current_fight['days_since_last_fight_b'] != 0 else 1)
         ]
 
         combined_features = np.concatenate([
-            fighter_features, opponent_features, results_fighter, results_opponent,
+            fighter_a_features, fighter_b_features, results_fighter_a, results_fighter_b,
             current_fight_odds, [current_fight_odds_diff, current_fight_odds_ratio],
             current_fight_ages, [current_fight_age_diff, current_fight_age_ratio],
             elo_stats, [elo_ratio], other_stats
@@ -446,14 +452,14 @@ def create_matchup_data(file_path, tester, name):
 
         combined_row = np.concatenate([combined_features, labels])
 
-        most_recent_date = max(fighter_df['fight_date'].max(), opponent_df['fight_date'].max())
+        most_recent_date = max(fighter_a_df['fight_date'].max(), fighter_b_df['fight_date'].max())
         current_fight_date = current_fight['fight_date']
 
         if not name:
             matchup_data.append([most_recent_date] + combined_row.tolist() + [current_fight_date])
         else:
             matchup_data.append(
-                [fighter_name, opponent_name, most_recent_date] + combined_row.tolist() + [current_fight_date])
+                [fighter_a_name, fighter_b_name, most_recent_date] + combined_row.tolist() + [current_fight_date])
 
     # Generate column names
     results_columns = []
@@ -477,7 +483,7 @@ def create_matchup_data(file_path, tester, name):
         'current_fight_days_since_last_ratio'
     ]
 
-    base_columns = ['fight_date'] if not name else ['fighter', 'fighter_b', 'fight_date']
+    base_columns = ['fight_date'] if not name else ['fighter_a', 'fighter_b', 'fight_date']
     feature_columns = [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in features_to_include] + \
                       [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include]
     odds_age_columns = ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
@@ -491,6 +497,29 @@ def create_matchup_data(file_path, tester, name):
     matchup_df = pd.DataFrame(matchup_data, columns=column_names)
     columns_to_drop = ['fight_date']
     matchup_df = matchup_df.drop(columns=columns_to_drop, errors='ignore')
+
+    # Generalized column renaming
+    def rename_column(col):
+        if 'fighter' in col and not col.startswith('fighter'):
+            if 'b_fighter_b' in col:
+                return col.replace('b_fighter_b', 'fighter_b_opponent')
+            elif 'b_fighter' in col:
+                return col.replace('b_fighter', 'fighter_a_opponent')
+            elif 'fighter' in col and 'fighter_b' not in col:
+                return col.replace('fighter', 'fighter_a')
+        return col
+
+    matchup_df.columns = [rename_column(col) for col in matchup_df.columns]
+
+    # Calculate matchup diff and ratio columns after renaming
+    for feature in features_to_include:
+        col_a = f"{feature}_fighter_a_avg_last_{n_past_fights}"
+        col_b = f"{feature}_fighter_b_avg_last_{n_past_fights}"
+
+        if col_a in matchup_df.columns and col_b in matchup_df.columns:
+            matchup_df[f"matchup_{feature}_diff_avg_last_{n_past_fights}"] = matchup_df[col_a] - matchup_df[col_b]
+            matchup_df[f"matchup_{feature}_ratio_avg_last_{n_past_fights}"] = matchup_df[col_a] / matchup_df[
+                col_b].replace(0, 1)
 
     output_filename = f'../data/matchup data/matchup_data_{n_past_fights}_avg{"_name" if name else ""}.csv'
     matchup_df.to_csv(output_filename, index=False)
