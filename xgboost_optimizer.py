@@ -38,7 +38,7 @@ def get_train_val_data():
     val_labels = val_data['winner']
     train_data = train_data.drop(['winner'], axis=1)
     val_data = val_data.drop(['winner'], axis=1)
-    columns_to_drop = ['fighter', 'fighter_b', 'current_fight_date']
+    columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date']
     train_data = train_data.drop(columns=columns_to_drop)
     val_data = val_data.drop(columns=columns_to_drop)
 
@@ -200,7 +200,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         }
 
     params.update({
-        'tree_method': 'gpu_hist',
+        'tree_method': 'hist',
         'device': 'cuda',
         'objective': 'binary:logistic',
         'verbosity': 0,
@@ -218,7 +218,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.66 and (auc_diff < 0.05):
+    if accuracy > 0.65 and (auc_diff < 0.25):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
         model_filename = f'models/xgboost/jan2024-july2024/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
@@ -229,7 +229,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     return accuracy  # Return both accuracy and final validation loss
 
 
-def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=10000):
+def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=1000):
     for round in range(n_rounds):
         print(f"Starting optimization round {round + 1}/{n_rounds}")
 
@@ -275,8 +275,8 @@ if __name__ == "__main__":
     print("Starting initial optimization and evaluation...")
     try:
         # Original training code
-        # study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
-        # best_trials = study.best_trials
+        study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
+        best_trials = study.best_trials
 
         model_filename = f'models/xgboost/jun2022-july2024/ratio data 125/model_0.7039_auc_diff_0.0033.json'
         print("Creating SHAP graph for the best model")

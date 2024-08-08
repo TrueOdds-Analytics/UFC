@@ -138,7 +138,7 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
     confident_bets = []
     processed_fights = set()
 
-    test_data = test_data.sort_values(by=['current_fight_date', 'fighter', 'fighter_b'], ascending=[True, True, True])
+    test_data = test_data.sort_values(by=['current_fight_date', 'fighter_a', 'fighter_b'], ascending=[True, True, True])
     test_data = test_data.reset_index(drop=True)
 
     daily_fixed_bankrolls = {}
@@ -152,7 +152,7 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
     for i in range(len(test_data)):
         row = test_data.iloc[i]
-        fight_id = frozenset([row['fighter'], row['fighter_b']])
+        fight_id = frozenset([row['fighter_a'], row['fighter_b']])
         fight_date = row['current_fight_date']
 
         if fight_id in processed_fights:
@@ -172,7 +172,7 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             daily_fixed_profits[current_date] = 0
             daily_kelly_profits[current_date] = 0
 
-        true_winner = row['fighter'] if y_test.iloc[i] == 1 else row['fighter_b']
+        true_winner = row['fighter_a'] if y_test.iloc[i] == 1 else row['fighter_b']
 
         if use_ensemble:
             y_pred_proba_avg = np.mean([y_pred_proba[i] for y_pred_proba in y_pred_proba_list], axis=0)
@@ -180,7 +180,7 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             y_pred_proba_avg = y_pred_proba_list[0][i]
 
         winning_probability = max(y_pred_proba_avg)
-        predicted_winner = row['fighter'] if y_pred_proba_avg[1] > y_pred_proba_avg[0] else row['fighter_b']
+        predicted_winner = row['fighter_a'] if y_pred_proba_avg[1] > y_pred_proba_avg[0] else row['fighter_b']
 
         if use_ensemble:
             models_agreeing = sum([1 for y_pred_proba in y_pred_proba_list if
@@ -194,7 +194,7 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             correct_confident_predictions += 1
 
         if winning_probability >= confidence_threshold and models_agreeing >= (5 if use_ensemble else 1):
-            odds = row['current_fight_open_odds'] if predicted_winner == row['fighter'] else row[
+            odds = row['current_fight_open_odds'] if predicted_winner == row['fighter_a'] else row[
                 'current_fight_open_odds_b']
 
             if odds < min_odds:
@@ -218,7 +218,7 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
             bet_result = {
                 'Fight': i + 1,
-                'Fighter A': row['fighter'],
+                'Fighter A': row['fighter_a'],
                 'Fighter B': row['fighter_b'],
                 'Date': fight_date,
                 'True Winner': true_winner,
@@ -481,7 +481,7 @@ def main(manual_threshold, use_calibration=True,
     val_data = pd.read_csv('data/train test data/val_data.csv')
     test_data = pd.read_csv('data/train test data/test_data.csv')
 
-    display_columns = ['current_fight_date', 'fighter', 'fighter_b']
+    display_columns = ['current_fight_date', 'fighter_a', 'fighter_b']
     y_val = val_data['winner']
     y_test = test_data['winner']
     X_val = val_data.drop(['winner'] + display_columns, axis=1)
