@@ -103,7 +103,7 @@ def create_shap_graph(model_path, X_train):
 
     top_50_features = feature_importance[:50]
     print("Most influential features:")
-    for feature, importance in feature_importance[:75]:
+    for feature, importance in feature_importance[:150]:
         print(f"{feature}: {importance}")
 
     top_50_df = pd.DataFrame(top_50_features, columns=["Feature", "Importance"])
@@ -187,8 +187,8 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
 
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 15, 20, log=True),
-            'alpha': trial.suggest_float('alpha', 15, 20, log=True),
+            'lambda': trial.suggest_float('lambda', 25, 30, log=True),
+            'alpha': trial.suggest_float('alpha', 25, 30, log=True),
             'min_child_weight': trial.suggest_float('min_child_weight', 1, 10.0),
             'max_depth': trial.suggest_int('max_depth', 1, 6),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
@@ -218,10 +218,10 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.65 and (auc_diff < 0.25):
+    if accuracy > 0.65 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
-        model_filename = f'models/xgboost/jan2024-july2024/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
+        model_filename = f'models/xgboost/jan2024-july2024/125 new/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
@@ -229,7 +229,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     return accuracy  # Return both accuracy and final validation loss
 
 
-def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=1000):
+def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=10000):
     for round in range(n_rounds):
         print(f"Starting optimization round {round + 1}/{n_rounds}")
 
@@ -275,17 +275,17 @@ if __name__ == "__main__":
     print("Starting initial optimization and evaluation...")
     try:
         # Original training code
-        study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
-        best_trials = study.best_trials
+        # study = optimize_model(X_train, X_val, y_train, y_val, 1, 1000)
+        # best_trials = study.best_trials
 
-        model_filename = f'models/xgboost/jun2022-july2024/ratio data 125/model_0.7039_auc_diff_0.0033.json'
+        model_filename = f'models/xgboost/jan2024-july2024/baseline/model_0.6556_auc_diff_0.0998.json'
         print("Creating SHAP graph for the best model")
         create_shap_graph(model_filename, X_train)
         print("SHAP graph creation completed.")
         print("--------------------")
 
         # New feature selection and optimization process
-        num_top_features = 50  # You can change this value as needed
+        num_top_features = 125  # You can change this value as needed
 
         # Get feature importance from the best model
         best_model_path = model_filename

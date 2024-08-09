@@ -494,11 +494,11 @@ def main(manual_threshold, use_calibration=True,
     test_data_with_display = pd.concat([X_test, display_data], axis=1)
 
     model_files = [
-        'model_0.6647_auc_diff_0.0446.json',
-        'model_0.6647_auc_diff_0.0448.json',
-        'model_0.6677_auc_diff_0.0406.json',
-        'model_0.6677_auc_diff_0.0442.json',
-        'model_0.6677_auc_diff_0.0465.json'
+        'model_0.6526_auc_diff_0.0720.json',
+        'model_0.6526_auc_diff_0.0786.json',
+        'model_0.6526_auc_diff_0.0965.json',
+        'model_0.6556_auc_diff_0.0795.json',
+        'model_0.6677_auc_diff_0.0637.json'
     ]
 
     # model_files = [
@@ -512,11 +512,11 @@ def main(manual_threshold, use_calibration=True,
     models = []
     if use_ensemble:
         for model_file in model_files:
-            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125/{model_file}')
+            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 matchup/{model_file}')
             model = load_model(model_path, 'xgboost')
             models.append(model)
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125/{model_files[0]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 matchup/{model_files[0]}')
         model = load_model(model_path, 'xgboost')
         models.append(model)
 
