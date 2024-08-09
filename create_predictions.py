@@ -64,19 +64,22 @@ def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past
 
     current_fight_date = pd.to_datetime(current_fight_data['current_fight_date'])
 
-    def calculate_fighter_stats(fighter_data):
-        last_fight_date = fighter_data['fight_date'].iloc[0]
-        last_known_age = fighter_data['age'].iloc[0]
-        first_fight_date = fighter_data['fight_date'].iloc[-1]
+    def calculate_fighter_stats(fighter_name):
+        fighter_all_fights = df[df['fighter'] == fighter_name].sort_values(by='fight_date', ascending=False)
+        fighter_recent_fights = fighter_all_fights.head(n_past_fights)
+
+        last_fight_date = fighter_recent_fights['fight_date'].iloc[0]
+        last_known_age = fighter_recent_fights['age'].iloc[0]
+        first_fight_date = fighter_all_fights['fight_date'].iloc[-1]  # Use the earliest fight date from all fights
 
         days_since_last_fight = (current_fight_date - last_fight_date).days
         current_age = int(last_known_age + days_since_last_fight / 365.25)
         years_of_experience = (current_fight_date - first_fight_date).days / 365.25
 
-        win_streak = fighter_data['win_streak'].iloc[0]
-        loss_streak = fighter_data['loss_streak'].iloc[0]
+        win_streak = fighter_recent_fights['win_streak'].iloc[0]
+        loss_streak = fighter_recent_fights['loss_streak'].iloc[0]
 
-        most_recent_result = fighter_data['winner'].iloc[0]
+        most_recent_result = fighter_recent_fights['winner'].iloc[0]
         if most_recent_result == 1:
             win_streak += 1
             loss_streak = 0
@@ -86,8 +89,8 @@ def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past
 
         return current_age, years_of_experience, days_since_last_fight, win_streak, loss_streak
 
-    age_a, exp_a, days_a, win_streak_a, loss_streak_a = calculate_fighter_stats(fighter_df)
-    age_b, exp_b, days_b, win_streak_b, loss_streak_b = calculate_fighter_stats(opponent_df)
+    age_a, exp_a, days_a, win_streak_a, loss_streak_a = calculate_fighter_stats(fighter_a)
+    age_b, exp_b, days_b, win_streak_b, loss_streak_b = calculate_fighter_stats(fighter_b)
 
     age_diff = age_a - age_b
     age_ratio = age_a / age_b if age_b != 0 else 0
@@ -163,11 +166,48 @@ def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past
     matchup_df.insert(1, 'fighter_b', fighter_b)
     matchup_df['current_fight_date'] = current_fight_data['current_fight_date']
 
+    def rename_column(col):
+        if 'fighter' in col and not col.startswith('fighter'):
+            if 'b_fighter_b' in col:
+                return col.replace('b_fighter_b', 'fighter_b_opponent')
+            elif 'b_fighter' in col:
+                return col.replace('b_fighter', 'fighter_a_opponent')
+            elif 'fighter' in col and 'fighter_b' not in col:
+                return col.replace('fighter', 'fighter_a')
+        return col
+
+    matchup_df.columns = [rename_column(col) for col in matchup_df.columns]
+
+    new_columns = {}
+    for feature in features_to_include:
+        col_a = f"{feature}_fighter_a_avg_last_{n_past_fights}"
+        col_b = f"{feature}_fighter_b_avg_last_{n_past_fights}"
+
+        if col_a in matchup_df.columns and col_b in matchup_df.columns:
+            new_columns[f"matchup_{feature}_diff_avg_last_{n_past_fights}"] = matchup_df[col_a] - matchup_df[col_b]
+            new_columns[f"matchup_{feature}_ratio_avg_last_{n_past_fights}"] = matchup_df[col_a] / matchup_df[col_b].replace(0, 1)
+
+    matchup_df = pd.concat([matchup_df, pd.DataFrame(new_columns)], axis=1)
+
+    # Read the test file to get the correct column order
+    test_file_path = 'data/train test data/test_data.csv'
+    test_df = pd.read_csv(test_file_path, nrows=0)  # Read only the header
+    correct_columns = test_df.columns.tolist()
+
+    # Reorder the columns of matchup_df to match the test file
+    # For columns that don't exist in matchup_df, fill with NaN
+    for col in correct_columns:
+        if col not in matchup_df.columns:
+            matchup_df[col] = np.nan
+
+    matchup_df = matchup_df[correct_columns]
+
     output_file = os.path.join(output_dir, 'specific_matchup_data.csv')
     matchup_df.to_csv(output_file, index=False)
     print(f"Matchup data saved to {output_file}")
 
     return matchup_df
+
 
 def load_model(model_path, model_type='xgboost'):
     if not os.path.exists(model_path):
@@ -186,11 +226,11 @@ def load_model(model_path, model_type='xgboost'):
 
 def ensemble_prediction(matchup_df, model_dir, val_data_path, use_calibration=True):
     model_files = [
-        'model_0.6647_auc_diff_0.0446.json',
-        'model_0.6647_auc_diff_0.0448.json',
-        'model_0.6677_auc_diff_0.0406.json',
-        'model_0.6677_auc_diff_0.0442.json',
-        'model_0.6677_auc_diff_0.0465.json'
+        'model_0.6526_auc_diff_0.0720.json',
+        'model_0.6526_auc_diff_0.0786.json',
+        'model_0.6526_auc_diff_0.0965.json',
+        'model_0.6556_auc_diff_0.0795.json',
+        'model_0.6677_auc_diff_0.0637.json'
     ]
 
     models = []
@@ -235,16 +275,16 @@ def ensemble_prediction(matchup_df, model_dir, val_data_path, use_calibration=Tr
 
 if __name__ == "__main__":
     file_path = "data/combined_sorted_fighter_stats.csv"
-    fighter_a = "azamat murzakanov"
-    fighter_b = "alonzo menifield"
+    fighter_a = "curtis blaydes"
+    fighter_b = "tom aspinall"
 
     current_fight_data = {
-        'odds': [170, -205],
-        'current_fight_date': '2024-08-03'
+        'odds': [164, -198],
+        'current_fight_date': '2024-07-27'
     }
 
     output_dir = 'data/matchup data'
-    model_dir = 'models/xgboost/jan2024-july2024/125'
+    model_dir = 'models/xgboost/jan2024-july2024/125 matchup'
     val_data_path = 'data/train test data/val_data.csv'
 
     matchup_df = specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, output_dir=output_dir)
