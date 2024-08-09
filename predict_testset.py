@@ -591,6 +591,6 @@ def main(manual_threshold, use_calibration=True,
 
 if __name__ == "__main__":
     main(manual_threshold=0.50,
-         use_calibration=True, initial_bankroll=10000, kelly_fraction=1.0,
+         use_calibration=True, initial_bankroll=10000, kelly_fraction=1.00,
          fixed_bet_fraction=0.1, max_bet_percentage=0.20, min_odds=-500,
          use_ensemble=True)
