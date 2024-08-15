@@ -388,7 +388,7 @@ def create_matchup_data(file_path, tester, name):
 
         labels = current_fight[method_columns].values
 
-        # Process odds
+        # Process open odds
         if pd.notna(current_fight['open_odds']) and pd.notna(current_fight['open_odds_b']):
             current_fight_odds = [current_fight['open_odds'], current_fight['open_odds_b']]
             current_fight_odds_diff = current_fight['open_odds'] - current_fight['open_odds_b']
@@ -410,6 +410,28 @@ def create_matchup_data(file_path, tester, name):
             current_fight_odds = [-110, -110]
             current_fight_odds_diff = 0
             current_fight_odds_ratio = 1
+
+        # Process closing range end odds
+        if pd.notna(current_fight['closing_range_end']) and pd.notna(current_fight['closing_range_end_b']):
+            current_fight_closing_odds = [current_fight['closing_range_end'], current_fight['closing_range_end_b']]
+            current_fight_closing_odds_diff = current_fight['closing_range_end'] - current_fight['closing_range_end_b']
+            current_fight_closing_odds_ratio = current_fight['closing_range_end'] / current_fight['closing_range_end_b'] if current_fight['closing_range_end_b'] != 0 else 0
+        elif pd.notna(current_fight['closing_range_end']):
+            odds_a = round_to_nearest_1(current_fight['closing_range_end'])
+            odds_b = calculate_complementary_odd(odds_a)
+            current_fight_closing_odds = [odds_a, odds_b]
+            current_fight_closing_odds_diff = odds_a - odds_b
+            current_fight_closing_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
+        elif pd.notna(current_fight['closing_range_end_b']):
+            odds_b = round_to_nearest_1(current_fight['closing_range_end_b'])
+            odds_a = calculate_complementary_odd(odds_b)
+            current_fight_closing_odds = [odds_a, odds_b]
+            current_fight_closing_odds_diff = odds_a - odds_b
+            current_fight_closing_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
+        else:
+            current_fight_closing_odds = [-110, -110]
+            current_fight_closing_odds_diff = 0
+            current_fight_closing_odds_ratio = 1
 
         current_fight_ages = [current_fight['age'], current_fight['age_b']]
         current_fight_age_diff = current_fight['age'] - current_fight['age_b']
@@ -443,16 +465,12 @@ def create_matchup_data(file_path, tester, name):
                 current_fight['days_since_last_fight_b'] if current_fight['days_since_last_fight_b'] != 0 else 1)
         ]
 
-        # Add current fight closing_range_end and closing_range_end_b
-        current_fight_closing_range_end = current_fight['closing_range_end']
-        current_fight_closing_range_end_b = current_fight['closing_range_end_b']
-
         combined_features = np.concatenate([
             fighter_a_features, fighter_b_features, results_fighter_a, results_fighter_b,
             current_fight_odds, [current_fight_odds_diff, current_fight_odds_ratio],
+            current_fight_closing_odds, [current_fight_closing_odds_diff, current_fight_closing_odds_ratio],
             current_fight_ages, [current_fight_age_diff, current_fight_age_ratio],
-            elo_stats, [elo_ratio], other_stats,
-            [current_fight_closing_range_end, current_fight_closing_range_end_b]
+            elo_stats, [elo_ratio], other_stats
         ])
 
         combined_row = np.concatenate([combined_features, labels])
@@ -485,8 +503,7 @@ def create_matchup_data(file_path, tester, name):
         'current_fight_years_experience_a', 'current_fight_years_experience_b', 'current_fight_years_experience_diff',
         'current_fight_years_experience_ratio',
         'current_fight_days_since_last_a', 'current_fight_days_since_last_b', 'current_fight_days_since_last_diff',
-        'current_fight_days_since_last_ratio',
-        'current_fight_closing_range_end', 'current_fight_closing_range_end_b'  # Add these new columns
+        'current_fight_days_since_last_ratio'
     ]
 
     base_columns = ['fight_date'] if not name else ['fighter_a', 'fighter_b', 'fight_date']
@@ -494,6 +511,8 @@ def create_matchup_data(file_path, tester, name):
                       [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include]
     odds_age_columns = ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
                         'current_fight_open_odds_ratio',
+                        'current_fight_closing_odds', 'current_fight_closing_odds_b', 'current_fight_closing_odds_diff',
+                        'current_fight_closing_odds_ratio',
                         'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff',
                         'current_fight_age_ratio']
 
@@ -542,5 +561,5 @@ if __name__ == "__main__":
     # combine_rounds_stats('../data/ufc_fight_processed.csv')
     # calculate_elo_ratings('../data/combined_rounds.csv')
     # combine_fighters_stats("../data/combined_rounds.csv")
-    # create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv', '2024-01-01', '2024-07-30')

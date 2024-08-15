@@ -141,7 +141,7 @@ def remove_correlated_features(matchup_df, correlation_threshold=0.95):
     # Find the columns to drop, excluding 'current_fight_open_odds_diff'
     columns_to_drop = [column for column in upper_tri.columns
                        if any(upper_tri[column] > correlation_threshold)
-                       and column != ['current_fight_open_odds_diff', 'current_fight_closing_range_end_b']
+                       and column != 'current_fight_open_odds_diff' and column != 'current_fight_closing_range_end_b'
                        ]
 
     # Drop the highly correlated columns
