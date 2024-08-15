@@ -443,11 +443,16 @@ def create_matchup_data(file_path, tester, name):
                 current_fight['days_since_last_fight_b'] if current_fight['days_since_last_fight_b'] != 0 else 1)
         ]
 
+        # Add current fight closing_range_end and closing_range_end_b
+        current_fight_closing_range_end = current_fight['closing_range_end']
+        current_fight_closing_range_end_b = current_fight['closing_range_end_b']
+
         combined_features = np.concatenate([
             fighter_a_features, fighter_b_features, results_fighter_a, results_fighter_b,
             current_fight_odds, [current_fight_odds_diff, current_fight_odds_ratio],
             current_fight_ages, [current_fight_age_diff, current_fight_age_ratio],
-            elo_stats, [elo_ratio], other_stats
+            elo_stats, [elo_ratio], other_stats,
+            [current_fight_closing_range_end, current_fight_closing_range_end_b]
         ])
 
         combined_row = np.concatenate([combined_features, labels])
@@ -480,7 +485,8 @@ def create_matchup_data(file_path, tester, name):
         'current_fight_years_experience_a', 'current_fight_years_experience_b', 'current_fight_years_experience_diff',
         'current_fight_years_experience_ratio',
         'current_fight_days_since_last_a', 'current_fight_days_since_last_b', 'current_fight_days_since_last_diff',
-        'current_fight_days_since_last_ratio'
+        'current_fight_days_since_last_ratio',
+        'current_fight_closing_range_end', 'current_fight_closing_range_end_b'  # Add these new columns
     ]
 
     base_columns = ['fight_date'] if not name else ['fighter_a', 'fighter_b', 'fight_date']
@@ -511,25 +517,29 @@ def create_matchup_data(file_path, tester, name):
 
     matchup_df.columns = [rename_column(col) for col in matchup_df.columns]
 
-    # Calculate matchup diff and ratio columns after renaming
+    diff_columns = {}
+    ratio_columns = {}
+
     for feature in features_to_include:
         col_a = f"{feature}_fighter_a_avg_last_{n_past_fights}"
         col_b = f"{feature}_fighter_b_avg_last_{n_past_fights}"
 
         if col_a in matchup_df.columns and col_b in matchup_df.columns:
-            matchup_df[f"matchup_{feature}_diff_avg_last_{n_past_fights}"] = matchup_df[col_a] - matchup_df[col_b]
-            matchup_df[f"matchup_{feature}_ratio_avg_last_{n_past_fights}"] = matchup_df[col_a] / matchup_df[
+            diff_columns[f"matchup_{feature}_diff_avg_last_{n_past_fights}"] = matchup_df[col_a] - matchup_df[col_b]
+            ratio_columns[f"matchup_{feature}_ratio_avg_last_{n_past_fights}"] = matchup_df[col_a] / matchup_df[
                 col_b].replace(0, 1)
+
+    # Add all new columns at once
+    matchup_df = pd.concat([matchup_df, pd.DataFrame(diff_columns), pd.DataFrame(ratio_columns)], axis=1)
 
     output_filename = f'../data/matchup data/matchup_data_{n_past_fights}_avg{"_name" if name else ""}.csv'
     matchup_df.to_csv(output_filename, index=False)
 
     return matchup_df
 
-
 if __name__ == "__main__":
-    combine_rounds_stats('../data/ufc_fight_processed.csv')
-    calculate_elo_ratings('../data/combined_rounds.csv')
-    combine_fighters_stats("../data/combined_rounds.csv")
+    # combine_rounds_stats('../data/ufc_fight_processed.csv')
+    # calculate_elo_ratings('../data/combined_rounds.csv')
+    # combine_fighters_stats("../data/combined_rounds.csv")
     create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv', '2024-01-01', '2024-07-30')

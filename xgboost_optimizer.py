@@ -38,7 +38,8 @@ def get_train_val_data():
     val_labels = val_data['winner']
     train_data = train_data.drop(['winner'], axis=1)
     val_data = val_data.drop(['winner'], axis=1)
-    columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date']
+    columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date', 'current_fight_closing_range_end',
+                       'current_fight_closing_range_end_b']
     train_data = train_data.drop(columns=columns_to_drop)
     val_data = val_data.drop(columns=columns_to_drop)
 

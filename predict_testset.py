@@ -7,14 +7,11 @@ from sklearn.utils.validation import check_is_fitted
 from rich.table import Table
 from rich.columns import Columns
 from rich.text import Text
-from rich.console import Group
+from rich.console import Group, Console
+from rich.panel import Panel
 import datetime
 from io import StringIO
 import sys
-from rich.console import Console
-from rich.panel import Panel
-import lightgbm as lgb
-from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.calibration import CalibratedClassifierCV
 
 
@@ -31,8 +28,6 @@ def load_model(model_path, model_type='xgboost'):
         if model_type == 'xgboost':
             model = xgb.XGBClassifier(enable_categorical=True)
             model.load_model(model_path)
-        elif model_type == 'lightgbm':
-            model = lgb.Booster(model_file=model_path)
         else:
             raise ValueError(f"Unsupported model type: {model_type}")
         return model
@@ -62,7 +57,6 @@ def print_fight_results(confident_bets):
         date_obj = datetime.datetime.strptime(bet['Date'], '%Y-%m-%d')
         formatted_date = date_obj.strftime('%B %d, %Y')
 
-        # Calculate Fixed Fraction stake as a percentage of starting bankroll
         fixed_starting_bankroll = float(bet.get('Fixed Fraction Starting Bankroll', '0').replace('$', ''))
         fixed_stake = float(bet.get('Fixed Fraction Stake', '0').replace('$', ''))
         fixed_stake_percentage = (fixed_stake / fixed_starting_bankroll) * 100 if fixed_starting_bankroll > 0 else 0
@@ -81,7 +75,6 @@ def print_fight_results(confident_bets):
             width=42
         )
 
-        # Calculate Kelly stake as a percentage of starting bankroll
         kelly_starting_bankroll = float(bet.get('Kelly Starting Bankroll', '0').replace('$', ''))
         kelly_stake = float(bet.get('Kelly Stake', '0').replace('$', ''))
         kelly_stake_percentage = (kelly_stake / kelly_starting_bankroll) * 100 if kelly_starting_bankroll > 0 else 0
@@ -194,8 +187,8 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             correct_confident_predictions += 1
 
         if winning_probability >= confidence_threshold and models_agreeing >= (5 if use_ensemble else 1):
-            odds = row['current_fight_open_odds'] if predicted_winner == row['fighter_a'] else row[
-                'current_fight_open_odds_b']
+            odds = row['current_fight_closing_range_end'] if predicted_winner == row['fighter_a'] else row[
+                'current_fight_closing_range_end_b']
 
             if odds < min_odds:
                 continue
@@ -210,8 +203,8 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
             b = odds / 100 if odds > 0 else 100 / abs(odds)
             kelly_bet_size = calculate_kelly_fraction(winning_probability, b, kelly_fraction)
-            kelly_stake = kelly_bankroll * kelly_bet_size  # Calculate based on starting bankroll
-            kelly_stake = min(kelly_stake, available_kelly_bankroll, kelly_max_bet)  # Apply limits
+            kelly_stake = kelly_bankroll * kelly_bet_size
+            kelly_stake = min(kelly_stake, available_kelly_bankroll, kelly_max_bet)
 
             if kelly_stake <= kelly_bankroll * default_bet:
                 kelly_stake = min(kelly_bankroll * default_bet, available_kelly_bankroll, kelly_max_bet)
@@ -294,15 +287,44 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             daily_fixed_bankrolls, daily_kelly_bankrolls)
 
 
-def calculate_monthly_roi(daily_bankrolls, initial_bankroll):
+def calculate_daily_roi(daily_bankrolls, initial_bankroll):
+    daily_roi = {}
+    previous_bankroll = initial_bankroll
+
+    for date, bankroll in sorted(daily_bankrolls.items()):
+        daily_profit = bankroll - previous_bankroll
+        daily_roi[date] = (daily_profit / previous_bankroll) * 100
+        previous_bankroll = bankroll
+
+    return daily_roi
+
+
+def print_daily_roi(daily_fixed_roi, daily_kelly_roi):
+    console = Console()
+    console.print("\nDaily ROI:")
+    table = Table(title="Daily Return on Investment")
+    table.add_column("Date", style="cyan")
+    table.add_column("Fixed Fraction ROI", justify="right", style="magenta")
+    table.add_column("Kelly ROI", justify="right", style="green")
+
+    for date in sorted(daily_fixed_roi.keys()):
+        fixed_roi = f"{daily_fixed_roi[date]:.2f}%"
+        kelly_roi = f"{daily_kelly_roi[date]:.2f}%"
+        table.add_row(date, fixed_roi, kelly_roi)
+
+    console.print(table)
+
+def calculate_monthly_roi(daily_bankrolls, initial_bankroll, kelly):
     monthly_roi = {}
     monthly_profit = {}
     current_month = None
     current_bankroll = initial_bankroll
     month_start_bankroll = initial_bankroll
     total_profit = 0
-
-    print("\nDetailed ROI Calculation:")
+    if kelly:
+        print("\nDetailed Kelly ROI Calculation:")
+    else:
+        print("\nDetailed Fixed Fraction ROI Calculation:")
     print(f"{'Month':<10}{'Profit':<15}{'ROI':<10}{'Start Bankroll':<20}{'End Bankroll':<20}")
     print("-" * 80)
 
@@ -351,7 +373,6 @@ def calculate_monthly_roi(daily_bankrolls, initial_bankroll):
     print(f"Initial bankroll: ${initial_bankroll:.2f}, Final bankroll: ${current_bankroll:.2f}")
 
     return monthly_roi, monthly_profit, total_roi
-
 
 def print_betting_results(total_fights, confident_predictions, correct_confident_predictions,
                           fixed_total_bets, fixed_correct_bets, initial_bankroll, fixed_final_bankroll,
@@ -425,7 +446,6 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
 
     console.print(Columns([fixed_panel, kelly_panel]))
 
-
 def print_overall_metrics(y_test, y_pred, y_pred_proba):
     overall_accuracy = accuracy_score(y_test, y_pred)
     overall_precision = precision_score(y_test, y_pred)
@@ -445,27 +465,6 @@ def print_overall_metrics(y_test, y_pred, y_pred_proba):
     table.add_row("AUC", f"{overall_auc:.4f}")
 
     console.print(table)
-
-
-class LGBMWrapper(BaseEstimator, ClassifierMixin):
-    def __init__(self, model):
-        self.model = model
-        self.classes_ = None
-
-    def fit(self, X, y):
-        self.classes_ = np.unique(y)
-        return self
-
-    def predict_proba(self, X):
-        check_is_fitted(self, ['classes_'])
-        raw_preds = self.model.predict(X, raw_score=True)
-        proba = 1 / (1 + np.exp(-raw_preds))
-        return np.column_stack((1 - proba, proba))
-
-    def predict(self, X):
-        proba = self.predict_proba(X)
-        return self.classes_[np.argmax(proba, axis=1)]
-
 
 def main(manual_threshold, use_calibration=True,
          initial_bankroll=10000, kelly_fraction=1.0, fixed_bet_fraction=0.1,
@@ -500,14 +499,6 @@ def main(manual_threshold, use_calibration=True,
         'model_0.6556_auc_diff_0.0795.json',
         'model_0.6677_auc_diff_0.0637.json'
     ]
-
-    # model_files = [
-    #     'model_0.7007_auc_diff_0.0046.json',
-    #     'model_0.7007_auc_diff_0.0058.json',
-    #     'model_0.7039_auc_diff_0.0012.json',
-    #     'model_0.7039_auc_diff_0.0027.json',
-    #     'model_0.7039_auc_diff_0.0033.json'
-    # ]
 
     models = []
     if use_ensemble:
@@ -547,10 +538,15 @@ def main(manual_threshold, use_calibration=True,
 
     earliest_fight_date = test_data['current_fight_date'].min()
 
+    # Calculate and print daily ROI
+    daily_fixed_roi = calculate_daily_roi(daily_fixed_bankrolls, INITIAL_BANKROLL)
+    daily_kelly_roi = calculate_daily_roi(daily_kelly_bankrolls, INITIAL_BANKROLL)
+    print_daily_roi(daily_fixed_roi, daily_kelly_roi)
+
     fixed_monthly_roi, fixed_monthly_profit, fixed_total_roi = calculate_monthly_roi(daily_fixed_bankrolls,
-                                                                                     INITIAL_BANKROLL)
+                                                                                     INITIAL_BANKROLL, False)
     kelly_monthly_roi, kelly_monthly_profit, kelly_total_roi = calculate_monthly_roi(daily_kelly_bankrolls,
-                                                                                     INITIAL_BANKROLL)
+                                                                                     INITIAL_BANKROLL, True)
 
     console = Console()
     console.print("\nMonthly ROI (based on monthly performance, calibrated):")
