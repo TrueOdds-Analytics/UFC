@@ -186,9 +186,33 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
         if predicted_winner == true_winner:
             correct_confident_predictions += 1
 
+        def calculate_average_odds(open_odds, close_odds):
+            # Convert American odds to decimal
+            def american_to_decimal(odds):
+                return (odds / 100) + 1 if odds > 0 else (100 / abs(odds)) + 1
+
+            # Calculate average decimal odds
+            avg_decimal = (american_to_decimal(open_odds) + american_to_decimal(close_odds)) / 2
+
+            # Convert back to American odds
+            if avg_decimal > 2:
+                return round((avg_decimal - 1) * 100)
+            else:
+                return round(-100 / (avg_decimal - 1))
+
         if winning_probability >= confidence_threshold and models_agreeing >= (5 if use_ensemble else 1):
-            odds = row['current_fight_closing_range_end'] if predicted_winner == row['fighter_a'] else row[
-                'current_fight_closing_range_end_b']
+            if predicted_winner == row['fighter_a']:
+                open_odds = row['current_fight_open_odds']
+                close_odds = row['current_fight_closing_odds']
+            else:
+                open_odds = row['current_fight_open_odds_b']
+                close_odds = row['current_fight_closing_odds_b']
+
+            odds = calculate_average_odds(open_odds, close_odds)
+
+            # if winning_probability >= confidence_threshold and models_agreeing >= (5 if use_ensemble else 1):
+            #     odds = row['current_fight_closing_odds'] if predicted_winner == row['fighter_a'] else row[
+            #         'current_fight_closing_odds_b']
 
             if odds < min_odds:
                 continue
@@ -492,6 +516,7 @@ def main(manual_threshold, use_calibration=True,
     display_data = test_data[display_columns]
     test_data_with_display = pd.concat([X_test, display_data], axis=1)
 
+    # Open odds
     model_files = [
         'model_0.6526_auc_diff_0.0720.json',
         'model_0.6526_auc_diff_0.0786.json',
@@ -500,14 +525,22 @@ def main(manual_threshold, use_calibration=True,
         'model_0.6677_auc_diff_0.0637.json'
     ]
 
+    # Closed odds
+    # model_files = [
+    #     'model_0.6677_auc_diff_0.0988.json',
+    #     'model_0.6616_auc_diff_0.0996.json',
+    #     'model_0.6677_auc_diff_0.0992.json',
+    #     'model_0.6616_auc_diff_0.0975.json',
+    #     'model_0.6616_auc_diff_0.0993.json'
+    # ]
     models = []
     if use_ensemble:
         for model_file in model_files:
-            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 matchup/{model_file}')
+            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 open/{model_file}')
             model = load_model(model_path, 'xgboost')
             models.append(model)
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 matchup/{model_files[0]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 open/{model_files[4]}')
         model = load_model(model_path, 'xgboost')
         models.append(model)
 
@@ -586,7 +619,7 @@ def main(manual_threshold, use_calibration=True,
 
 
 if __name__ == "__main__":
-    main(manual_threshold=0.50,
-         use_calibration=True, initial_bankroll=10000, kelly_fraction=1.00,
-         fixed_bet_fraction=0.1, max_bet_percentage=0.20, min_odds=-500,
+    main(manual_threshold=0.5,
+         use_calibration=True, initial_bankroll=10000, kelly_fraction=1.0,
+         fixed_bet_fraction=0.1, max_bet_percentage=0.1, min_odds=-500,
          use_ensemble=True)

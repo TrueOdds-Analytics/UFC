@@ -284,7 +284,7 @@ if __name__ == "__main__":
     }
 
     output_dir = 'data/matchup data'
-    model_dir = 'models/xgboost/jan2024-july2024/125 matchup'
+    model_dir = 'models/xgboost/jan2024-july2024/125 open'
     val_data_path = 'data/train test data/val_data.csv'
 
     matchup_df = specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, output_dir=output_dir)
