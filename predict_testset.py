@@ -210,12 +210,12 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
             odds = calculate_average_odds(open_odds, close_odds)
 
-            # if winning_probability >= confidence_threshold and models_agreeing >= (5 if use_ensemble else 1):
-            #     odds = row['current_fight_closing_odds'] if predicted_winner == row['fighter_a'] else row[
-            #         'current_fight_closing_odds_b']
-
-            if odds < min_odds:
-                continue
+        # if winning_probability >= confidence_threshold and models_agreeing >= (5 if use_ensemble else 1):
+        #     odds = row['current_fight_closing_odds'] if predicted_winner == row['fighter_a'] else row[
+        #         'current_fight_closing_odds_b']
+        #
+        #     if odds < min_odds:
+        #         continue
 
             available_fixed_bankroll = fixed_bankroll - daily_fixed_stakes[current_date]
             available_kelly_bankroll = kelly_bankroll - daily_kelly_stakes[current_date]
@@ -620,6 +620,6 @@ def main(manual_threshold, use_calibration=True,
 
 if __name__ == "__main__":
     main(manual_threshold=0.5,
-         use_calibration=True, initial_bankroll=10000, kelly_fraction=1.0,
-         fixed_bet_fraction=0.1, max_bet_percentage=0.1, min_odds=-500,
+         use_calibration=True, initial_bankroll=10000, kelly_fraction=0.5,
+         fixed_bet_fraction=0.1, max_bet_percentage=1.0, min_odds=-500,
          use_ensemble=True)
