@@ -223,10 +223,10 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.66 and (auc_diff < 0.10):
+    if accuracy > 0.65 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
-        model_filename = f'models/xgboost/jan2024-july2024/125 closing/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
+        model_filename = f'models/xgboost/jan2024-july2024/baseline/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
@@ -280,8 +280,8 @@ if __name__ == "__main__":
     print("Starting initial optimization and evaluation...")
     try:
         # Original training code
-        # study = optimize_model(X_train, X_val, y_train, y_val, 1, 1000)
-        # best_trials = study.best_trials
+        study = optimize_model(X_train, X_val, y_train, y_val, 1, 1000)
+        best_trials = study.best_trials
 
         model_filename = f'models/xgboost/jan2024-july2024/baseline/model_0.6798_auc_diff_0.0845.json'
         print("Creating SHAP graph for the best model")

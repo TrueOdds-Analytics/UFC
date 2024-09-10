@@ -114,9 +114,21 @@ def print_fight_results(confident_bets):
         console.print()
 
 
+def calculate_average_odds(open_odds, close_odds):
+    def american_to_decimal(odds):
+        return (odds / 100) + 1 if odds > 0 else (100 / abs(odds)) + 1
+
+    avg_decimal = (american_to_decimal(open_odds) + american_to_decimal(close_odds)) / 2
+
+    if avg_decimal > 2:
+        return round((avg_decimal - 1) * 100)
+    else:
+        return round(-100 / (avg_decimal - 1))
+
+
 def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, initial_bankroll=10000,
                   kelly_fraction=0.125, fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300, print_fights=True,
-                  max_bet_percentage=0.20, use_ensemble=True):
+                  max_bet_percentage=0.20, use_ensemble=True, odds_type='average'):
     fixed_bankroll = initial_bankroll
     kelly_bankroll = initial_bankroll
     fixed_total_volume = 0
@@ -186,20 +198,6 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
         if predicted_winner == true_winner:
             correct_confident_predictions += 1
 
-        def calculate_average_odds(open_odds, close_odds):
-            # Convert American odds to decimal
-            def american_to_decimal(odds):
-                return (odds / 100) + 1 if odds > 0 else (100 / abs(odds)) + 1
-
-            # Calculate average decimal odds
-            avg_decimal = (american_to_decimal(open_odds) + american_to_decimal(close_odds)) / 2
-
-            # Convert back to American odds
-            if avg_decimal > 2:
-                return round((avg_decimal - 1) * 100)
-            else:
-                return round(-100 / (avg_decimal - 1))
-
         if winning_probability >= confidence_threshold and models_agreeing >= (5 if use_ensemble else 1):
             if predicted_winner == row['fighter_a']:
                 open_odds = row['current_fight_open_odds']
@@ -208,14 +206,15 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
                 open_odds = row['current_fight_open_odds_b']
                 close_odds = row['current_fight_closing_odds_b']
 
-            odds = calculate_average_odds(open_odds, close_odds)
+            if odds_type == 'open':
+                odds = open_odds
+            elif odds_type == 'close':
+                odds = close_odds
+            else:  # 'average'
+                odds = calculate_average_odds(open_odds, close_odds)
 
-        # if winning_probability >= confidence_threshold and models_agreeing >= (5 if use_ensemble else 1):
-        #     odds = row['current_fight_closing_odds'] if predicted_winner == row['fighter_a'] else row[
-        #         'current_fight_closing_odds_b']
-        #
-        #     if odds < min_odds:
-        #         continue
+            if odds < min_odds:
+                continue
 
             available_fixed_bankroll = fixed_bankroll - daily_fixed_stakes[current_date]
             available_kelly_bankroll = kelly_bankroll - daily_kelly_stakes[current_date]
@@ -492,62 +491,52 @@ def print_overall_metrics(y_test, y_pred, y_pred_proba):
 
 def main(manual_threshold, use_calibration=True,
          initial_bankroll=10000, kelly_fraction=1.0, fixed_bet_fraction=0.1,
-         max_bet_percentage=0.25, min_odds=-300, use_ensemble=True):
+         max_bet_percentage=0.25, min_odds=-300, use_ensemble=True, odds_type='average'):
+    # Redirect stdout to capture output
     old_stdout = sys.stdout
     sys.stdout = mystdout = StringIO()
 
+    # Set constants
     INITIAL_BANKROLL = initial_bankroll
     KELLY_FRACTION = kelly_fraction
     FIXED_BET_FRACTION = fixed_bet_fraction
     MAX_BET_PERCENTAGE = max_bet_percentage
 
+    # Load and preprocess data
     val_data = pd.read_csv('data/train test data/val_data.csv')
     test_data = pd.read_csv('data/train test data/test_data.csv')
 
     display_columns = ['current_fight_date', 'fighter_a', 'fighter_b']
-    y_val = val_data['winner']
-    y_test = test_data['winner']
-    X_val = val_data.drop(['winner'] + display_columns, axis=1)
-    X_test = test_data.drop(['winner'] + display_columns, axis=1)
+    y_val, y_test = val_data['winner'], test_data['winner']
+    X_val = preprocess_data(val_data.drop(['winner'] + display_columns, axis=1))
+    X_test = preprocess_data(test_data.drop(['winner'] + display_columns, axis=1))
 
-    X_val = preprocess_data(X_val)
-    X_test = preprocess_data(X_test)
+    test_data_with_display = pd.concat([X_test, test_data[display_columns]], axis=1)
 
-    display_data = test_data[display_columns]
-    test_data_with_display = pd.concat([X_test, display_data], axis=1)
-
-    # Open odds
+    # Load models
     model_files = [
-        'model_0.6526_auc_diff_0.0720.json',
-        'model_0.6526_auc_diff_0.0786.json',
-        'model_0.6526_auc_diff_0.0965.json',
-        'model_0.6556_auc_diff_0.0795.json',
-        'model_0.6677_auc_diff_0.0637.json'
+        'model_0.6526_auc_diff_0.0995.json',
+        'model_0.6556_auc_diff_0.0621.json',
+        'model_0.6526_auc_diff_0.0390.json',
+        'model_0.6586_auc_diff_0.0832.json',
+        'model_0.6526_auc_diff_0.0938.json'
     ]
 
-    # Closed odds
-    # model_files = [
-    #     'model_0.6677_auc_diff_0.0988.json',
-    #     'model_0.6616_auc_diff_0.0996.json',
-    #     'model_0.6677_auc_diff_0.0992.json',
-    #     'model_0.6616_auc_diff_0.0975.json',
-    #     'model_0.6616_auc_diff_0.0993.json'
-    # ]
     models = []
     if use_ensemble:
         for model_file in model_files:
-            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 open/{model_file}')
-            model = load_model(model_path, 'xgboost')
-            models.append(model)
+            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/baseline/{model_file}')
+            models.append(load_model(model_path, 'xgboost'))
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 open/{model_files[4]}')
-        model = load_model(model_path, 'xgboost')
-        models.append(model)
+        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/baseline/{model_files[0]}')
+        models.append(load_model(model_path, 'xgboost'))
 
+    # Ensure consistent feature ordering
     expected_features = models[0].get_booster().feature_names
     X_val = X_val.reindex(columns=expected_features)
     X_test = X_test.reindex(columns=expected_features)
 
+    # Generate predictions
     y_pred_proba_list = []
     for model in models:
         if use_calibration:
@@ -558,29 +547,33 @@ def main(manual_threshold, use_calibration=True,
             y_pred_proba = model.predict_proba(X_test)
         y_pred_proba_list.append(y_pred_proba)
 
-    best_threshold = manual_threshold
-
-    bet_results = evaluate_bets(y_test, y_pred_proba_list, test_data_with_display, best_threshold, INITIAL_BANKROLL,
-                                KELLY_FRACTION, FIXED_BET_FRACTION, default_bet=0.00, print_fights=True,
-                                max_bet_percentage=MAX_BET_PERCENTAGE, min_odds=min_odds, use_ensemble=use_ensemble)
+    # Evaluate bets
+    bet_results = evaluate_bets(
+        y_test, y_pred_proba_list, test_data_with_display, manual_threshold,
+        INITIAL_BANKROLL, KELLY_FRACTION, FIXED_BET_FRACTION,
+        default_bet=0.00, print_fights=True, max_bet_percentage=MAX_BET_PERCENTAGE,
+        min_odds=min_odds, use_ensemble=use_ensemble, odds_type=odds_type
+    )
 
     (fixed_final_bankroll, fixed_total_volume, fixed_correct_bets, fixed_total_bets,
      kelly_final_bankroll, kelly_total_volume, kelly_correct_bets, kelly_total_bets,
      confident_predictions, correct_confident_predictions,
      daily_fixed_bankrolls, daily_kelly_bankrolls) = bet_results
 
+    # Calculate ROI
     earliest_fight_date = test_data['current_fight_date'].min()
-
-    # Calculate and print daily ROI
     daily_fixed_roi = calculate_daily_roi(daily_fixed_bankrolls, INITIAL_BANKROLL)
     daily_kelly_roi = calculate_daily_roi(daily_kelly_bankrolls, INITIAL_BANKROLL)
     print_daily_roi(daily_fixed_roi, daily_kelly_roi)
 
-    fixed_monthly_roi, fixed_monthly_profit, fixed_total_roi = calculate_monthly_roi(daily_fixed_bankrolls,
-                                                                                     INITIAL_BANKROLL, False)
-    kelly_monthly_roi, kelly_monthly_profit, kelly_total_roi = calculate_monthly_roi(daily_kelly_bankrolls,
-                                                                                     INITIAL_BANKROLL, True)
+    fixed_monthly_roi, fixed_monthly_profit, fixed_total_roi = calculate_monthly_roi(
+        daily_fixed_bankrolls, INITIAL_BANKROLL, False
+    )
+    kelly_monthly_roi, kelly_monthly_profit, kelly_total_roi = calculate_monthly_roi(
+        daily_kelly_bankrolls, INITIAL_BANKROLL, True
+    )
 
+    # Print results
     console = Console()
     console.print("\nMonthly ROI (based on monthly performance, calibrated):")
     table = Table()
@@ -596,22 +589,26 @@ def main(manual_threshold, use_calibration=True,
     table.add_row("Total", f"{fixed_total_roi:.2f}%", f"{kelly_total_roi:.2f}%")
     console.print(table)
 
-    print_betting_results(len(test_data), confident_predictions, correct_confident_predictions,
-                          fixed_total_bets, fixed_correct_bets, INITIAL_BANKROLL, fixed_final_bankroll,
-                          fixed_total_volume, best_threshold, kelly_final_bankroll, kelly_total_volume,
-                          kelly_correct_bets, kelly_total_bets, KELLY_FRACTION, FIXED_BET_FRACTION,
-                          earliest_fight_date, fixed_monthly_profit, kelly_monthly_profit)
+    print_betting_results(
+        len(test_data), confident_predictions, correct_confident_predictions,
+        fixed_total_bets, fixed_correct_bets, INITIAL_BANKROLL, fixed_final_bankroll,
+        fixed_total_volume, manual_threshold, kelly_final_bankroll, kelly_total_volume,
+        kelly_correct_bets, kelly_total_bets, KELLY_FRACTION, FIXED_BET_FRACTION,
+        earliest_fight_date, fixed_monthly_profit, kelly_monthly_profit
+    )
 
+    # Calculate and print overall metrics
     y_pred_avg = np.mean([y_pred_proba[:, 1] for y_pred_proba in y_pred_proba_list], axis=0)
     y_pred = (y_pred_avg > 0.5).astype(int)
     print_overall_metrics(y_test, y_pred, np.column_stack((1 - y_pred_avg, y_pred_avg)))
 
+    # Restore stdout and print final output
     sys.stdout = old_stdout
     output = mystdout.getvalue()
     console = Console(width=93)
     main_panel = Panel(
         output,
-        title="Past Fight Testing",
+        title=f"Past Fight Testing (Odds Type: {odds_type.capitalize()})",
         border_style="bold magenta",
         expand=True,
     )
@@ -620,6 +617,11 @@ def main(manual_threshold, use_calibration=True,
 
 if __name__ == "__main__":
     main(manual_threshold=0.5,
-         use_calibration=True, initial_bankroll=10000, kelly_fraction=0.5,
-         fixed_bet_fraction=0.1, max_bet_percentage=1.0, min_odds=-500,
-         use_ensemble=True)
+         use_calibration=True,
+         initial_bankroll=10000,
+         kelly_fraction=0.5,
+         fixed_bet_fraction=0.1,
+         max_bet_percentage=1.0,
+         min_odds=-500,
+         use_ensemble=True,
+         odds_type='average')  # Options: 'open', 'close', 'average'
