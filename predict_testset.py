@@ -515,11 +515,11 @@ def main(manual_threshold, use_calibration=True,
 
     # Load models
     model_files = [
-        'model_0.6526_auc_diff_0.0995.json',
-        'model_0.6556_auc_diff_0.0621.json',
-        'model_0.6526_auc_diff_0.0390.json',
-        'model_0.6586_auc_diff_0.0832.json',
-        'model_0.6526_auc_diff_0.0938.json'
+        'model_0.6526_auc_diff_0.0782.json',
+        'model_0.6677_auc_diff_0.0793.json',
+        'model_0.6556_auc_diff_0.0575.json',
+        'model_0.6647_auc_diff_0.0648.json',
+        'model_0.6677_auc_diff_0.0883.json'
     ]
 
     models = []
@@ -623,5 +623,5 @@ if __name__ == "__main__":
          fixed_bet_fraction=0.1,
          max_bet_percentage=1.0,
          min_odds=-500,
-         use_ensemble=True,
+         use_ensemble=False,
          odds_type='average')  # Options: 'open', 'close', 'average'

@@ -40,7 +40,8 @@ def get_train_val_data(open_odds):
     val_data = val_data.drop(['winner'], axis=1)
     if open_odds:
         columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date', 'current_fight_closing_odds',
-                           'current_fight_closing_odds_b', 'current_fight_closing_odds_ratio']
+                           'current_fight_closing_odds_b', 'current_fight_closing_odds_ratio',
+                           'current_fight_closing_odds_diff']
     else:
         columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date']
 
@@ -276,14 +277,14 @@ if __name__ == "__main__":
     input_thread = threading.Thread(target=user_input_thread, daemon=True)
     input_thread.start()
 
-    X_train, X_val, y_train, y_val = get_train_val_data(False)
+    X_train, X_val, y_train, y_val = get_train_val_data(open_odds=True)
     print("Starting initial optimization and evaluation...")
     try:
         # Original training code
-        study = optimize_model(X_train, X_val, y_train, y_val, 1, 1000)
+        study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
         best_trials = study.best_trials
 
-        model_filename = f'models/xgboost/jan2024-july2024/baseline/model_0.6798_auc_diff_0.0845.json'
+        model_filename = f'models/xgboost/jan2024-july2024/baseline/model_0.6556_auc_diff_0.0863.json'
         print("Creating SHAP graph for the best model")
         create_shap_graph(model_filename, X_train)
         print("SHAP graph creation completed.")
