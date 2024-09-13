@@ -515,20 +515,20 @@ def main(manual_threshold, use_calibration=True,
 
     # Load models
     model_files = [
-        'model_0.6526_auc_diff_0.0782.json',
-        'model_0.6677_auc_diff_0.0793.json',
-        'model_0.6556_auc_diff_0.0575.json',
-        'model_0.6647_auc_diff_0.0648.json',
-        'model_0.6677_auc_diff_0.0883.json'
+        'model_0.6616_auc_diff_0.0917.json',
+        'model_0.6586_auc_diff_0.0906.json',
+        'model_0.6586_auc_diff_0.0975.json',
+        'model_0.6526_auc_diff_0.0951.json',
+        'model_0.6556_auc_diff_0.0846.json'
     ]
 
     models = []
     if use_ensemble:
         for model_file in model_files:
-            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/baseline/{model_file}')
+            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 closed/{model_file}')
             models.append(load_model(model_path, 'xgboost'))
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/baseline/{model_files[0]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 closed/{model_files[4]}')
         models.append(load_model(model_path, 'xgboost'))
 
     # Ensure consistent feature ordering
@@ -623,5 +623,5 @@ if __name__ == "__main__":
          fixed_bet_fraction=0.1,
          max_bet_percentage=1.0,
          min_odds=-500,
-         use_ensemble=False,
-         odds_type='average')  # Options: 'open', 'close', 'average'
+         use_ensemble=True,
+         odds_type='close')  # Options: 'open', 'close', 'average'

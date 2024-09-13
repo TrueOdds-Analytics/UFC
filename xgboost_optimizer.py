@@ -227,7 +227,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     if accuracy > 0.65 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
-        model_filename = f'models/xgboost/jan2024-july2024/baseline/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
+        model_filename = f'models/xgboost/jan2024-july2024/125 closed/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
@@ -277,14 +277,14 @@ if __name__ == "__main__":
     input_thread = threading.Thread(target=user_input_thread, daemon=True)
     input_thread.start()
 
-    X_train, X_val, y_train, y_val = get_train_val_data(open_odds=True)
+    X_train, X_val, y_train, y_val = get_train_val_data(open_odds=False)
     print("Starting initial optimization and evaluation...")
     try:
         # Original training code
-        study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
-        best_trials = study.best_trials
+        # study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
+        # best_trials = study.best_trials
 
-        model_filename = f'models/xgboost/jan2024-july2024/baseline/model_0.6556_auc_diff_0.0863.json'
+        model_filename = f'models/xgboost/jan2024-july2024/baseline closed/model_0.6586_auc_diff_0.0948.json'
         print("Creating SHAP graph for the best model")
         create_shap_graph(model_filename, X_train)
         print("SHAP graph creation completed.")
