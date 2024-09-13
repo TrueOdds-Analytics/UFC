@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-from datetime import timedelta
 
 
 def get_opponent(fighter, fight_id, ufc_stats):
