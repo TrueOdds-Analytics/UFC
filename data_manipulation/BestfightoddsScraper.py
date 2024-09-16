@@ -2,20 +2,34 @@ import re
 import time
 import random
 import pandas as pd
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.options import Options  # For headless option if needed
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from datetime import datetime
 
 class BestFightOddsScraperSelenium:
-    def __init__(self, fighters):
+    def __init__(self, fighters, existing_odds_df=None):
         self.fighters = fighters
         self.driver = self.initialize_driver()
+        if existing_odds_df is not None and not existing_odds_df.empty:
+            self.existing_data = existing_odds_df
+            # Ensure 'Event' and 'Matchup' are strings
+            self.existing_data['Event'] = self.existing_data['Event'].astype(str)
+            self.existing_data['Matchup'] = self.existing_data['Matchup'].astype(str)
+            self.existing_matchups = set(zip(self.existing_data['Event'], self.existing_data['Matchup']))
+        else:
+            self.existing_data = pd.DataFrame()
+            self.existing_matchups = set()
 
     def initialize_driver(self):
-        driver = webdriver.Chrome()
+        # Optionally, run in headless mode
+        options = Options()
+        # options.add_argument('--headless')  # Uncomment to run in headless mode
+        driver = webdriver.Chrome(options=options)
         return driver
 
     @staticmethod
@@ -58,6 +72,18 @@ class BestFightOddsScraperSelenium:
                         continue
 
                     try:
+                        event_cell = row.find_element(By.XPATH, ".//td[@class='item-non-mobile'][1]")
+                        event = event_cell.find_element(By.XPATH, ".//a").text
+                    except NoSuchElementException:
+                        event = ""
+
+                    # Check if this event and matchup have already been scraped
+                    if (event, matchup) in self.existing_matchups:
+                        print(f"Skipping already scraped event: {event}, matchup: {matchup}")
+                        continue
+
+                    # Proceed with scraping
+                    try:
                         open_odds = row.find_element(By.XPATH, ".//td[@class='moneyline']/span").text
                     except NoSuchElementException:
                         open_odds = ""
@@ -70,23 +96,14 @@ class BestFightOddsScraperSelenium:
 
                     try:
                         movement = row.find_element(By.XPATH, ".//td[@class='change-cell']/span").text
-                        print(f"Raw movement: {movement}")
                         movement = self.clean_movement(movement)
-                        print(f"Cleaned movement: {movement}")
                     except NoSuchElementException:
                         movement = None
-
-                    try:
-                        event_cell = row.find_element(By.XPATH, ".//td[@class='item-non-mobile'][1]")
-                        event = event_cell.find_element(By.XPATH, ".//a").text
-                    except NoSuchElementException:
-                        event = ""
 
                     try:
                         date_cell = row.find_element(By.XPATH,
                                                      ".//td[@class='item-non-mobile'][@style='padding-left: 20px; color: #767676']")
                         date = date_cell.text.strip()
-                        print(f"Extracted date: {date}")
                     except NoSuchElementException:
                         date = ""
 
@@ -180,15 +197,30 @@ if __name__ == "__main__":
     combined_rounds_df = pd.read_csv("../data/combined_rounds.csv")
     fighters = combined_rounds_df["fighter"].unique().tolist()
     fighters = list(set(fighters))
-    scraper = BestFightOddsScraperSelenium(fighters)
+
+    existing_odds_file = "../data/odds data/fight_odds.csv"
+    if os.path.exists(existing_odds_file):
+        existing_odds_df = pd.read_csv(existing_odds_file)
+    else:
+        existing_odds_df = pd.DataFrame()
+
+    scraper = BestFightOddsScraperSelenium(fighters, existing_odds_df)
     odds_df = scraper.scrape()
-    odds_df.to_csv("../data/odds data/fight_odds.csv", index=False)
-    print(odds_df)
+
+    if not existing_odds_df.empty:
+        combined_odds_df = pd.concat([existing_odds_df, odds_df], ignore_index=True)
+    else:
+        combined_odds_df = odds_df
+
+    # Remove duplicates if any
+    combined_odds_df = combined_odds_df.drop_duplicates(subset=['Event', 'Matchup'], keep='first')
+
+    combined_odds_df.to_csv(existing_odds_file, index=False)
+    print(combined_odds_df)
 
     # Clean the fight odds data
-    input_file = "../data/odds data/fight_odds.csv"
+    input_file = existing_odds_file
     output_file = "../data/odds data/cleaned_fight_odds.csv"
     cleaned_odds_df = clean_fight_odds_from_csv(input_file, output_file)
 
     print(cleaned_odds_df)
-
