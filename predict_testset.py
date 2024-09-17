@@ -504,7 +504,7 @@ def main(manual_threshold, use_calibration=True,
 
     # Load and preprocess data
     val_data = pd.read_csv('data/train test data/val_data.csv')
-    test_data = pd.read_csv('data/train test data/test_data.csv')
+    test_data = pd.read_csv('data/train test data/test_data prime.csv')
 
     display_columns = ['current_fight_date', 'fighter_a', 'fighter_b']
     y_val, y_test = val_data['winner'], test_data['winner']
@@ -621,7 +621,7 @@ if __name__ == "__main__":
          initial_bankroll=10000,
          kelly_fraction=0.5,
          fixed_bet_fraction=0.1,
-         max_bet_percentage=1.0,
+         max_bet_percentage=0.10,
          min_odds=-500,
          use_ensemble=True,
          odds_type='close')  # Options: 'open', 'close', 'average'
