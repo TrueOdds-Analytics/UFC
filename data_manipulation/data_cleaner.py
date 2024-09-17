@@ -407,7 +407,7 @@ def create_matchup_data(file_path, tester, name):
             current_fight_odds_diff = odds_a - odds_b
             current_fight_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
         else:
-            current_fight_odds = [-110, -110]
+            current_fight_odds = [-111, -111]
             current_fight_odds_diff = 0
             current_fight_odds_ratio = 1
 
@@ -429,7 +429,7 @@ def create_matchup_data(file_path, tester, name):
             current_fight_closing_odds_diff = odds_a - odds_b
             current_fight_closing_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
         else:
-            current_fight_closing_odds = [-110, -110]
+            current_fight_closing_odds = [-111, -111]
             current_fight_closing_odds_diff = 0
             current_fight_closing_odds_ratio = 1
 
