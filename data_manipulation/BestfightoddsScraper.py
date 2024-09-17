@@ -78,51 +78,58 @@ class BestFightOddsScraperSelenium:
                     )
                     search_button.click()
 
-                    # Wait for the search results table to be present
-                    try:
-                        search_results = WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located(
-                                (By.XPATH, "//table[@class='content-list']")
-                            )
-                        )
-                    except TimeoutException:
-                        print(
-                            f"No search results found for fighter '{fighter}' on attempt {attempt}."
-                        )
-                        continue  # Try again
+                    time.sleep(2)  # Small delay to allow page to load
 
-                    # Find all fighter links
-                    fighter_links = search_results.find_elements(
-                        By.XPATH, ".//a[contains(@href, '/fighters/')]"
-                    )
-                    fighter_found = False
-                    for link in fighter_links:
-                        link_text = link.text.strip()
-                        similarity = ratio(link_text.lower(), fighter.lower())
-                        if similarity >= similarity_threshold:
-                            print(f"Found match: '{link_text}' with similarity {similarity}")
-                            link.click()
-                            fighter_found = True
-                            break
-                    if not fighter_found:
-                        print(
-                            f"Fighter '{fighter}' not found in search results on attempt {attempt}."
-                        )
-                        continue  # Try again
-
-                    # Wait for the odds table to be present
+                    # Check if we're on the fighter's page directly
                     try:
-                        odds_table = WebDriverWait(self.driver, 10).until(
+                        # Attempt to locate the odds table directly
+                        odds_table = WebDriverWait(self.driver, 5).until(
                             EC.presence_of_element_located(
                                 (By.XPATH, "//table[@class='team-stats-table']")
                             )
                         )
+                        print(f"Directly navigated to fighter page for '{fighter}'")
+                        # Proceed to scrape the odds table
                     except TimeoutException:
-                        print(
-                            f"No odds table found for fighter '{fighter}' on attempt {attempt}."
-                        )
-                        continue  # Try again
+                        # If odds table not found, check for search results
+                        try:
+                            search_results = WebDriverWait(self.driver, 5).until(
+                                EC.presence_of_element_located(
+                                    (By.XPATH, "//table[@class='content-list']")
+                                )
+                            )
+                            # We're on the search results page
+                            fighter_links = search_results.find_elements(
+                                By.XPATH, ".//a[contains(@href, '/fighters/')]"
+                            )
+                            fighter_found = False
+                            for link in fighter_links:
+                                link_text = link.text.strip()
+                                similarity = ratio(link_text.lower(), fighter.lower())
+                                if similarity >= similarity_threshold:
+                                    print(f"Found match: '{link_text}' with similarity {similarity}")
+                                    link.click()
+                                    fighter_found = True
+                                    break
+                            if not fighter_found:
+                                print(
+                                    f"Fighter '{fighter}' not found in search results on attempt {attempt}."
+                                )
+                                continue  # Try again
 
+                            # Wait for the odds table on fighter's page
+                            odds_table = WebDriverWait(self.driver, 10).until(
+                                EC.presence_of_element_located(
+                                    (By.XPATH, "//table[@class='team-stats-table']")
+                                )
+                            )
+                        except TimeoutException:
+                            print(
+                                f"No search results or fighter page found for '{fighter}' on attempt {attempt}."
+                            )
+                            continue  # Try again
+
+                    # Now, odds_table should be available
                     rows = odds_table.find_elements(By.XPATH, ".//tr")
                     for row in rows[1:]:
                         try:
@@ -213,19 +220,14 @@ class BestFightOddsScraperSelenium:
 
     @staticmethod
     def parse_custom_date(date_string):
+        if pd.isna(date_string):
+            return pd.NaT
+        date_string = str(date_string)
+        date_string = date_string.replace('th', '').replace('st', '').replace('nd', '').replace('rd', '')
         try:
             return datetime.strptime(date_string, '%b %d %Y')
         except ValueError:
-            try:
-                return datetime.strptime(
-                    date_string.replace('th', '')
-                    .replace('st', '')
-                    .replace('nd', '')
-                    .replace('rd', ''),
-                    '%b %d %Y',
-                )
-            except ValueError:
-                return pd.NaT
+            return pd.NaT
 
     @staticmethod
     def clean_fight_odds_from_csv(input_csv_path, output_csv_path):
