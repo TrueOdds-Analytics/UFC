@@ -30,7 +30,7 @@ def user_input_thread():
             break
 
 
-def get_train_val_data(open_odds):
+def get_train_val_data(odds):
     train_data = pd.read_csv('data/train test data/train_data.csv')
     val_data = pd.read_csv('data/train test data/val_data.csv')
 
@@ -38,12 +38,16 @@ def get_train_val_data(open_odds):
     val_labels = val_data['winner']
     train_data = train_data.drop(['winner'], axis=1)
     val_data = val_data.drop(['winner'], axis=1)
-    if open_odds:
+    if odds == 'open_odds':
         columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date', 'current_fight_closing_odds',
                            'current_fight_closing_odds_b', 'current_fight_closing_odds_ratio',
                            'current_fight_closing_odds_diff']
-    else:
+    elif odds == 'close_odds':
         columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date']
+    else:
+        columns_to_drop = list(train_data.columns[train_data.columns.str.contains('odd', case=False)]) + ['fighter_a',
+                                                                                                          'fighter_b',
+                                                                                                          'current_fight_date']
 
     train_data = train_data.drop(columns=columns_to_drop)
     val_data = val_data.drop(columns=columns_to_drop)
@@ -224,10 +228,10 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.65 and (auc_diff < 0.10):
+    if accuracy > 0.64 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
-        model_filename = f'models/xgboost/jan2024-july2024/125 closed/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
+        model_filename = f'models/xgboost/jan2024-july2024/no odds/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
                     auc if auc is not None else 0)
@@ -277,14 +281,14 @@ if __name__ == "__main__":
     input_thread = threading.Thread(target=user_input_thread, daemon=True)
     input_thread.start()
 
-    X_train, X_val, y_train, y_val = get_train_val_data(open_odds=False)
+    X_train, X_val, y_train, y_val = get_train_val_data(odds='no')
     print("Starting initial optimization and evaluation...")
     try:
         # Original training code
-        # study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
-        # best_trials = study.best_trials
+        study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
+        best_trials = study.best_trials
 
-        model_filename = f'models/xgboost/jan2024-july2024/baseline closed/model_0.6586_auc_diff_0.0948.json'
+        model_filename = f'models/xgboost/jan2024-july2024/no odds/model_0.6435_auc_diff_0.0398.json'
         print("Creating SHAP graph for the best model")
         create_shap_graph(model_filename, X_train)
         print("SHAP graph creation completed.")
