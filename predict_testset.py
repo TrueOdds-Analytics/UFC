@@ -125,8 +125,8 @@ def calculate_average_odds(open_odds, close_odds):
 
 
 def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, initial_bankroll=10000,
-                  kelly_fraction=0.125, fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300, print_fights=True,
-                  max_bet_percentage=0.20, use_ensemble=True, odds_type='average'):
+                  kelly_fraction=0.125, fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300, max_underdog_odds=200,
+                  print_fights=True, max_bet_percentage=0.20, use_ensemble=True, odds_type='average'):
     fixed_bankroll = initial_bankroll
     kelly_bankroll = initial_bankroll
 
@@ -152,7 +152,6 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
     current_date = None
 
-    # Initialize available bankrolls
     available_fixed_bankroll = fixed_bankroll
     available_kelly_bankroll = kelly_bankroll
 
@@ -168,22 +167,14 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
         if fight_date != current_date:
             if current_date is not None:
-                # At the end of the previous date, update the bankrolls with the profits/losses
                 fixed_bankroll += daily_fixed_profits.get(current_date, 0)
                 kelly_bankroll += daily_kelly_profits.get(current_date, 0)
-
-                # Record the bankrolls at the end of the date
                 daily_fixed_bankrolls[current_date] = fixed_bankroll
                 daily_kelly_bankrolls[current_date] = kelly_bankroll
 
-            # Start of a new date
             current_date = fight_date
-
-            # Reset available bankrolls
             available_fixed_bankroll = fixed_bankroll
             available_kelly_bankroll = kelly_bankroll
-
-            # Reset daily profits
             daily_fixed_profits[current_date] = 0
             daily_kelly_profits[current_date] = 0
 
@@ -226,14 +217,16 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             if odds < min_odds:
                 continue
 
-            # Compute maximum allowed bets based on available bankroll
+            # **Add this check for maximum underdog odds limit (+200)**
+            if odds > max_underdog_odds:
+                continue
+
             fixed_available_bankroll_before_bet = available_fixed_bankroll
             kelly_available_bankroll_before_bet = available_kelly_bankroll
 
             fixed_max_bet = fixed_available_bankroll_before_bet * max_bet_percentage
             kelly_max_bet = kelly_available_bankroll_before_bet * max_bet_percentage
 
-            # Compute fixed stake
             fixed_stake = min(fixed_available_bankroll_before_bet * fixed_bet_fraction,
                               fixed_available_bankroll_before_bet, fixed_max_bet)
 
@@ -260,7 +253,6 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
             if fixed_stake > 0:
                 fixed_total_bets += 1
-                # Reduce the available bankroll by the stake
                 available_fixed_bankroll -= fixed_stake
                 fixed_profit = calculate_profit(odds, fixed_stake)
                 fixed_total_volume += fixed_stake
@@ -281,12 +273,10 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
                     bet_result['Fixed Fraction Profit'] = -fixed_stake
 
                 bet_result['Fixed Fraction Bankroll After'] = f"${(fixed_bankroll + daily_fixed_profits[current_date]):.2f}"
-                # Calculate ROI based on available bankroll before the bet
                 bet_result['Fixed Fraction ROI'] = (bet_result['Fixed Fraction Profit'] / fixed_available_bankroll_before_bet) * 100
 
             if kelly_stake > 0:
                 kelly_total_bets += 1
-                # Reduce the available bankroll by the stake
                 available_kelly_bankroll -= kelly_stake
                 kelly_profit = calculate_profit(odds, kelly_stake)
                 kelly_total_volume += kelly_stake
@@ -307,18 +297,14 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
                     bet_result['Kelly Profit'] = -kelly_stake
 
                 bet_result['Kelly Bankroll After'] = f"${(kelly_bankroll + daily_kelly_profits[current_date]):.2f}"
-                # Calculate ROI based on available bankroll before the bet
                 bet_result['Kelly ROI'] = (bet_result['Kelly Profit'] / kelly_available_bankroll_before_bet) * 100
 
             confident_bets.append(bet_result)
 
     # Handle the last date
     if current_date is not None:
-        # Update bankrolls with profits/losses from the last date
         fixed_bankroll += daily_fixed_profits.get(current_date, 0)
         kelly_bankroll += daily_kelly_profits.get(current_date, 0)
-
-        # Record the final bankrolls
         daily_fixed_bankrolls[current_date] = fixed_bankroll
         daily_kelly_bankrolls[current_date] = kelly_bankroll
 
@@ -329,6 +315,7 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             kelly_bankroll, kelly_total_volume, kelly_correct_bets, kelly_total_bets,
             confident_predictions, correct_confident_predictions,
             daily_fixed_bankrolls, daily_kelly_bankrolls)
+
 
 
 def calculate_daily_roi(daily_bankrolls, initial_bankroll):
@@ -534,7 +521,7 @@ def main(manual_threshold, use_calibration=True,
 
     test_data_with_display = pd.concat([X_test, test_data[display_columns]], axis=1)
 
-    # Load models
+    # With odds
     model_files = [
         'model_0.6616_auc_diff_0.0917.json',
         'model_0.6586_auc_diff_0.0906.json',
@@ -543,13 +530,22 @@ def main(manual_threshold, use_calibration=True,
         'model_0.6556_auc_diff_0.0846.json'
     ]
 
+    # Without odds
+    # model_files = [
+    #     'model_0.6798_auc_diff_0.0686.json',
+    #     'model_0.6707_auc_diff_0.0435.json',
+    #     'model_0.6677_auc_diff_0.0639.json',
+    #     'model_0.6677_auc_diff_0.0664.json',
+    #     'model_0.6647_auc_diff_0.0600.json'
+    # ]
+
     models = []
     if use_ensemble:
         for model_file in model_files:
             model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 closed/{model_file}')
             models.append(load_model(model_path, 'xgboost'))
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 closed/{model_files[4]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 no odds/{model_files[4]}')
         models.append(load_model(model_path, 'xgboost'))
 
     # Ensure consistent feature ordering
@@ -573,7 +569,7 @@ def main(manual_threshold, use_calibration=True,
         y_test, y_pred_proba_list, test_data_with_display, manual_threshold,
         INITIAL_BANKROLL, KELLY_FRACTION, FIXED_BET_FRACTION,
         default_bet=0.00, print_fights=True, max_bet_percentage=MAX_BET_PERCENTAGE,
-        min_odds=min_odds, use_ensemble=use_ensemble, odds_type=odds_type
+        min_odds=min_odds, use_ensemble=use_ensemble, odds_type=odds_type, max_underdog_odds=200
     )
 
     (fixed_final_bankroll, fixed_total_volume, fixed_correct_bets, fixed_total_bets,
