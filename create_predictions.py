@@ -330,14 +330,14 @@ def ensemble_prediction(matchup_df, model_dir, val_data_path, use_calibration=Tr
 
 if __name__ == "__main__":
     file_path = "data/combined_sorted_fighter_stats.csv"
-    fighter_a = "kevin holland"
-    fighter_b = "roman dolidze"
+    fighter_a = "austin hubbard"
+    fighter_b = "alexander hernandez"
 
     current_fight_data = {
-        'open_odds': -163,              # Opening odds for fighter_a
-        'open_odds_b': 120,           # Opening odds for fighter_b
-        'closing_range_end': -169,      # Closing odds for fighter_a
-        'closing_range_end_b': 145,   # Closing odds for fighter_b
+        'open_odds': 170,              # Opening odds for fighter_a
+        'open_odds_b': -215,           # Opening odds for fighter_b
+        'closing_range_end': 174,      # Closing odds for fighter_a
+        'closing_range_end_b': -206,   # Closing odds for fighter_b
         'current_fight_date': '2024-10-05'
     }
 
