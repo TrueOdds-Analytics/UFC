@@ -10,7 +10,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 def combine_rounds_stats(file_path):
     print("Loading and preprocessing data...")
     ufc_stats = pd.read_csv(file_path)
-    fighter_stats = pd.read_csv('../data/general data/ufc_fighter_tott.csv')
+    fighter_stats = pd.read_csv('Fight Scraping/rough_data/ufc_fighter_tott.csv')
 
     # Preprocessing
     ufc_stats['fighter'] = ufc_stats['fighter'].astype(str).str.lower()
