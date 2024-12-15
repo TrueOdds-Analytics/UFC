@@ -187,7 +187,7 @@ if __name__ == "__main__":
     file2_path = 'rough_data/ufc_fight_results.csv'
     file3_path = 'rough_data/ufc_event_details.csv'
     output_file_path = 'rough_data/ufc_fight_merged.csv'
-    processed_file_path = 'rough_data/ufc_fight_processed.csv'
+    processed_file_path = '../../data/ufc_fight_processed.csv'
 
     # Call the function to merge the CSV files
     merge_csv_files(file1_path, file2_path, file3_path, output_file_path)
