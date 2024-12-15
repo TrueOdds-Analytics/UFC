@@ -1,30 +1,126 @@
 import os
+import numpy as np
+import pandas as pd
 import xgboost as xgb
 from sklearn.calibration import CalibratedClassifierCV
 from data_manipulation.helper import *
-
 from data_manipulation.helper import calculate_complementary_odd
 
 
 def load_and_preprocess_data(data):
+    """Convert relevant columns to categorical and perform any necessary data preprocessing."""
     category_columns = [col for col in data.columns if col.endswith(('fight_1', 'fight_2', 'fight_3'))]
     data[category_columns] = data[category_columns].astype("category")
     return data
+
+
+def calculate_fighter_stats(fighter_name, df, current_fight_date, n_past_fights):
+    """
+    Calculate various statistics for a given fighter based on their past n_past_fights.
+
+    Parameters:
+    - fighter_name: str, fighter's name
+    - df: DataFrame containing historical fight data
+    - current_fight_date: datetime, the date of the current fight
+    - n_past_fights: int, number of past fights to consider
+
+    Returns: tuple (current_age, years_of_experience, days_since_last_fight, win_streak, loss_streak)
+    """
+    fighter_all_fights = df[(df['fighter'] == fighter_name) & (df['fight_date'] < current_fight_date)] \
+        .sort_values(by='fight_date', ascending=False)
+    fighter_recent_fights = fighter_all_fights.head(n_past_fights)
+
+    if fighter_recent_fights.empty:
+        return np.nan, np.nan, np.nan, np.nan, np.nan
+
+    last_fight_date = fighter_recent_fights['fight_date'].iloc[0]
+    last_known_age = fighter_recent_fights['age'].iloc[0]
+    first_fight_date = fighter_all_fights['fight_date'].iloc[-1]
+
+    days_since_last_fight = (current_fight_date - last_fight_date).days
+    current_age = last_known_age + days_since_last_fight / 365.25
+    years_of_experience = (current_fight_date - first_fight_date).days / 365.25
+
+    win_streak = fighter_recent_fights['win_streak'].iloc[0]
+    loss_streak = fighter_recent_fights['loss_streak'].iloc[0]
+
+    most_recent_result = fighter_recent_fights['winner'].iloc[0]
+    if most_recent_result == 1:
+        win_streak += 1
+        loss_streak = 0
+    elif most_recent_result == 0:
+        loss_streak += 1
+        win_streak = 0
+
+    return current_age, years_of_experience, days_since_last_fight, win_streak, loss_streak
+
+
+def process_odds(current_fight_data):
+    """
+    Process the odds from the current fight data.
+    If only one fighter's odds are provided, calculate the complementary odd.
+    Returns: opening odds, closing odds, and their derived stats.
+    """
+    # Process open odds
+    odds_a = current_fight_data.get('open_odds', np.nan)
+    odds_b = current_fight_data.get('open_odds_b', np.nan)
+
+    if pd.notna(odds_a) and pd.notna(odds_b):
+        odds_a = round_to_nearest_1(odds_a)
+        odds_b = round_to_nearest_1(odds_b)
+    elif pd.notna(odds_a):
+        odds_a = round_to_nearest_1(odds_a)
+        odds_b = calculate_complementary_odd(odds_a)
+    elif pd.notna(odds_b):
+        odds_b = round_to_nearest_1(odds_b)
+        odds_a = calculate_complementary_odd(odds_b)
+    else:
+        # Default to -110/-110 if no odds provided
+        odds_a, odds_b = -110, -110
+
+    current_fight_odds = [odds_a, odds_b]
+    current_fight_odds_diff = odds_a - odds_b
+    current_fight_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
+
+    # Process closing odds
+    closing_odds_a = current_fight_data.get('closing_range_end', np.nan)
+    closing_odds_b = current_fight_data.get('closing_range_end_b', np.nan)
+
+    if pd.notna(closing_odds_a) and pd.notna(closing_odds_b):
+        closing_odds_a = round_to_nearest_1(closing_odds_a)
+        closing_odds_b = round_to_nearest_1(closing_odds_b)
+    elif pd.notna(closing_odds_a):
+        closing_odds_a = round_to_nearest_1(closing_odds_a)
+        closing_odds_b = calculate_complementary_odd(closing_odds_a)
+    elif pd.notna(closing_odds_b):
+        closing_odds_b = round_to_nearest_1(closing_odds_b)
+        closing_odds_a = calculate_complementary_odd(closing_odds_b)
+    else:
+        closing_odds_a, closing_odds_b = -110, -110
+
+    current_fight_closing_odds = [closing_odds_a, closing_odds_b]
+    current_fight_closing_odds_diff = closing_odds_a - closing_odds_b
+    current_fight_closing_odds_ratio = closing_odds_a / closing_odds_b if closing_odds_b != 0 else 0
+
+    return (current_fight_odds, current_fight_odds_diff, current_fight_odds_ratio,
+            current_fight_closing_odds, current_fight_closing_odds_diff, current_fight_closing_odds_ratio)
 
 
 def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past_fights=3, output_dir=''):
     df = pd.read_csv(file_path)
     df['fight_date'] = pd.to_datetime(df['fight_date'])
 
-    columns_to_exclude = ['fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
-                          'result', 'winner', 'weight_class', 'scheduled_rounds',
-                          'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']
-
+    columns_to_exclude = [
+        'fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
+        'result', 'winner', 'weight_class', 'scheduled_rounds',
+        'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b'
+    ]
     features_to_include = [col for col in df.columns if
                            col not in columns_to_exclude and col != 'age' and not col.endswith('_age')]
 
-    # Filter past fights for each fighter before the current fight date
     current_fight_date = pd.to_datetime(current_fight_data['current_fight_date'])
+
+    # Get recent fights for each fighter
     fighter_df = df[(df['fighter'].str.lower() == fighter_a.lower()) & (df['fight_date'] < current_fight_date)] \
         .sort_values(by='fight_date', ascending=False).head(n_past_fights)
     opponent_df = df[(df['fighter'].str.lower() == fighter_b.lower()) & (df['fight_date'] < current_fight_date)] \
@@ -37,121 +133,39 @@ def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past
     fighter_features = fighter_df[features_to_include].mean().values
     opponent_features = opponent_df[features_to_include].mean().values
 
-    # Get last n_past_fights results
-    results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(
-        n_past_fights).values.flatten()
-    results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
-        n_past_fights).values.flatten()
+    # Get results
+    results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']] \
+        .head(n_past_fights).values.flatten()
+    results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']] \
+        .head(n_past_fights).values.flatten()
 
     # Pad results if necessary
-    results_fighter = np.pad(results_fighter, (0, n_past_fights * 4 - len(results_fighter)), 'constant',
-                             constant_values=np.nan)
-    results_opponent = np.pad(results_opponent, (0, n_past_fights * 4 - len(results_opponent)), 'constant',
-                              constant_values=np.nan)
+    results_fighter = np.pad(results_fighter, (0, n_past_fights * 4 - len(results_fighter)),
+                             'constant', constant_values=np.nan)
+    results_opponent = np.pad(results_opponent, (0, n_past_fights * 4 - len(results_opponent)),
+                              'constant', constant_values=np.nan)
 
-    # Process open odds
-    odds_a = current_fight_data.get('open_odds', np.nan)
-    odds_b = current_fight_data.get('open_odds_b', np.nan)
+    # Process odds
+    (current_fight_odds, current_fight_odds_diff, current_fight_odds_ratio,
+     current_fight_closing_odds, current_fight_closing_odds_diff, current_fight_closing_odds_ratio) = process_odds(current_fight_data)
 
-    if pd.notna(odds_a) and pd.notna(odds_b):
-        odds_a = round_to_nearest_1(odds_a)
-        odds_b = round_to_nearest_1(odds_b)
-        current_fight_odds = [odds_a, odds_b]
-        current_fight_odds_diff = odds_a - odds_b
-        current_fight_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
-    elif pd.notna(odds_a):
-        odds_a = round_to_nearest_1(odds_a)
-        odds_b = calculate_complementary_odd(odds_a)
-        current_fight_odds = [odds_a, odds_b]
-        current_fight_odds_diff = odds_a - odds_b
-        current_fight_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
-    elif pd.notna(odds_b):
-        odds_b = round_to_nearest_1(odds_b)
-        odds_a = calculate_complementary_odd(odds_b)
-        current_fight_odds = [odds_a, odds_b]
-        current_fight_odds_diff = odds_a - odds_b
-        current_fight_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
-    else:
-        current_fight_odds = [-110, -110]
-        current_fight_odds_diff = 0
-        current_fight_odds_ratio = 1
+    # Calculate fighter stats
+    age_a, exp_a, days_a, win_streak_a, loss_streak_a = calculate_fighter_stats(fighter_a, df, current_fight_date, n_past_fights)
+    age_b, exp_b, days_b, win_streak_b, loss_streak_b = calculate_fighter_stats(fighter_b, df, current_fight_date, n_past_fights)
 
-    # Process closing odds
-    closing_odds_a = current_fight_data.get('closing_range_end', np.nan)
-    closing_odds_b = current_fight_data.get('closing_range_end_b', np.nan)
-
-    if pd.notna(closing_odds_a) and pd.notna(closing_odds_b):
-        closing_odds_a = round_to_nearest_1(closing_odds_a)
-        closing_odds_b = round_to_nearest_1(closing_odds_b)
-        current_fight_closing_odds = [closing_odds_a, closing_odds_b]
-        current_fight_closing_odds_diff = closing_odds_a - closing_odds_b
-        current_fight_closing_odds_ratio = closing_odds_a / closing_odds_b if closing_odds_b != 0 else 0
-    elif pd.notna(closing_odds_a):
-        closing_odds_a = round_to_nearest_1(closing_odds_a)
-        closing_odds_b = calculate_complementary_odd(closing_odds_a)
-        current_fight_closing_odds = [closing_odds_a, closing_odds_b]
-        current_fight_closing_odds_diff = closing_odds_a - closing_odds_b
-        current_fight_closing_odds_ratio = closing_odds_a / closing_odds_b if closing_odds_b != 0 else 0
-    elif pd.notna(closing_odds_b):
-        closing_odds_b = round_to_nearest_1(closing_odds_b)
-        closing_odds_a = calculate_complementary_odd(closing_odds_b)
-        current_fight_closing_odds = [closing_odds_a, closing_odds_b]
-        current_fight_closing_odds_diff = closing_odds_a - closing_odds_b
-        current_fight_closing_odds_ratio = closing_odds_a / closing_odds_b if closing_odds_b != 0 else 0
-    else:
-        current_fight_closing_odds = [-110, -110]
-        current_fight_closing_odds_diff = 0
-        current_fight_closing_odds_ratio = 1
-
-    # Calculate fighter stats using helper functions
-    def calculate_fighter_stats(fighter_name):
-        fighter_all_fights = df[(df['fighter'] == fighter_name) & (df['fight_date'] < current_fight_date)] \
-            .sort_values(by='fight_date', ascending=False)
-        fighter_recent_fights = fighter_all_fights.head(n_past_fights)
-
-        if fighter_recent_fights.empty:
-            return np.nan, np.nan, np.nan, np.nan, np.nan
-
-        last_fight_date = fighter_recent_fights['fight_date'].iloc[0]
-        last_known_age = fighter_recent_fights['age'].iloc[0]
-        first_fight_date = fighter_all_fights['fight_date'].iloc[-1]  # Earliest fight date
-
-        days_since_last_fight = (current_fight_date - last_fight_date).days
-        current_age = last_known_age + days_since_last_fight / 365.25
-        years_of_experience = (current_fight_date - first_fight_date).days / 365.25
-
-        win_streak = fighter_recent_fights['win_streak'].iloc[0]
-        loss_streak = fighter_recent_fights['loss_streak'].iloc[0]
-
-        most_recent_result = fighter_recent_fights['winner'].iloc[0]
-        if most_recent_result == 1:
-            win_streak += 1
-            loss_streak = 0
-        elif most_recent_result == 0:
-            loss_streak += 1
-            win_streak = 0
-
-        return current_age, years_of_experience, days_since_last_fight, win_streak, loss_streak
-
-    age_a, exp_a, days_a, win_streak_a, loss_streak_a = calculate_fighter_stats(fighter_a)
-    age_b, exp_b, days_b, win_streak_b, loss_streak_b = calculate_fighter_stats(fighter_b)
-
+    # Derived stats
     age_diff = age_a - age_b
     age_ratio = age_a / age_b if age_b != 0 else 0
-
     exp_diff = exp_a - exp_b
     exp_ratio = exp_a / exp_b if exp_b != 0 else 1
-
     days_diff = days_a - days_b
     days_ratio = days_a / days_b if days_b != 0 else 1
-
     win_streak_diff = win_streak_a - win_streak_b
     win_streak_ratio = win_streak_a / win_streak_b if win_streak_b != 0 else 1
-
     loss_streak_diff = loss_streak_a - loss_streak_b
     loss_streak_ratio = loss_streak_a / loss_streak_b if loss_streak_b != 0 else 1
 
-    # Use pre-fight ELO
+    # ELO stats
     elo_a = fighter_df['fight_outcome_elo'].iloc[0]
     elo_b = opponent_df['fight_outcome_elo'].iloc[0]
     elo_diff = elo_a - elo_b
@@ -164,6 +178,7 @@ def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past
         elo_a_win_chance, elo_b_win_chance, elo_ratio
     ]
 
+    # Build feature columns
     feature_columns = [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in features_to_include] + \
                       [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include]
 
@@ -174,11 +189,13 @@ def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past
                             f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}",
                             f"scheduled_rounds_b_fight_{i}"]
 
-    odds_age_columns = ['current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
-                        'current_fight_open_odds_ratio',
-                        'current_fight_closing_odds', 'current_fight_closing_odds_b', 'current_fight_closing_odds_diff',
-                        'current_fight_closing_odds_ratio',
-                        'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff', 'current_fight_age_ratio']
+    odds_age_columns = [
+        'current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
+        'current_fight_open_odds_ratio',
+        'current_fight_closing_odds', 'current_fight_closing_odds_b', 'current_fight_closing_odds_diff',
+        'current_fight_closing_odds_ratio',
+        'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff', 'current_fight_age_ratio'
+    ]
 
     new_columns = [
         'current_fight_pre_fight_elo_a', 'current_fight_pre_fight_elo_b', 'current_fight_pre_fight_elo_diff',
@@ -214,7 +231,6 @@ def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past
     matchup_df.insert(1, 'fighter_b', fighter_b)
     matchup_df['current_fight_date'] = current_fight_data['current_fight_date']
 
-    # Generalized column renaming
     def rename_column(col):
         if col == 'fighter':
             return 'fighter_a'
@@ -229,28 +245,23 @@ def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past
 
     matchup_df.columns = [rename_column(col) for col in matchup_df.columns]
 
-    # Create diff and ratio columns
+    # Create diff and ratio columns for features
     diff_columns = {}
     ratio_columns = {}
-
     for feature in features_to_include:
         col_a = f"{feature}_fighter_a_avg_last_{n_past_fights}"
         col_b = f"{feature}_fighter_b_avg_last_{n_past_fights}"
-
         if col_a in matchup_df.columns and col_b in matchup_df.columns:
             diff_columns[f"matchup_{feature}_diff_avg_last_{n_past_fights}"] = matchup_df[col_a] - matchup_df[col_b]
-            ratio_columns[f"matchup_{feature}_ratio_avg_last_{n_past_fights}"] = matchup_df[col_a] / matchup_df[
-                col_b].replace(0, 1)
+            ratio_columns[f"matchup_{feature}_ratio_avg_last_{n_past_fights}"] = matchup_df[col_a] / matchup_df[col_b].replace(0, 1)
 
-    # Add new columns
     matchup_df = pd.concat([matchup_df, pd.DataFrame(diff_columns), pd.DataFrame(ratio_columns)], axis=1)
 
-    # Read the test file to get the correct column order
+    # Ensure correct column order by matching test data
     test_file_path = 'data/train test data/test_data.csv'
-    test_df = pd.read_csv(test_file_path, nrows=0)  # Read only the header
+    test_df = pd.read_csv(test_file_path, nrows=0)
     correct_columns = test_df.columns.tolist()
 
-    # Ensure all columns from test data are present
     for col in correct_columns:
         if col not in matchup_df.columns:
             matchup_df[col] = np.nan
@@ -265,6 +276,9 @@ def specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, n_past
 
 
 def load_model(model_path, model_type='xgboost'):
+    """
+    Load a trained model from file.
+    """
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found: {model_path}")
     try:
@@ -280,12 +294,16 @@ def load_model(model_path, model_type='xgboost'):
 
 
 def ensemble_prediction(matchup_df, model_dir, val_data_path, use_calibration=True):
+    """
+    Generate predictions using an ensemble of models. Optionally calibrate predictions.
+    Returns the predicted winner and winning probability.
+    """
     model_files = [
-        'model_0.6616_auc_diff_0.0917.json',
-        'model_0.6586_auc_diff_0.0906.json',
-        'model_0.6586_auc_diff_0.0975.json',
-        'model_0.6526_auc_diff_0.0951.json',
-        'model_0.6556_auc_diff_0.0846.json'
+        'model_0.6506_auc_diff_0.0519.json',
+        'model_0.6506_auc_diff_0.0310.json',
+        'model_0.6506_auc_diff_0.0607.json',
+        'model_0.6608_auc_diff_0.0892.json',
+        'model_0.6633_auc_diff_0.0876.json'
     ]
 
     models = []
@@ -328,22 +346,49 @@ def ensemble_prediction(matchup_df, model_dir, val_data_path, use_calibration=Tr
     return predicted_winner, winning_probability
 
 
+def american_odds_to_decimal(odds):
+    """
+    Convert American odds to decimal odds.
+    Positive: decimal = 1 + (odds / 100)
+    Negative: decimal = 1 + (100 / |odds|)
+    """
+    if odds > 0:
+        return 1 + (odds / 100.0)
+    else:
+        return 1 + (100.0 / abs(odds))
+
+
+def calculate_kelly_fraction(probability, american_odd, fractional_kelly=1.0):
+    """
+    Calculate the Kelly fraction for a given probability and American odds.
+    Kelly formula: f = (p*(b+1)-1)/b where b = decimal_odds - 1
+    fractional_kelly scales the result (e.g. 0.5 for half Kelly).
+    If the Kelly fraction is negative, it suggests not to bet.
+    """
+    decimal_odds = american_odds_to_decimal(american_odd)
+    b = decimal_odds - 1
+    p = probability
+    f = (p * (b + 1) - 1) / b
+    return f * fractional_kelly
+
+
 if __name__ == "__main__":
     file_path = "data/combined_sorted_fighter_stats.csv"
-    fighter_a = "austin hubbard"
-    fighter_b = "alexander hernandez"
+    fighter_a = "Michael Johnson"
+    fighter_b = "Ottman Azaitar"
 
     current_fight_data = {
-        'open_odds': 170,              # Opening odds for fighter_a
-        'open_odds_b': -215,           # Opening odds for fighter_b
-        'closing_range_end': 174,      # Closing odds for fighter_a
-        'closing_range_end_b': -206,   # Closing odds for fighter_b
-        'current_fight_date': '2024-10-05'
+        'open_odds': -200,            # Opening odds for fighter_a (example)
+        'open_odds_b': 150,           # Opening odds for fighter_b (example)
+        'closing_range_end': -229,    # Closing odds for fighter_a (example)
+        'closing_range_end_b': 185,   # Closing odds for fighter_b (example)
+        'current_fight_date': '2024-12-14'
     }
 
     output_dir = 'data/matchup data'
-    model_dir = 'models/xgboost/jan2024-july2024/125 closed/'
+    model_dir = 'models/xgboost/jan2024-july2024/split/'
     val_data_path = 'data/train test data/val_data.csv'
+    fractional_kelly = 0.5  # For example, half Kelly
 
     matchup_df = specific_matchup(file_path, fighter_a, fighter_b, current_fight_data, output_dir=output_dir)
 
@@ -351,6 +396,16 @@ if __name__ == "__main__":
         predicted_winner, winning_probability = ensemble_prediction(matchup_df, model_dir, val_data_path)
         print(f"Predicted winner: {predicted_winner}")
         print(f"Winning probability: {winning_probability:.2%}")
+
+        # Determine which fighter's odds to use for Kelly calculation:
+        if predicted_winner == fighter_a:
+            kelly_fraction = calculate_kelly_fraction(winning_probability, current_fight_data['closing_range_end'], fractional_kelly)
+        else:
+            kelly_fraction = calculate_kelly_fraction(winning_probability, current_fight_data['closing_range_end_b'], fractional_kelly)
+
+        if kelly_fraction > 0:
+            print(f"Fractional Kelly bet fraction: {kelly_fraction:.2%} of bankroll")
+        else:
+            print("Kelly fraction is negative or zero, suggesting not to bet.")
     else:
         print("Could not generate matchup data.")
-
