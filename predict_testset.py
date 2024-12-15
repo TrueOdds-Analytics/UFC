@@ -57,7 +57,8 @@ def print_fight_results(confident_bets):
 
         fixed_available_bankroll_before_bet = float(bet.get('Fixed Fraction Available Bankroll', '0').replace('$', ''))
         fixed_stake = float(bet.get('Fixed Fraction Stake', '0').replace('$', ''))
-        fixed_stake_percentage = (fixed_stake / fixed_available_bankroll_before_bet) * 100 if fixed_available_bankroll_before_bet > 0 else 0
+        fixed_stake_percentage = (
+                                             fixed_stake / fixed_available_bankroll_before_bet) * 100 if fixed_available_bankroll_before_bet > 0 else 0
 
         fixed_panel = Panel(
             f"Starting Bankroll: {bet.get('Fixed Fraction Starting Bankroll', 'N/A')}\n"
@@ -75,7 +76,8 @@ def print_fight_results(confident_bets):
 
         kelly_available_bankroll_before_bet = float(bet.get('Kelly Available Bankroll', '0').replace('$', ''))
         kelly_stake = float(bet.get('Kelly Stake', '0').replace('$', ''))
-        kelly_stake_percentage = (kelly_stake / kelly_available_bankroll_before_bet) * 100 if kelly_available_bankroll_before_bet > 0 else 0
+        kelly_stake_percentage = (
+                                             kelly_stake / kelly_available_bankroll_before_bet) * 100 if kelly_available_bankroll_before_bet > 0 else 0
 
         kelly_panel = Panel(
             f"Starting Bankroll: {bet.get('Kelly Starting Bankroll', 'N/A')}\n"
@@ -125,7 +127,8 @@ def calculate_average_odds(open_odds, close_odds):
 
 
 def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, initial_bankroll=10000,
-                  kelly_fraction=0.125, fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300, max_underdog_odds=200,
+                  kelly_fraction=0.125, fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300,
+                  max_underdog_odds=200,
                   print_fights=True, max_bet_percentage=0.20, use_ensemble=True, odds_type='average'):
     fixed_bankroll = initial_bankroll
     kelly_bankroll = initial_bankroll
@@ -191,7 +194,7 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
         if use_ensemble:
             models_agreeing = sum([1 for y_pred_proba in y_pred_proba_list if
                                    (y_pred_proba[i][1] > y_pred_proba[i][0]) == (
-                                               y_pred_proba_avg[1] > y_pred_proba_avg[0])])
+                                           y_pred_proba_avg[1] > y_pred_proba_avg[0])])
         else:
             models_agreeing = 1
 
@@ -237,7 +240,8 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             kelly_stake = min(kelly_stake, kelly_available_bankroll_before_bet, kelly_max_bet)
 
             if kelly_stake <= kelly_available_bankroll_before_bet * default_bet:
-                kelly_stake = min(kelly_available_bankroll_before_bet * default_bet, kelly_available_bankroll_before_bet, kelly_max_bet)
+                kelly_stake = min(kelly_available_bankroll_before_bet * default_bet,
+                                  kelly_available_bankroll_before_bet, kelly_max_bet)
 
             bet_result = {
                 'Fight': i + 1,
@@ -272,8 +276,10 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
                     daily_fixed_profits[current_date] -= fixed_stake
                     bet_result['Fixed Fraction Profit'] = -fixed_stake
 
-                bet_result['Fixed Fraction Bankroll After'] = f"${(fixed_bankroll + daily_fixed_profits[current_date]):.2f}"
-                bet_result['Fixed Fraction ROI'] = (bet_result['Fixed Fraction Profit'] / fixed_available_bankroll_before_bet) * 100
+                bet_result[
+                    'Fixed Fraction Bankroll After'] = f"${(fixed_bankroll + daily_fixed_profits[current_date]):.2f}"
+                bet_result['Fixed Fraction ROI'] = (bet_result[
+                                                        'Fixed Fraction Profit'] / fixed_available_bankroll_before_bet) * 100
 
             if kelly_stake > 0:
                 kelly_total_bets += 1
@@ -317,7 +323,6 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
             daily_fixed_bankrolls, daily_kelly_bankrolls)
 
 
-
 def calculate_daily_roi(daily_bankrolls, initial_bankroll):
     daily_roi = {}
     previous_bankroll = initial_bankroll
@@ -344,6 +349,7 @@ def print_daily_roi(daily_fixed_roi, daily_kelly_roi):
         table.add_row(date, fixed_roi, kelly_roi)
 
     console.print(table)
+
 
 def calculate_monthly_roi(daily_bankrolls, initial_bankroll, kelly):
     monthly_roi = {}
@@ -404,6 +410,7 @@ def calculate_monthly_roi(daily_bankrolls, initial_bankroll, kelly):
     print(f"Initial bankroll: ${initial_bankroll:.2f}, Final bankroll: ${current_bankroll:.2f}")
 
     return monthly_roi, monthly_profit, total_roi
+
 
 def print_betting_results(total_fights, confident_predictions, correct_confident_predictions,
                           fixed_total_bets, fixed_correct_bets, initial_bankroll, fixed_final_bankroll,
@@ -477,6 +484,7 @@ def print_betting_results(total_fights, confident_predictions, correct_confident
 
     console.print(Columns([fixed_panel, kelly_panel]))
 
+
 def print_overall_metrics(y_test, y_pred, y_pred_proba):
     overall_accuracy = accuracy_score(y_test, y_pred)
     overall_precision = precision_score(y_test, y_pred)
@@ -496,6 +504,7 @@ def print_overall_metrics(y_test, y_pred, y_pred_proba):
     table.add_row("AUC", f"{overall_auc:.4f}")
 
     console.print(table)
+
 
 def main(manual_threshold, use_calibration=True,
          initial_bankroll=10000, kelly_fraction=1.0, fixed_bet_fraction=0.1,
@@ -523,13 +532,12 @@ def main(manual_threshold, use_calibration=True,
 
     # With odds
     model_files = [
-        'model_0.6734_auc_diff_0.0268.json',
+        'model_0.6709_auc_diff_0.0226.json',
         'model_0.6734_auc_diff_0.0261.json',
         'model_0.6684_auc_diff_0.0277.json',
         'model_0.6734_auc_diff_0.0266.json',
         'model_0.6684_auc_diff_0.0276.json'
     ]
-
 
     models = []
     if use_ensemble:
@@ -632,5 +640,5 @@ if __name__ == "__main__":
          fixed_bet_fraction=0.1,
          max_bet_percentage=0.1,
          min_odds=-300,
-         use_ensemble=True,
+         use_ensemble=False,
          odds_type='close')  # Options: 'open', 'close', 'average'
