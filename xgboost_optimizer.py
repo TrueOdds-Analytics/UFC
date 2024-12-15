@@ -228,7 +228,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Calculate the difference between train and validation AUC
     auc_diff = abs(train_auc[-1] - val_auc[-1])
 
-    if accuracy > 0.66 and (auc_diff < 0.10):
+    if accuracy > 0.67 and (auc_diff < 0.10):
         best_accuracy = accuracy
         best_auc_diff = auc_diff
         model_filename = f'models/xgboost/jan2024-july2024/split 125/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
