@@ -299,11 +299,11 @@ def ensemble_prediction(matchup_df, model_dir, val_data_path, use_calibration=Tr
     Returns the predicted winner and winning probability.
     """
     model_files = [
-        'model_0.6506_auc_diff_0.0519.json',
-        'model_0.6608_auc_diff_0.0651.json',
-        'model_0.6506_auc_diff_0.0310.json',
-        'model_0.6633_auc_diff_0.0861.json',
-        'model_0.6633_auc_diff_0.0832.json'
+        'model_0.6709_auc_diff_0.0242.json',
+        'model_0.6709_auc_diff_0.0239.json',
+        'model_0.6709_auc_diff_0.0273.json',
+        'model_0.6734_auc_diff_0.0252.json',
+        'model_0.6734_auc_diff_0.0251.json'
     ]
 
     models = []
@@ -380,13 +380,13 @@ if __name__ == "__main__":
     current_fight_data = {
         'open_odds': -200,            # Opening odds for fighter_a (example)
         'open_odds_b': 150,           # Opening odds for fighter_b (example)
-        'closing_range_end': -229,    # Closing odds for fighter_a (example)
-        'closing_range_end_b': 185,   # Closing odds for fighter_b (example)
+        'closing_range_end': -189,    # Closing odds for fighter_a (example)
+        'closing_range_end_b': 160,   # Closing odds for fighter_b (example)
         'current_fight_date': '2024-12-14'
     }
 
     output_dir = 'data/matchup data'
-    model_dir = 'models/xgboost/jan2024-july2024/split/'
+    model_dir = 'models/xgboost/jan2024-july2024/split 125/'
     val_data_path = 'data/train test data/val_data.csv'
     fractional_kelly = 0.5  # For example, half Kelly
 

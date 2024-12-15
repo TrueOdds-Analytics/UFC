@@ -530,13 +530,12 @@ def main(manual_threshold, use_calibration=True,
 
     test_data_with_display = pd.concat([X_test, test_data[display_columns]], axis=1)
 
-    # With odds
     model_files = [
-        'model_0.6709_auc_diff_0.0226.json',
-        'model_0.6734_auc_diff_0.0261.json',
-        'model_0.6684_auc_diff_0.0277.json',
-        'model_0.6734_auc_diff_0.0266.json',
-        'model_0.6684_auc_diff_0.0276.json'
+        'model_0.6709_auc_diff_0.0242.json',
+        'model_0.6709_auc_diff_0.0239.json',
+        'model_0.6709_auc_diff_0.0273.json',
+        'model_0.6734_auc_diff_0.0252.json',
+        'model_0.6734_auc_diff_0.0251.json'
     ]
 
     models = []
@@ -545,7 +544,7 @@ def main(manual_threshold, use_calibration=True,
             model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/split 125/{model_file}')
             models.append(load_model(model_path, 'xgboost'))
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/split 125/{model_files[0]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/split 125/{model_files[4]}')
         models.append(load_model(model_path, 'xgboost'))
 
     # Ensure consistent feature ordering
@@ -640,5 +639,5 @@ if __name__ == "__main__":
          fixed_bet_fraction=0.1,
          max_bet_percentage=0.1,
          min_odds=-300,
-         use_ensemble=False,
+         use_ensemble=True,
          odds_type='close')  # Options: 'open', 'close', 'average'
