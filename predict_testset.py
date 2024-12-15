@@ -537,7 +537,7 @@ def main(manual_threshold, use_calibration=True,
             model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/split/{model_file}')
             models.append(load_model(model_path, 'xgboost'))
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/split/{model_files[4]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/split/{model_files[0]}')
         models.append(load_model(model_path, 'xgboost'))
 
     # Ensure consistent feature ordering
@@ -632,5 +632,5 @@ if __name__ == "__main__":
          fixed_bet_fraction=0.1,
          max_bet_percentage=0.1,
          min_odds=-300,
-         use_ensemble=True,
+         use_ensemble=False,
          odds_type='close')  # Options: 'open', 'close', 'average'
