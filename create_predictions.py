@@ -300,10 +300,10 @@ def ensemble_prediction(matchup_df, model_dir, val_data_path, use_calibration=Tr
     """
     model_files = [
         'model_0.6506_auc_diff_0.0519.json',
+        'model_0.6608_auc_diff_0.0651.json',
         'model_0.6506_auc_diff_0.0310.json',
-        'model_0.6506_auc_diff_0.0607.json',
-        'model_0.6608_auc_diff_0.0892.json',
-        'model_0.6633_auc_diff_0.0876.json'
+        'model_0.6633_auc_diff_0.0861.json',
+        'model_0.6633_auc_diff_0.0832.json'
     ]
 
     models = []

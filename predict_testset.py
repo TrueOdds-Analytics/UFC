@@ -523,29 +523,21 @@ def main(manual_threshold, use_calibration=True,
 
     # With odds
     model_files = [
-        'model_0.6616_auc_diff_0.0917.json',
-        'model_0.6586_auc_diff_0.0906.json',
-        'model_0.6586_auc_diff_0.0975.json',
-        'model_0.6526_auc_diff_0.0951.json',
-        'model_0.6556_auc_diff_0.0846.json'
+        'model_0.6506_auc_diff_0.0519.json',
+        'model_0.6608_auc_diff_0.0651.json',
+        'model_0.6506_auc_diff_0.0310.json',
+        'model_0.6633_auc_diff_0.0861.json',
+        'model_0.6633_auc_diff_0.0832.json'
     ]
 
-    # Without odds
-    # model_files = [
-    #     'model_0.6798_auc_diff_0.0686.json',
-    #     'model_0.6707_auc_diff_0.0435.json',
-    #     'model_0.6677_auc_diff_0.0639.json',
-    #     'model_0.6677_auc_diff_0.0664.json',
-    #     'model_0.6647_auc_diff_0.0600.json'
-    # ]
 
     models = []
     if use_ensemble:
         for model_file in model_files:
-            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 closed/{model_file}')
+            model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/split/{model_file}')
             models.append(load_model(model_path, 'xgboost'))
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/125 no odds/{model_files[4]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-july2024/split/{model_files[4]}')
         models.append(load_model(model_path, 'xgboost'))
 
     # Ensure consistent feature ordering
