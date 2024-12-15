@@ -562,4 +562,4 @@ if __name__ == "__main__":
     calculate_elo_ratings('../data/combined_rounds.csv')
     combine_fighters_stats("../data/combined_rounds.csv")
     create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
-    split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv', '2024-01-01', '2024-10-01')
+    split_train_val_test('../data/matchup data/matchup_data_3_avg_name.csv', '2024-01-01', '2024-12-31')
