@@ -10,13 +10,13 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 def combine_rounds_stats(file_path):
     print("Loading and preprocessing data...")
     ufc_stats = pd.read_csv(file_path)
-    fighter_stats = pd.read_csv('../data/general data/fighter_stats.csv')
+    fighter_stats = pd.read_csv('../data/general data/ufc_fighter_tott.csv')
 
     # Preprocessing
     ufc_stats['fighter'] = ufc_stats['fighter'].astype(str).str.lower()
     ufc_stats['fight_date'] = pd.to_datetime(ufc_stats['fight_date'])
-    fighter_stats['name'] = fighter_stats['name'].astype(str).str.lower().str.strip()
-    fighter_stats['dob'] = fighter_stats['dob'].replace(['--', '', 'NA', 'N/A'], np.nan).apply(parse_date)
+    fighter_stats['name'] = fighter_stats['FIGHTER'].astype(str).str.lower().str.strip()
+    fighter_stats['dob'] = fighter_stats['DOB'].replace(['--', '', 'NA', 'N/A'], np.nan).apply(parse_date)
 
     # Merge fighter stats
     ufc_stats = pd.merge(ufc_stats, fighter_stats[['name', 'dob']], left_on='fighter', right_on='name', how='left')
@@ -96,7 +96,7 @@ def combine_rounds_stats(file_path):
 
     final_stats = final_stats[~final_stats['winner'].isin(['NC/NC', 'D/D'])]
     final_stats = final_stats[
-        ~final_stats['result'].isin(['DQ', 'Decision - Split ', 'DQ ', 'Could Not Continue ', 'Overturned ', 'Other '])]
+        ~final_stats['result'].isin(['DQ', 'DQ ', 'Could Not Continue ', 'Overturned ', 'Other '])]
 
     for column in ['result', 'winner', 'scheduled_rounds']:
         final_stats[column], unique = pd.factorize(final_stats[column])
