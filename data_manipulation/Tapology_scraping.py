@@ -1,4 +1,5 @@
 import time
+import random
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -34,7 +35,8 @@ for fighter in fighters:
 
     # Navigate to the Tapology search page.
     driver.get("https://www.tapology.com/search")
-    time.sleep(2)  # Allow the page to fully load
+    # Random sleep to allow the page to load naturally.
+    time.sleep(random.uniform(2, 4))
 
     # -------------------------------------
     # 3a. Click the "Bouts" subsection
@@ -44,6 +46,8 @@ for fighter in fighters:
             EC.element_to_be_clickable((By.CSS_SELECTOR, "label[for='searchBouts']"))
         )
         bouts_label.click()
+        # Pause briefly after clicking the subsection.
+        time.sleep(random.uniform(1, 2))
     except Exception as e:
         print(f"Error clicking the Bouts label for fighter {fighter}: {e}")
         continue
@@ -58,12 +62,14 @@ for fighter in fighters:
         )
         search_box.clear()
         search_box.send_keys(fighter)
-        time.sleep(1)  # Allow time for any dynamic suggestions to appear
+        # Allow time for any dynamic suggestions to appear.
+        time.sleep(random.uniform(1, 2))
 
         # Locate the parent form and submit it using JavaScript.
         form = search_box.find_element(By.XPATH, "./ancestor::form")
         driver.execute_script("arguments[0].submit();", form)
-        time.sleep(2)  # Explicitly wait 2 seconds for the search results to load
+        # Wait a bit longer for the search results to load.
+        time.sleep(random.uniform(3, 5))
     except Exception as e:
         print(f"Error submitting the search form for fighter {fighter}: {e}")
         continue
@@ -77,6 +83,8 @@ for fighter in fighters:
             table_body = WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "tbody"))
             )
+            # Brief pause to mimic human reading behavior.
+            time.sleep(random.uniform(1, 2))
             # Get all rows within the table body.
             rows = table_body.find_elements(By.TAG_NAME, "tr")
 
@@ -118,7 +126,8 @@ for fighter in fighters:
             next_buttons = driver.find_elements(By.LINK_TEXT, "Next")
             if next_buttons:
                 next_buttons[0].click()
-                time.sleep(2)  # Wait 2 seconds for the next page to load
+                # Wait for the next page to load with a random delay.
+                time.sleep(random.uniform(2, 4))
             else:
                 break  # No "Next" button means we're done with this fighter.
 
@@ -135,6 +144,9 @@ for fighter in fighters:
     df = pd.DataFrame(all_bouts)
     df.to_csv("../data/tapology_bouts_results.csv", index=False)
     print(f"Results for fighter '{fighter}' saved to tapology_bouts_results.csv")
+
+    # Additional pause between processing fighters to mimic natural user behavior.
+    time.sleep(random.uniform(2, 4))
 
 # =====================================================
 # 4. Clean up
