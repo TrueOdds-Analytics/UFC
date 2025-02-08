@@ -133,7 +133,7 @@ for fighter in fighters:
     # 3e. Save the current accumulated results to CSV.
     # -------------------------------------------------
     df = pd.DataFrame(all_bouts)
-    df.to_csv("tapology_bouts_results.csv", index=False)
+    df.to_csv("../data/tapology_bouts_results.csv", index=False)
     print(f"Results for fighter '{fighter}' saved to tapology_bouts_results.csv")
 
 # =====================================================

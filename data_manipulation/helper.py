@@ -1,6 +1,149 @@
 import numpy as np
 import pandas as pd
 
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def preprocess_data(ufc_stats: pd.DataFrame, fighter_stats: pd.DataFrame) -> pd.DataFrame:
+    """
+    Preprocess the UFC and fighter stats dataframes:
+      - Standardize string columns.
+      - Convert dates.
+      - Merge fighter DOB and compute age.
+      - Clean and drop unwanted columns.
+      - Convert time strings to seconds.
+    """
+    # Standardize fighter names and dates
+    ufc_stats['fighter'] = ufc_stats['fighter'].astype(str).str.lower()
+    ufc_stats['fight_date'] = pd.to_datetime(ufc_stats['fight_date'])
+    fighter_stats['name'] = fighter_stats['FIGHTER'].astype(str).str.lower().str.strip()
+    fighter_stats['dob'] = fighter_stats['DOB'].replace(['--', '', 'NA', 'N/A'], np.nan).apply(parse_date)
+
+    # Merge fighter stats and calculate age
+    ufc_stats = pd.merge(
+        ufc_stats,
+        fighter_stats[['name', 'dob']],
+        left_on='fighter', right_on='name',
+        how='left'
+    )
+    ufc_stats['age'] = (ufc_stats['fight_date'] - ufc_stats['dob']).dt.days / 365.25
+    ufc_stats['age'] = ufc_stats['age'].fillna(np.nan).round().astype(float)
+    ufc_stats.loc[ufc_stats['age'] < 0, 'age'] = np.nan
+
+    # Clean data and drop unwanted columns
+    ufc_stats = ufc_stats.drop(['round', 'location', 'name'], axis=1)
+    ufc_stats = ufc_stats[~ufc_stats['weight_class'].str.contains("Women's")]
+
+    # Convert time strings ('MM:SS') to seconds
+    ufc_stats['time'] = (
+            pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.minute * 60 +
+            pd.to_datetime(ufc_stats['time'], format='%M:%S').dt.second
+    )
+
+    return ufc_stats
+
+
+def process_odds_data(final_stats: pd.DataFrame) -> pd.DataFrame:
+    """
+    Process odds data from the cleaned odds CSV file and update final_stats with new odds columns.
+    """
+    print("Processing odds data...")
+    cleaned_odds_df = pd.read_csv('../data/odds data/cleaned_fight_odds.csv')
+    odds_columns = ['Open', 'Closing Range Start', 'Closing Range End', 'Movement']
+    odds_mappings = {
+        col: cleaned_odds_df.set_index(['Matchup', 'Event'])
+        .apply(lambda x: {'odds': x[col], 'Date': x['Date']}, axis=1)
+        .to_dict()
+        for col in odds_columns
+    }
+    processed_odds_mappings = preprocess_odds_mappings(odds_mappings)
+    new_odds = get_odds_efficient(final_stats, processed_odds_mappings, odds_columns)
+
+    # Assign new odds columns
+    for col in odds_columns:
+        final_stats[f'new_{col}'] = new_odds[col]
+    final_stats['open_odds'] = final_stats['new_Open']
+    final_stats['closing_range_start'] = final_stats['new_Closing Range Start']
+    final_stats['closing_range_end'] = final_stats['new_Closing Range End']
+    final_stats['movement'] = final_stats['new_Movement']
+
+    return final_stats
+
+
+def calculate_time_based_stats(final_stats: pd.DataFrame) -> pd.DataFrame:
+    """
+    Calculate additional time-based statistics such as takedowns and knockdowns per 15 minutes.
+    """
+    final_stats['time_career_minutes'] = final_stats['time_career'] / 60  # Convert seconds to minutes
+    final_stats['takedowns_per_15min'] = (final_stats['takedown_successful_career'] / final_stats[
+        'time_career_minutes']) * 15
+    final_stats['knockdowns_per_15min'] = (final_stats['knockdowns_career'] / final_stats['time_career_minutes']) * 15
+    # Handle division by zero and infinities
+    final_stats['takedowns_per_15min'] = final_stats['takedowns_per_15min'].fillna(0).replace([np.inf, -np.inf], 0)
+    final_stats['knockdowns_per_15min'] = final_stats['knockdowns_per_15min'].fillna(0).replace([np.inf, -np.inf], 0)
+    return final_stats
+
+
+def calculate_total_fight_stats(group: pd.DataFrame) -> pd.DataFrame:
+    """
+    Given a fighter’s group of fights (sorted chronologically),
+    calculate cumulative fight stats including total fights, wins, losses,
+    and breakdowns by outcome.
+    """
+    group = group.sort_values('fight_date').reset_index(drop=True)
+    group['total_fights'] = range(1, len(group) + 1)
+    group['total_wins'] = group['winner'].cumsum()
+    group['total_losses'] = group['total_fights'] - group['total_wins']
+
+    # Initialize outcome count columns
+    for outcome in ['ko', 'submission', 'decision']:
+        group[f'wins_by_{outcome}'] = 0
+        group[f'losses_by_{outcome}'] = 0
+
+    # Cumulatively calculate fight outcomes
+    for i in range(len(group)):
+        if i > 0:
+            for col in ['wins_by_ko', 'wins_by_submission', 'wins_by_decision',
+                        'losses_by_ko', 'losses_by_submission', 'losses_by_decision']:
+                group.loc[i, col] = group.loc[i - 1, col]
+        if group.loc[i, 'winner'] == 1:  # Win
+            if group.loc[i, 'result'] in [0, 3]:
+                group.loc[i, 'wins_by_ko'] += 1
+            elif group.loc[i, 'result'] == 1:
+                group.loc[i, 'wins_by_submission'] += 1
+            elif group.loc[i, 'result'] in [2, 4]:
+                group.loc[i, 'wins_by_decision'] += 1
+        else:  # Loss
+            if group.loc[i, 'result'] in [0, 3]:
+                group.loc[i, 'losses_by_ko'] += 1
+            elif group.loc[i, 'result'] == 1:
+                group.loc[i, 'losses_by_submission'] += 1
+            elif group.loc[i, 'result'] in [2, 4]:
+                group.loc[i, 'losses_by_decision'] += 1
+
+    # Calculate percentages
+    for outcome in ['ko', 'submission', 'decision']:
+        group[f'win_rate_by_{outcome}'] = (group[f'wins_by_{outcome}'] / group['total_wins']).fillna(0)
+        group[f'loss_rate_by_{outcome}'] = (group[f'losses_by_{outcome}'] / group['total_losses']).fillna(0)
+
+    return group
+
+
+def rename_columns_general(col: str) -> str:
+    """
+    Generalized column renaming: if the column contains 'fighter' (but not starting with it)
+    adjust the name for clarity.
+    """
+    if 'fighter' in col and not col.startswith('fighter'):
+        if 'b_fighter_b' in col:
+            return col.replace('b_fighter_b', 'fighter_b_opponent')
+        elif 'b_fighter' in col:
+            return col.replace('b_fighter', 'fighter_a_opponent')
+        elif 'fighter' in col and 'fighter_b' not in col:
+            return col.replace('fighter', 'fighter_a')
+    return col
+
 
 def get_opponent(fighter, fight_id, ufc_stats):
     fight_fighters = ufc_stats[ufc_stats['id'] == fight_id]['fighter'].unique()
