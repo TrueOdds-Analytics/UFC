@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+
 # =============================================================================
 # Helper Functions
 # =============================================================================
@@ -169,7 +170,6 @@ def aggregate_fighter_stats(group, numeric_columns):
     group['total_strikes_rate_career'] = (
             cumulative_stats['total_strikes_landed'] / cumulative_stats['total_strikes_attempted']).fillna(0)
     group["combined_success_rate_career"] = (group["takedown_rate_career"] + group["total_strikes_rate_career"]) / 2
-
 
     return group
 
