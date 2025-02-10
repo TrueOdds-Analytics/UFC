@@ -374,15 +374,15 @@ def calculate_kelly_fraction(probability, american_odd, fractional_kelly=1.0):
 
 if __name__ == "__main__":
     file_path = "data/combined_sorted_fighter_stats.csv"
-    fighter_a = "Michael Johnson"
-    fighter_b = "Ottman Azaitar"
+    fighter_a = "Gabriel Bonfim"
+    fighter_b = "Khaos Williams"
 
     current_fight_data = {
-        'open_odds': -200,            # Opening odds for fighter_a (example)
-        'open_odds_b': 150,           # Opening odds for fighter_b (example)
-        'closing_range_end': -189,    # Closing odds for fighter_a (example)
-        'closing_range_end_b': 160,   # Closing odds for fighter_b (example)
-        'current_fight_date': '2024-12-14'
+        'open_odds': -198,            # Opening odds for fighter_a (example)
+        'open_odds_b': 164,           # Opening odds for fighter_b (example)
+        'closing_range_end': -220,    # Closing odds for fighter_a (example)
+        'closing_range_end_b': 185,   # Closing odds for fighter_b (example)
+        'current_fight_date': '2025-02-15'
     }
 
     output_dir = 'data/matchup data'
