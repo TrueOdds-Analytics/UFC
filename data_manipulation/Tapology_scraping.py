@@ -189,4 +189,4 @@ for fighter in fighters:
 # 5. Clean up
 # =====================================================
 driver.quit()
-print("Scraping complete.")
+print("Scraping complete...")
