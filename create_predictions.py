@@ -408,4 +408,4 @@ if __name__ == "__main__":
         else:
             print("Kelly fraction is negative or zero, suggesting not to bet.")
     else:
-        print("Could not generate matchup data.")
+        print("Could not generate matchup data..")
