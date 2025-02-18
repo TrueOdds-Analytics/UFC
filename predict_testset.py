@@ -521,7 +521,7 @@ def main(manual_threshold, use_calibration=True,
 
     # Load and preprocess data
     val_data = pd.read_csv('data/train test data/val_data.csv')
-    test_data = pd.read_csv('data/train test data/test_data 6d.csv')
+    test_data = pd.read_csv('data/train test data/test_data.csv')
 
     display_columns = ['current_fight_date', 'fighter_a', 'fighter_b']
     y_val, y_test = val_data['winner'], test_data['winner']

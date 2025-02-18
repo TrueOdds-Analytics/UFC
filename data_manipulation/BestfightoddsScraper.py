@@ -296,22 +296,29 @@ if __name__ == "__main__":
     existing_odds_file = "../data/odds data/fight_odds.csv"
     if os.path.exists(existing_odds_file):
         existing_odds_df = pd.read_csv(existing_odds_file)
+        # Create a set of existing matchups for faster lookup
+        existing_matchups = set(zip(existing_odds_df['Event'], existing_odds_df['Matchup']))
     else:
         existing_odds_df = pd.DataFrame()
+        existing_matchups = set()
 
     scraper = BestFightOddsScraperSelenium(fighters, existing_odds_df)
-    odds_df = scraper.scrape()
+    new_odds_df = scraper.scrape()
 
+    # Filter out any rows from new_odds_df that already exist in existing_odds_df
     if not existing_odds_df.empty:
-        combined_odds_df = pd.concat([existing_odds_df, odds_df], ignore_index=True)
+        new_rows = []
+        for _, row in new_odds_df.iterrows():
+            if (row['Event'], row['Matchup']) not in existing_matchups:
+                new_rows.append(row)
+        new_odds_df = pd.DataFrame(new_rows) if new_rows else pd.DataFrame()
+
+        # Append only the new, unique rows to the existing data
+        combined_odds_df = pd.concat([existing_odds_df, new_odds_df], ignore_index=True)
     else:
-        combined_odds_df = odds_df
+        combined_odds_df = new_odds_df
 
-    # Remove duplicates if any
-    combined_odds_df = combined_odds_df.drop_duplicates(
-        subset=['Event', 'Matchup'], keep='first'
-    )
-
+    # Save without dropping any duplicates
     combined_odds_df.to_csv(existing_odds_file, index=False)
     print(combined_odds_df)
 
@@ -319,13 +326,3 @@ if __name__ == "__main__":
     input_file = existing_odds_file
     output_file = "../data/odds data/cleaned_fight_odds.csv"
     cleaned_odds_df = BestFightOddsScraperSelenium.clean_fight_odds_from_csv(input_file, output_file)
-
-    print(cleaned_odds_df)
-
-    # Print out the fighters that were not processed
-    if scraper.unprocessed_fighters:
-        print("\nThe following fighters were not processed after 5 attempts:")
-        for fighter in scraper.unprocessed_fighters:
-            print(f"- {fighter}")
-    else:
-        print("\nAll fighters were processed successfully.")
