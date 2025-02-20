@@ -6,231 +6,220 @@ import os
 import traceback
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options  # For headless option if needed
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import (
-    TimeoutException,
-    NoSuchElementException,
-    WebDriverException,
-)
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
 from datetime import datetime
-from rapidfuzz.fuzz import ratio  # Import the ratio function for fuzzy matching
+from rapidfuzz.fuzz import ratio
+import concurrent.futures
+from tqdm import tqdm
+import threading
+import queue
 
 
 class BestFightOddsScraperSelenium:
-    def __init__(self, fighters, existing_odds_df=None):
-        self.fighters = fighters
-        self.driver = self.initialize_driver()
-        self.unprocessed_fighters = []  # List to keep track of unprocessed fighters
-        if existing_odds_df is not None and not existing_odds_df.empty:
-            self.existing_data = existing_odds_df
-            # Ensure 'Event' and 'Matchup' are strings
-            self.existing_data['Event'] = self.existing_data['Event'].astype(str)
-            self.existing_data['Matchup'] = self.existing_data['Matchup'].astype(str)
-            self.existing_matchups = set(
-                zip(self.existing_data['Event'], self.existing_data['Matchup'])
-            )
-        else:
-            self.existing_data = pd.DataFrame()
-            self.existing_matchups = set()
+    def __init__(self, num_workers=24):
+        self.num_workers = num_workers
+        self.unprocessed_fighters = []
+        self.progress_queue = queue.Queue()
+        self.lock = threading.Lock()
+        self.total_fighters = 0
+        self.processed_count = 0
 
     def initialize_driver(self):
-        # Optionally, run in headless mode
         options = Options()
-        # options.add_argument('--headless')  # Uncomment to run in headless mode
-        driver = webdriver.Chrome(options=options)
-        return driver
+        options.add_argument('--disable-gpu')
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--log-level=3')
+        return webdriver.Chrome(options=options)
 
     @staticmethod
     def clean_movement(movement):
-        match = re.search(r'([+-]?\d+(\.\d+)?)', movement)
+        if pd.isna(movement) or movement == "":
+            return None
+        match = re.search(r'([+-]?\d+(\.\d+)?)', str(movement))
         if match:
             try:
                 return float(match.group(1)) / 100
             except ValueError:
-                print(f"Failed to convert movement: {movement}")
-        print(f"No numerical value found in movement: {movement}")
+                return None
         return None
 
-    def scrape(self):
+    def scrape_fighter(self, fighter, driver):
         odds_data = []
-        similarity_threshold = 85  # Adjust the threshold as needed
+        similarity_threshold = 85
 
-        for fighter in self.fighters:
-            print(f"Processing fighter: {fighter}")
-            success = False
-            for attempt in range(1, 6):  # Try up to 5 times
+        for attempt in range(1, 6):
+            try:
+                print(f"\nAttempting to scrape {fighter} (Attempt {attempt})")
+                driver.get("https://www.bestfightodds.com/search")
+
+                # Search for fighter
+                search_input = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.NAME, "query"))
+                )
+                search_input.clear()
+                search_input.send_keys(fighter)
+
+                search_button = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, "//input[@type='submit']"))
+                )
+                search_button.click()
+                time.sleep(1)
+
+                # Find odds table
                 try:
-                    print(f"Attempt {attempt} for fighter: {fighter}")
-                    self.driver.get("https://www.bestfightodds.com/search")
-
-                    # Wait for the search input field
-                    search_input = WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.NAME, "query"))
+                    odds_table = WebDriverWait(driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, "//table[@class='team-stats-table']"))
                     )
-                    search_input.clear()
-                    search_input.send_keys(fighter)
-
-                    # Wait for the search button
-                    search_button = WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable((By.XPATH, "//input[@type='submit']"))
-                    )
-                    search_button.click()
-
-                    # Shorter fixed sleep to allow page load
-                    time.sleep(1)
-
-                    # Check if we're on the fighter's page directly
+                except TimeoutException:
                     try:
-                        # Attempt to locate the odds table directly
-                        odds_table = WebDriverWait(self.driver, 5).until(
-                            EC.presence_of_element_located(
-                                (By.XPATH, "//table[@class='team-stats-table']")
-                            )
+                        # Search results page
+                        search_results = WebDriverWait(driver, 5).until(
+                            EC.presence_of_element_located((By.XPATH, "//table[@class='content-list']"))
                         )
-                        print(f"Directly navigated to fighter page for '{fighter}'")
-                        # Proceed to scrape the odds table
+                        fighter_links = search_results.find_elements(By.XPATH, ".//a[contains(@href, '/fighters/')]")
+
+                        # Find matching fighter
+                        for link in fighter_links:
+                            link_text = link.text.strip()
+                            similarity = ratio(link_text.lower(), fighter.lower())
+                            if similarity >= similarity_threshold:
+                                link.click()
+                                break
+                        else:
+                            print(f"No match found for {fighter}")
+                            continue
+
+                        odds_table = WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.XPATH, "//table[@class='team-stats-table']"))
+                        )
                     except TimeoutException:
-                        # If odds table not found, check for search results
-                        try:
-                            search_results = WebDriverWait(self.driver, 5).until(
-                                EC.presence_of_element_located(
-                                    (By.XPATH, "//table[@class='content-list']")
-                                )
-                            )
-                            # We're on the search results page
-                            fighter_links = search_results.find_elements(
-                                By.XPATH, ".//a[contains(@href, '/fighters/')]"
-                            )
-                            fighter_found = False
-                            for link in fighter_links:
-                                link_text = link.text.strip()
-                                similarity = ratio(link_text.lower(), fighter.lower())
-                                if similarity >= similarity_threshold:
-                                    print(f"Found match: '{link_text}' with similarity {similarity}")
-                                    link.click()
-                                    fighter_found = True
-                                    break
-                            if not fighter_found:
-                                print(
-                                    f"Fighter '{fighter}' not found in search results on attempt {attempt}."
-                                )
-                                continue  # Try again
+                        print(f"No odds table found for {fighter}")
+                        continue
 
-                            # Wait for the odds table on fighter's page
-                            odds_table = WebDriverWait(self.driver, 10).until(
-                                EC.presence_of_element_located(
-                                    (By.XPATH, "//table[@class='team-stats-table']")
-                                )
-                            )
-                        except TimeoutException:
-                            print(
-                                f"No search results or fighter page found for '{fighter}' on attempt {attempt}."
-                            )
-                            continue  # Try again
+                # Process odds table
+                rows = odds_table.find_elements(By.XPATH, ".//tr")[1:]
+                for row in rows:
+                    try:
+                        fight_data = {
+                            "Matchup": row.find_element(By.XPATH, ".//th[@class='oppcell']/a").text,
+                            "Event": "",
+                            "Open": "",
+                            "Closing Range Start": "",
+                            "Closing Range End": "",
+                            "Movement": None,
+                            "Date": ""
+                        }
 
-                    # Now, odds_table should be available
-                    rows = odds_table.find_elements(By.XPATH, ".//tr")
-                    for row in rows[1:]:
+                        # Get event
                         try:
-                            matchup = row.find_element(
-                                By.XPATH, ".//th[@class='oppcell']/a"
-                            ).text
+                            event_cell = row.find_element(By.XPATH, ".//td[@class='item-non-mobile'][1]")
+                            fight_data["Event"] = event_cell.find_element(By.XPATH, ".//a").text
                         except NoSuchElementException:
-                            continue
+                            pass
 
+                        # Get odds
                         try:
-                            event_cell = row.find_element(
-                                By.XPATH, ".//td[@class='item-non-mobile'][1]"
-                            )
-                            event = event_cell.find_element(By.XPATH, ".//a").text
+                            fight_data["Open"] = row.find_element(By.XPATH, ".//td[@class='moneyline']/span").text
+                            fight_data["Closing Range Start"] = row.find_element(By.XPATH,
+                                                                                 ".//td[@class='moneyline'][2]/span").text
+                            fight_data["Closing Range End"] = row.find_element(By.XPATH,
+                                                                               ".//td[@class='moneyline'][3]/span").text
                         except NoSuchElementException:
-                            event = ""
+                            pass
 
-                        # Check if this event and matchup have already been scraped
-                        if (event, matchup) in self.existing_matchups:
-                            print(
-                                f"Skipping already scraped event: {event}, matchup: {matchup}"
-                            )
-                            continue
-
-                        # Proceed with scraping
+                        # Get movement
                         try:
-                            open_odds = row.find_element(
-                                By.XPATH, ".//td[@class='moneyline']/span"
-                            ).text
+                            movement = row.find_element(By.XPATH, ".//td[@class='change-cell']/span").text
+                            fight_data["Movement"] = self.clean_movement(movement)
                         except NoSuchElementException:
-                            open_odds = ""
+                            pass
 
-                        try:
-                            closing_range_low = row.find_element(
-                                By.XPATH, ".//td[@class='moneyline'][2]/span"
-                            ).text
-                            closing_range_high = row.find_element(
-                                By.XPATH, ".//td[@class='moneyline'][3]/span"
-                            ).text
-                        except NoSuchElementException:
-                            closing_range_low = closing_range_high = ""
-
-                        try:
-                            movement = row.find_element(
-                                By.XPATH, ".//td[@class='change-cell']/span"
-                            ).text
-                            movement = self.clean_movement(movement)
-                        except NoSuchElementException:
-                            movement = None
-
+                        # Get date
                         try:
                             date_cell = row.find_element(
                                 By.XPATH,
-                                ".//td[@class='item-non-mobile'][@style='padding-left: 20px; color: #767676']",
+                                ".//td[@class='item-non-mobile'][@style='padding-left: 20px; color: #767676']"
                             )
-                            date = date_cell.text.strip()
+                            fight_data["Date"] = date_cell.text.strip()
                         except NoSuchElementException:
-                            date = ""
+                            pass
 
-                        odds_data.append(
-                            {
-                                "Matchup": matchup,
-                                "Open": open_odds,
-                                "Closing Range Start": closing_range_low,
-                                "Closing Range End": closing_range_high,
-                                "Movement": movement,
-                                "Event": event,
-                                "Date": date,
-                            }
-                        )
-                    success = True  # Scraping was successful
-                    print(f"Successfully processed fighter: {fighter} on attempt {attempt}")
-                    break  # Exit the retry loop
-                except Exception as e:
-                    print(
-                        f"An error occurred while processing fighter '{fighter}' on attempt {attempt}: {type(e).__name__}: {e}"
-                    )
-                    traceback.print_exc()
-                    # Shorter sleep before next retry
-                    time.sleep(random.uniform(0.5, 1))
-                    continue  # Try again
-            if not success:
-                print(f"Failed to process fighter '{fighter}' after 5 attempts. Skipping.")
-                self.unprocessed_fighters.append(fighter)
-            # Shorter sleep between processing fighters
-            time.sleep(random.uniform(0.5, 1))
+                        odds_data.append(fight_data)
 
-        self.driver.quit()
-        return pd.DataFrame(odds_data)
+                    except NoSuchElementException:
+                        continue
 
-    @staticmethod
-    def parse_custom_date(date_string):
-        if pd.isna(date_string):
-            return pd.NaT
-        date_string = str(date_string)
-        date_string = date_string.replace('th', '').replace('st', '').replace('nd', '').replace('rd', '')
+                # Update progress
+                with self.lock:
+                    self.processed_count += 1
+                    self.progress_queue.put(1)
+
+                print(f"Successfully scraped {fighter}")
+                return odds_data
+
+            except Exception as e:
+                print(f"Error processing {fighter}: {str(e)}")
+                if attempt == 5:
+                    self.unprocessed_fighters.append(fighter)
+                time.sleep(random.uniform(0.5, 1))
+
+        return []
+
+    def process_batch(self, batch):
+        driver = self.initialize_driver()
+        batch_data = []
         try:
-            return datetime.strptime(date_string, '%b %d %Y')
-        except ValueError:
-            return pd.NaT
+            for fighter in batch:
+                fighter_data = self.scrape_fighter(fighter, driver)
+                batch_data.extend(fighter_data)
+                time.sleep(random.uniform(0.5, 1))
+        finally:
+            driver.quit()
+        return batch_data
+
+    def scrape_all(self, fighters):
+        self.total_fighters = len(fighters)
+        print(f"\nStarting scrape of {self.total_fighters} fighters using {self.num_workers} workers")
+
+        # Create batches
+        batch_size = max(1, len(fighters) // self.num_workers)
+        batches = [fighters[i:i + batch_size] for i in range(0, len(fighters), batch_size)]
+
+        # Progress bar setup
+        pbar = tqdm(total=self.total_fighters, desc="Processing fighters")
+
+        # Process batches
+        all_data = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_workers) as executor:
+            future_to_batch = {executor.submit(self.process_batch, batch): batch for batch in batches}
+
+            # Monitor progress
+            while future_to_batch:
+                done, _ = concurrent.futures.wait(future_to_batch, timeout=0.1)
+
+                # Update progress bar
+                while True:
+                    try:
+                        progress = self.progress_queue.get_nowait()
+                        pbar.update(progress)
+                    except queue.Empty:
+                        break
+
+                # Process completed futures
+                for future in done:
+                    try:
+                        batch_data = future.result()
+                        all_data.extend(batch_data)
+                    except Exception as e:
+                        print(f"\nBatch processing error: {str(e)}")
+                    future_to_batch.pop(future)
+
+        pbar.close()
+        return pd.DataFrame(all_data)
 
     @staticmethod
     def clean_fight_odds_from_csv(input_csv_path, output_csv_path):
@@ -239,11 +228,13 @@ class BestFightOddsScraperSelenium:
         if 'Date' not in fight_odds_df.columns:
             fight_odds_df['Date'] = ""
 
+        # Filter for UFC events
         fight_odds_df = fight_odds_df[
             fight_odds_df['Event'].str.contains('UFC', case=False, na=False)
             | fight_odds_df['Event'].isna()
-        ]
+            ]
 
+        # Process rows
         modified_rows = []
         i = 0
         while i < len(fight_odds_df):
@@ -264,79 +255,93 @@ class BestFightOddsScraperSelenium:
             else:
                 i += 1
 
+        # Create final DataFrame
         modified_df = pd.DataFrame(modified_rows, columns=fight_odds_df.columns)
 
-        # Convert Date column to datetime using the custom parser
-        modified_df['Date'] = modified_df['Date'].apply(BestFightOddsScraperSelenium.parse_custom_date)
-
-        # Remove rows with no valid date entry
+        # Parse dates
+        modified_df['Date'] = modified_df['Date'].apply(lambda x: BestFightOddsScraperSelenium.parse_custom_date(x))
         modified_df = modified_df[modified_df['Date'].notna()]
 
-        # Extract fighter names and create a new column
-        modified_df['Fighter'] = modified_df['Matchup'].str.split(' vs ', expand=True)[0]
+        # -------------------------
+        # CHANGED THIS LINE ONLY:
+        # -------------------------
+        # Instead of '%b %d %Y', use '%Y-%m-%d'
+        modified_df['Date'] = modified_df['Date'].dt.strftime('%Y-%m-%d')
 
-        # Remove duplicate rows based on 'Matchup' and 'Date'
-        modified_df = modified_df.drop_duplicates(subset=['Matchup', 'Date'], keep='first')
-
-        # Sort the DataFrame by Fighter name and then by Date
-        modified_df = modified_df.sort_values(['Fighter', 'Date'])
-
-        # Drop the temporary Fighter column
-        modified_df = modified_df.drop('Fighter', axis=1)
-
-        # Reset the index
-        modified_df = modified_df.reset_index(drop=True)
-
-        # Convert Date back to string format for CSV output
-        modified_df['Date'] = modified_df['Date'].dt.strftime('%b %d %Y')
-
-        # Drop the "Event" column as requested
+        # Sort and clean
+        modified_df = modified_df.sort_values(['Matchup', 'Date'])
         if 'Event' in modified_df.columns:
             modified_df = modified_df.drop('Event', axis=1)
+
+        # Remove duplicates based on 'Matchup' and 'Date', keeping the first occurrence only
+        modified_df = modified_df.drop_duplicates(subset=['Matchup', 'Date'], keep='first')
 
         modified_df.to_csv(output_csv_path, index=False)
         return modified_df
 
+    @staticmethod
+    def parse_custom_date(date_string):
+        if pd.isna(date_string):
+            return pd.NaT
+        date_string = str(date_string)
+        date_string = date_string.replace('th', '').replace('st', '').replace('nd', '').replace('rd', '')
+        try:
+            return datetime.strptime(date_string, '%b %d %Y')
+        except ValueError:
+            return pd.NaT
+
 
 if __name__ == "__main__":
-    # Read the combined rounds CSV and extract unique fighter names
-    combined_rounds_df = pd.read_csv("../data/combined_rounds.csv")
-    fighters = combined_rounds_df["fighter"].unique().tolist()
-    fighters = list(set(fighters))
+    start_time = time.time()
 
-    existing_odds_file = "../data/odds data/fight_odds.csv"
-    if os.path.exists(existing_odds_file):
-        existing_odds_df = pd.read_csv(existing_odds_file)
-    else:
-        existing_odds_df = pd.DataFrame()
+    # ---------------------------------------------------------------------
+    # Set these flags to control which parts of the process to run:
+    #   run_scraping: Scrape data and save raw CSV.
+    #   run_cleaning: Clean the raw CSV and save the cleaned version.
+    #
+    # To run only one part, simply set the other flag to False.
+    # ---------------------------------------------------------------------
+    run_scraping = False   # Change to False to skip scraping
+    run_cleaning = True   # Change to False to skip cleaning
 
-    scraper = BestFightOddsScraperSelenium(fighters, existing_odds_df)
-    odds_df = scraper.scrape()
+    if run_scraping:
+        # Read fighter list
+        combined_rounds_df = pd.read_csv("../data/combined_rounds.csv")
+        fighters = list(set(combined_rounds_df["fighter"].unique().tolist()))
 
-    if not existing_odds_df.empty:
-        combined_odds_df = pd.concat([existing_odds_df, odds_df], ignore_index=True)
-    else:
-        combined_odds_df = odds_df
+        # For testing (optional):
+        # fighters = fighters[:10]
 
-    # Remove duplicates if any
-    combined_odds_df = combined_odds_df.drop_duplicates(
-        subset=['Event', 'Matchup'], keep='first'
-    )
+        # Initialize scraper
+        scraper = BestFightOddsScraperSelenium(num_workers=24)
 
-    combined_odds_df.to_csv(existing_odds_file, index=False)
-    print(combined_odds_df)
+        # Scrape data
+        odds_df = scraper.scrape_all(fighters)
 
-    # Clean the fight odds data and drop the Event column in the cleaned CSV
-    input_file = existing_odds_file
-    output_file = "../data/odds data/cleaned_fight_odds.csv"
-    cleaned_odds_df = BestFightOddsScraperSelenium.clean_fight_odds_from_csv(input_file, output_file)
+        # Save raw data
+        odds_df.to_csv("../data/odds data/fight_odds.csv", index=False)
+        print("\nRaw data saved!")
 
-    print(cleaned_odds_df)
+        # Print scraping summary
+        print("\nScraping Summary:")
+        total_processed = len(fighters) - len(scraper.unprocessed_fighters)
+        print(f"Total fighters processed: {total_processed}")
+        success_rate = (total_processed / len(fighters)) * 100 if fighters else 0
+        print(f"Success rate: {success_rate:.2f}%")
+        if scraper.unprocessed_fighters:
+            print("\nUnprocessed fighters:")
+            for fighter in scraper.unprocessed_fighters:
+                print(f"- {fighter}")
+        else:
+            print("\nAll fighters processed successfully!")
 
-    # Print out the fighters that were not processed
-    if scraper.unprocessed_fighters:
-        print("\nThe following fighters were not processed after 5 attempts:")
-        for fighter in scraper.unprocessed_fighters:
-            print(f"- {fighter}")
-    else:
-        print("\nAll fighters were processed successfully.")
+    if run_cleaning:
+        # Clean and save processed data
+        input_file = "../data/odds data/fight_odds.csv"
+        output_file = "../data/odds data/cleaned_fight_odds.csv"
+        cleaned_odds_df = BestFightOddsScraperSelenium.clean_fight_odds_from_csv(input_file, output_file)
+        print("\nCleaned data saved!")
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    print(f"\nTotal time: {elapsed_time / 60:.2f} minutes")

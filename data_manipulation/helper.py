@@ -45,33 +45,6 @@ def preprocess_data(ufc_stats: pd.DataFrame, fighter_stats: pd.DataFrame) -> pd.
     return ufc_stats
 
 
-def process_odds_data(final_stats: pd.DataFrame) -> pd.DataFrame:
-    """
-    Process odds data from the cleaned odds CSV file and update final_stats with new odds columns.
-    """
-    print("Processing odds data...")
-    cleaned_odds_df = pd.read_csv('../data/odds data/cleaned_fight_odds.csv')
-    odds_columns = ['Open', 'Closing Range Start', 'Closing Range End', 'Movement']
-    odds_mappings = {
-        col: cleaned_odds_df.set_index(['Matchup', 'Event'])
-        .apply(lambda x: {'odds': x[col], 'Date': x['Date']}, axis=1)
-        .to_dict()
-        for col in odds_columns
-    }
-    processed_odds_mappings = preprocess_odds_mappings(odds_mappings)
-    new_odds = get_odds_efficient(final_stats, processed_odds_mappings, odds_columns)
-
-    # Assign new odds columns
-    for col in odds_columns:
-        final_stats[f'new_{col}'] = new_odds[col]
-    final_stats['open_odds'] = final_stats['new_Open']
-    final_stats['closing_range_start'] = final_stats['new_Closing Range Start']
-    final_stats['closing_range_end'] = final_stats['new_Closing Range End']
-    final_stats['movement'] = final_stats['new_Movement']
-
-    return final_stats
-
-
 def calculate_time_based_stats(final_stats: pd.DataFrame) -> pd.DataFrame:
     """
     Calculate additional time-based statistics such as takedowns and knockdowns per 15 minutes.
@@ -214,59 +187,70 @@ def parse_date(date_str):
             return pd.NaT
 
 
-def preprocess_odds_mappings(odds_mappings):
-    processed_mappings = {}
-    for odds_type, mappings in odds_mappings.items():
-        processed_mappings[odds_type] = {}
-        for (matchup, event_name), odds_data in mappings.items():
-            fighters = [str(f).strip().lower() for f in matchup.split('vs')]
-            event_key = str(event_name).lower()
-            odds_date = pd.to_datetime(odds_data['Date'])
-            odds = odds_data['odds']
+def process_odds_data(final_stats: pd.DataFrame) -> pd.DataFrame:
+    """
+    Process and merge betting odds data with fight statistics using merge_asof to match
+    on the nearest date within a 1 day tolerance.
 
-            for fighter in fighters:
-                if fighter not in processed_mappings[odds_type]:
-                    processed_mappings[odds_type][fighter] = []
-                processed_mappings[odds_type][fighter].append((event_key, odds_date, odds))
+    Args:
+        final_stats (pd.DataFrame): DataFrame containing fight statistics
 
-    return processed_mappings
+    Returns:
+        pd.DataFrame: DataFrame with merged odds data
+    """
+    import pandas as pd
 
+    # Copy and remove duplicate columns
+    final_stats = final_stats.copy().loc[:, ~final_stats.columns.duplicated()]
 
-def get_odds_efficient(df, processed_odds_mappings, odds_columns):
-    odds_values = pd.DataFrame(index=df.index, columns=odds_columns)
+    # Read odds data
+    odds_df = pd.read_csv('../data/odds data/cleaned_fight_odds.csv')
 
-    for odds_type in odds_columns:
-        fighter_odds = processed_odds_mappings[odds_type]
+    # Standardize fighter names
+    final_stats['fighter'] = final_stats['fighter'].str.lower().str.strip()
+    odds_df['Matchup'] = odds_df['Matchup'].str.lower().str.strip()
 
-        for idx, row in df.iterrows():
-            fighter = row['fighter']
-            event = row['event']
-            fight_date = row['fight_date']
+    # Rename odds_df column so both DataFrames share the same key
+    odds_df.rename(columns={'Matchup': 'fighter'}, inplace=True)
 
-            if isinstance(fighter, pd.Series):
-                fighter = fighter.iloc[0]
-            if isinstance(event, pd.Series):
-                event = event.iloc[0]
-            if isinstance(fight_date, pd.Series):
-                fight_date = fight_date.iloc[0]
+    print("\nSample of standardized names:")
+    print("final_stats.fighter:", final_stats['fighter'].head())
+    print("odds_df.fighter:", odds_df['fighter'].head())
 
-            fighter = str(fighter).lower()
-            event = str(event).lower()
-            fight_date = pd.to_datetime(fight_date)
+    # Convert dates to datetime
+    final_stats['fight_date'] = pd.to_datetime(final_stats['fight_date'])
+    odds_df['Date'] = pd.to_datetime(odds_df['Date'], format='%Y-%m-%d')
 
-            if fighter in fighter_odds:
-                for event_key, odds_date, odds in fighter_odds[fighter]:
-                    if (event == event_key and odds_date.year == fight_date.year) or \
-                            (abs((odds_date - fight_date).days) <= 1 and odds_date.year == fight_date.year):
-                        odds_values.at[idx, odds_type] = odds
-                        break
+    # Sort both DataFrames by their respective date columns (required for merge_asof)
+    final_stats.sort_values('fight_date', inplace=True)
+    odds_df.sort_values('Date', inplace=True)
 
-    return odds_values
+    # Merge using merge_asof with a grouping key and tolerance of 1 day
+    merged_df = pd.merge_asof(
+        final_stats,
+        odds_df,
+        left_on='fight_date',
+        right_on='Date',
+        by='fighter',
+        tolerance=pd.Timedelta("1D"),
+        direction='nearest'
+    )
 
+    # Drop the extra Date column from the odds DataFrame
+    merged_df.drop(columns=['Date'], inplace=True)
 
-def process_chunk(chunk, odds_mappings, odds_columns):
-    result = chunk.apply(lambda row: get_odds_efficient(row, odds_mappings, odds_columns), axis=1)
-    return result, len(chunk)
+    # Rename odds columns for clarity
+    merged_df.rename(
+        columns={
+            'Open': 'open_odds',
+            'Closing Range Start': 'closing_range_start',
+            'Closing Range End': 'closing_range_end',
+            'Movement': 'odds_movement'
+        },
+        inplace=True
+    )
+
+    return merged_df
 
 
 def remove_correlated_features(matchup_df, correlation_threshold=0.95):
