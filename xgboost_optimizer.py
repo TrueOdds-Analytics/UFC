@@ -10,7 +10,7 @@ import shap
 import threading
 import time
 
-# Global variables
+# Global variables for user interaction
 should_pause = False
 best_accuracy = 0
 best_auc = 0
@@ -18,6 +18,7 @@ best_auc_diff = 0
 
 
 def user_input_thread():
+    """Background thread to handle user input for pausing/quitting the optimization."""
     global should_pause
     while True:
         user_input = input("Press 'p' to pause/resume or 'q' to quit: ")
@@ -30,35 +31,55 @@ def user_input_thread():
             break
 
 
-def get_train_val_data(odds):
+def load_and_preprocess_data(odds_type='close_odds'):
+    """
+    Load and preprocess the training and validation data.
+
+    Args:
+        odds_type: Which odds to use in the model: 'open_odds', 'close_odds', or None
+
+    Returns:
+        Tuple of (X_train, X_val, y_train, y_val)
+    """
+    print(f"Loading data with odds type: {odds_type}")
+
+    # Load data from CSV files
     train_data = pd.read_csv('data/train test data/train_data.csv')
     val_data = pd.read_csv('data/train test data/val_data.csv')
 
+    # Extract target variable
     train_labels = train_data['winner']
     val_labels = val_data['winner']
+
+    # Remove target from feature sets
     train_data = train_data.drop(['winner'], axis=1)
     val_data = val_data.drop(['winner'], axis=1)
-    if odds == 'open_odds':
-        columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date', 'current_fight_closing_odds',
-                           'current_fight_closing_odds_b', 'current_fight_closing_odds_ratio',
-                           'current_fight_closing_odds_diff']
-    elif odds == 'close_odds':
+
+    # Determine columns to drop based on odds_type
+    if odds_type == 'open_odds':
+        columns_to_drop = [
+            'fighter_a', 'fighter_b', 'current_fight_date',
+            'current_fight_closing_odds', 'current_fight_closing_odds_b',
+            'current_fight_closing_odds_ratio', 'current_fight_closing_odds_diff'
+        ]
+    elif odds_type == 'close_odds':
         columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date']
     else:
-        columns_to_drop = list(train_data.columns[train_data.columns.str.contains('odd', case=False)]) + ['fighter_a',
-                                                                                                          'fighter_b',
-                                                                                                          'current_fight_date']
+        columns_to_drop = list(train_data.columns[train_data.columns.str.contains('odd', case=False)]) + [
+            'fighter_a', 'fighter_b', 'current_fight_date'
+        ]
 
+    # Drop specified columns
     train_data = train_data.drop(columns=columns_to_drop)
     val_data = val_data.drop(columns=columns_to_drop)
 
-    # Shuffle data
+    # Shuffle data (with consistent random state for reproducibility)
     train_data = train_data.sample(frac=1, random_state=42).reset_index(drop=True)
     train_labels = train_labels.sample(frac=1, random_state=42).reset_index(drop=True)
     val_data = val_data.sample(frac=1, random_state=42).reset_index(drop=True)
     val_labels = val_labels.sample(frac=1, random_state=42).reset_index(drop=True)
 
-    # Convert specified columns to category type
+    # Convert categorical columns
     category_columns = [
         'result_fight_1', 'winner_fight_1', 'weight_class_fight_1', 'scheduled_rounds_fight_1',
         'result_b_fight_1', 'winner_b_fight_1', 'weight_class_b_fight_1', 'scheduled_rounds_b_fight_1',
@@ -71,27 +92,41 @@ def get_train_val_data(odds):
     for df in [train_data, val_data]:
         df[category_columns] = df[category_columns].astype("category")
 
+    print(f"Data loaded and preprocessed. Training features: {train_data.shape[1]}")
     return train_data, val_data, train_labels, val_labels
 
 
-def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, accuracy, auc):
+def plot_learning_curves(train_losses, val_losses, train_auc, val_auc, feature_count, accuracy, auc):
+    """
+    Plot learning curves for model training.
+
+    Args:
+        train_losses: List of training loss values
+        val_losses: List of validation loss values
+        train_auc: List of training AUC values
+        val_auc: List of validation AUC values
+        feature_count: Number of features used
+        accuracy: Final validation accuracy
+        auc: Final validation AUC
+    """
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
 
+    # Plot loss curves
     ax1.plot(train_losses, label='Train Loss')
     ax1.plot(val_losses, label='Validation Loss')
     ax1.set_xlabel('Number of iterations')
     ax1.set_ylabel('Log Loss')
     ax1.set_title(
-        f'Learning Curves - Log Loss (Features: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
+        f'Learning Curves - Log Loss (Features: {feature_count}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
     ax1.legend()
     ax1.grid()
 
+    # Plot AUC curves
     ax2.plot(train_auc, label='Train AUC')
     ax2.plot(val_auc, label='Validation AUC')
     ax2.set_xlabel('Number of iterations')
     ax2.set_ylabel('AUC')
-    ax2.set_title(
-        f'Learning Curves - AUC (Features removed: {features_removed}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
+    ax2.set_title(f'Learning Curves - AUC (Features: {feature_count}, Val Acc: {accuracy:.4f}, Val AUC: {auc:.4f})')
     ax2.legend()
     ax2.grid()
 
@@ -99,102 +134,134 @@ def plot_losses(train_losses, val_losses, train_auc, val_auc, features_removed, 
     plt.show()
 
 
-def create_shap_graph(model_path, X_train):
-    # Load the model from the file
+def create_feature_importance_plot(model_path, X_train, top_n=50, print_count=150):
+    """
+    Create and display SHAP feature importance plot.
+
+    Args:
+        model_path: Path to the saved model file
+        X_train: Training data used for SHAP analysis
+        top_n: Number of top features to display in the plot
+        print_count: Number of top features to print to console
+    """
+    print(f"Creating SHAP feature importance plot for model: {model_path}")
+
+    # Load the model
     model = xgb.XGBClassifier(enable_categorical=True)
     model.load_model(model_path)
 
-    # Create the SHAP explainer
+    # Create SHAP explainer and calculate values
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_train)
 
+    # Calculate mean absolute SHAP values
     mean_abs_shap_values = np.abs(shap_values).mean(axis=0)
     feature_importance = sorted(zip(X_train.columns, mean_abs_shap_values), key=lambda x: x[1], reverse=True)
 
-    top_50_features = feature_importance[:50]
+    # Print top features
     print("Most influential features:")
-    for feature, importance in feature_importance[:150]:
-        print(f"{feature}: {importance}")
+    for feature, importance in feature_importance[:print_count]:
+        print(f"{feature}: {importance:.6f}")
 
-    top_50_df = pd.DataFrame(top_50_features, columns=["Feature", "Importance"])
+    # Create plot
+    top_n_features = feature_importance[:top_n]
+    top_n_df = pd.DataFrame(top_n_features, columns=["Feature", "Importance"])
 
     plt.figure(figsize=(12, 20))
-    plt.barh(top_50_df["Feature"], top_50_df["Importance"], color='blue')
+    plt.barh(top_n_df["Feature"], top_n_df["Importance"], color='blue')
     plt.xlabel('Mean Absolute SHAP Value')
     plt.ylabel('Features')
-    plt.title("SHAP Values for XGBoost model")
+    plt.title(f"Top {top_n} Features by SHAP Importance")
     plt.gca().invert_yaxis()
     plt.tight_layout()
     plt.show()
 
+    return [feature for feature, _ in feature_importance]
 
-def create_fit_and_evaluate_model(params, X_train, X_val, y_train, y_val):
+
+def train_xgboost_model(params, X_train, X_val, y_train, y_val):
+    """
+    Train an XGBoost model with the given parameters and evaluate it.
+
+    Args:
+        params: Dictionary of XGBoost parameters
+        X_train: Training features
+        X_val: Validation features
+        y_train: Training labels
+        y_val: Validation labels
+
+    Returns:
+        Tuple of (model, accuracy, auc, train_losses, val_losses, train_auc, val_auc)
+    """
+    # Ensure required parameters are set
     params['enable_categorical'] = True
-    params['eval_metric'] = ['logloss', 'auc']  # Add this line
+    params['eval_metric'] = ['logloss', 'auc']
 
+    # Default parameters if not specified
+    default_params = {
+        'tree_method': 'hist',
+        'device': 'cuda',
+        'objective': 'binary:logistic',
+        'verbosity': 0,
+        'n_jobs': -1,
+        'n_estimators': 1000,
+        'early_stopping_rounds': 250
+    }
+
+    # Update params with defaults if not already set
+    for key, value in default_params.items():
+        if key not in params:
+            params[key] = value
+
+    # Initialize and train the model
     model = xgb.XGBClassifier(**params)
     eval_set = [(X_train, y_train), (X_val, y_val)]
-
-    # Remove eval_metric from fit method
     model.fit(X_train, y_train, eval_set=eval_set, verbose=False)
 
+    # Extract training history
     results = model.evals_result()
     train_losses = results['validation_0']['logloss']
     val_losses = results['validation_1']['logloss']
-
-    # Safely get AUC values
     train_auc = results['validation_0'].get('auc', [])
     val_auc = results['validation_1'].get('auc', [])
 
+    # Evaluate model
     y_val_pred = model.predict(X_val)
     accuracy = accuracy_score(y_val, y_val_pred)
 
-    # Calculate AUC manually
+    # Calculate AUC
     try:
         auc = roc_auc_score(y_val, model.predict_proba(X_val)[:, 1])
     except ValueError as e:
         print(f"Error calculating AUC: {str(e)}")
         print(f"Unique values in y_val: {np.unique(y_val)}")
-        print(f"Shape of predict_proba: {model.predict_proba(X_val).shape}")
-        auc = None
+        auc = 0.5  # Default value when AUC calculation fails
 
     return model, accuracy, auc, train_losses, val_losses, train_auc, val_auc
 
 
-def adjust_hyperparameter_ranges(study, num_best_trials=20):
-    trials = sorted(study.trials, key=lambda t: t.value, reverse=True)
-    best_trials = trials[:num_best_trials]
-
-    new_ranges = {}
-    for param_name in study.best_params.keys():
-        values = [t.params[param_name] for t in best_trials if param_name in t.params]
-        if values:
-            if isinstance(study.best_params[param_name], int):
-                new_ranges[param_name] = {
-                    'type': 'int',
-                    'low': max(min(values) - 1, 1),
-                    'high': min(max(values) + 1, 10)
-                }
-            elif isinstance(study.best_params[param_name], float):
-                new_ranges[param_name] = {
-                    'type': 'float',
-                    'low': max(min(values) * 0.8, 0.00001),
-                    'high': min(max(values) * 1.2, 150.0)
-                }
-            else:  # For categorical parameters
-                new_ranges[param_name] = {
-                    'type': 'categorical',
-                    'choices': list(set(values))
-                }
-
-    return new_ranges
-
-
 def objective(trial, X_train, X_val, y_train, y_val, params=None):
-    global should_pause, best_accuracy, best_auc_diff
+    """
+    Optuna objective function for hyperparameter optimization.
+
+    Args:
+        trial: Optuna trial object
+        X_train: Training features
+        X_val: Validation features
+        y_train: Training labels
+        y_val: Validation labels
+        params: Optional parameter dict (if None, will suggest parameters)
+
+    Returns:
+        Validation accuracy score
+    """
+    global should_pause, best_accuracy, best_auc, best_auc_diff
+
+    # Wait if paused
     while should_pause:
         time.sleep(1)
 
+    # Suggest parameters if not provided
     if params is None:
         params = {
             'lambda': trial.suggest_float('lambda', 25, 30, log=True),
@@ -209,137 +276,168 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
             'grow_policy': trial.suggest_categorical('grow_policy', ['depthwise', 'lossguide']),
         }
 
-    params.update({
-        'tree_method': 'hist',
-        'device': 'cuda',
-        'objective': 'binary:logistic',
-        'verbosity': 0,
-        'n_jobs': -1,
-        'n_estimators': 1000,
-        'early_stopping_rounds': 250,
-        'eval_metric': ['logloss', 'auc'],
-        'enable_categorical': True
-    })
+    # Train and evaluate model
+    model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = train_xgboost_model(
+        params, X_train, X_val, y_train, y_val
+    )
 
-    model, accuracy, auc, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(params, X_train,
-                                                                                                       X_val, y_train,
-                                                                                                       y_val)
+    # Calculate train-validation AUC difference (for overfitting detection)
+    if train_auc and val_auc:
+        auc_diff = abs(train_auc[-1] - val_auc[-1])
+    else:
+        auc_diff = 1.0  # High difference when AUC isn't available
 
-    # Calculate the difference between train and validation AUC
-    auc_diff = abs(train_auc[-1] - val_auc[-1])
-
+    # Save good models and plot learning curves
     if accuracy > 0.67 and (auc_diff < 0.10):
-        best_accuracy = accuracy
-        best_auc_diff = auc_diff
-        model_filename = f'models/xgboost/jan2024-july2024/split 125/model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
-        model.save_model(model_filename)
-        plot_losses(train_losses, val_losses, train_auc, val_auc, len(X_train.columns), accuracy,
-                    auc if auc is not None else 0)
+        if accuracy > best_accuracy:
+            best_accuracy = accuracy
+            best_auc_diff = auc_diff
 
-    return accuracy  # Return both accuracy and final validation loss
+            # Save model
+            model_dir = 'models/xgboost/jan2024-dec2024/split 125/'
+            model_filename = f'{model_dir}model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
+            model.save_model(model_filename)
+            print(f"New best model saved: {model_filename}")
+
+            # Plot learning curves
+            plot_learning_curves(train_losses, val_losses, train_auc, val_auc,
+                                 len(X_train.columns), accuracy, auc)
+
+    return accuracy
 
 
-def optimize_model(X_train, X_val, y_train, y_val, n_rounds=1, n_trials_per_round=10000):
-    for round in range(n_rounds):
-        print(f"Starting optimization round {round + 1}/{n_rounds}")
+def optimize_model(X_train, X_val, y_train, y_val, n_trials=10000):
+    """
+    Perform hyperparameter optimization for XGBoost model.
 
-        if round == 0:
-            study = optuna.create_study(direction='maximize',
-                                        sampler=TPESampler(),
-                                        pruner=MedianPruner())
-            study.optimize(lambda trial: objective(trial, X_train, X_val, y_train, y_val),
-                           n_trials=n_trials_per_round)
-        else:
-            new_ranges = adjust_hyperparameter_ranges(study)
+    Args:
+        X_train: Training features
+        X_val: Validation features
+        y_train: Training labels
+        y_val: Validation labels
+        n_trials: Number of Optuna trials to run
 
-            def objective_with_new_ranges(trial):
-                params = {}
-                for k, v in new_ranges.items():
-                    if v['type'] == 'int':
-                        params[k] = trial.suggest_int(k, v['low'], v['high'])
-                    elif v['type'] == 'float':
-                        if k in ['subsample', 'colsample_bytree']:
-                            params[k] = trial.suggest_float(k, max(v['low'], 0.1), min(v['high'], 1.0))
-                        elif k == 'eta':
-                            params[k] = trial.suggest_float(k, max(v['low'], 1e-5), min(v['high'], 1.0), log=True)
-                        else:
-                            params[k] = trial.suggest_float(k, max(v['low'], 1e-5), min(v['high'], 100.0), log=True)
-                    elif v['type'] == 'categorical':
-                        params[k] = trial.suggest_categorical(k, v['choices'])
-                return objective(trial, X_train, X_val, y_train, y_val, params)
+    Returns:
+        Best Optuna trial
+    """
+    print(f"Starting hyperparameter optimization with {n_trials} trials...")
 
-            study = optuna.create_study(direction='maximize', sampler=TPESampler(), pruner=MedianPruner())
-            study.optimize(objective_with_new_ranges, n_trials=n_trials_per_round)
+    # Create Optuna study
+    study = optuna.create_study(
+        direction='maximize',
+        sampler=TPESampler(),
+        pruner=MedianPruner()
+    )
 
-        print(f"Round {round + 1} best accuracy: {study.best_value:.4f}")
-        print(f"Round {round + 1} best parameters: {study.best_params}")
+    # Run optimization
+    study.optimize(
+        lambda trial: objective(trial, X_train, X_val, y_train, y_val),
+        n_trials=n_trials
+    )
+
+    # Print results
+    print(f"Best validation accuracy: {study.best_value:.4f}")
+    print(f"Best hyperparameters: {study.best_params}")
 
     return study.best_trial
 
 
-if __name__ == "__main__":
+def train_model_with_top_features(X_train, X_val, y_train, y_val, model_path, num_top_features=125):
+    """
+    Train a model using only the top features from an existing model.
+
+    Args:
+        X_train: Training features
+        X_val: Validation features
+        y_train: Training labels
+        y_val: Validation labels
+        model_path: Path to the existing model to extract features from
+        num_top_features: Number of top features to use
+
+    Returns:
+        Path to the saved model with top features
+    """
+    print(f"Training model with top {num_top_features} features from {model_path}")
+
+    # Get feature importance from existing model
+    feature_importance_list = create_feature_importance_plot(model_path, X_train)
+    top_features = feature_importance_list[:num_top_features]
+
+    print(f"Selected top {num_top_features} features")
+
+    # Filter data to include only top features
+    X_train_top = X_train[top_features]
+    X_val_top = X_val[top_features]
+
+    # Run hyperparameter optimization for top features
+    print(f"Optimizing model with top {num_top_features} features...")
+    best_trial = optimize_model(X_train_top, X_val_top, y_train, y_val, n_trials=10000)
+
+    # Train final model with best parameters
+    best_params = best_trial.params
+    print(f"Training final model with best parameters: {best_params}")
+
+    best_model_top, accuracy_top, auc_top, train_losses, val_losses, train_auc, val_auc = train_xgboost_model(
+        best_params, X_train_top, X_val_top, y_train, y_val
+    )
+
+    # Calculate AUC difference
+    auc_diff = abs(train_auc[-1] - val_auc[-1]) if train_auc and val_auc else 1.0
+
+    # Save model
+    model_dir = 'models/xgboost/jan2024-july2024/split 125/'
+    model_filename = f'{model_dir}model_top{num_top_features}_{accuracy_top:.4f}_auc_diff_{auc_diff:.4f}.json'
+    best_model_top.save_model(model_filename)
+
+    print(f"Final model results:")
+    print(f"  Validation accuracy: {accuracy_top:.4f}")
+    print(f"  Validation AUC: {auc_top:.4f}")
+    print(f"  AUC difference: {auc_diff:.4f}")
+    print(f"Model saved to: {model_filename}")
+
+    # Plot learning curves
+    plot_learning_curves(train_losses, val_losses, train_auc, val_auc,
+                         num_top_features, accuracy_top, auc_top)
+
+    return model_filename
+
+
+def main():
+    """Main program execution"""
+    # Start user input thread
     input_thread = threading.Thread(target=user_input_thread, daemon=True)
     input_thread.start()
 
-    X_train, X_val, y_train, y_val = get_train_val_data(odds='close_odds')
-    print("Starting initial optimization and evaluation...")
     try:
-        # Original training code
-        # study = optimize_model(X_train, X_val, y_train, y_val, 1, 10000)
-        # best_trials = study.best_trials
+        # Load and preprocess data
+        X_train, X_val, y_train, y_val = load_and_preprocess_data(odds_type='close_odds')
+        print("Data loaded. Starting optimization...")
 
-        model_filename = f'models/xgboost/jan2024-july2024/split/model_0.6506_auc_diff_0.0310.json'
-        print("Creating SHAP graph for the best model")
-        create_shap_graph(model_filename, X_train)
-        print("SHAP graph creation completed.")
-        print("--------------------")
+        # Phase 1: Train initial model with all features
+        best_trial = optimize_model(X_train, X_val, y_train, y_val, n_trials=10000)
 
-        # New feature selection and optimization process
-        num_top_features = 125  # You can change this value as needed
+        # Use an existing model for feature selection and visualization
+        existing_model_path = 'models/xgboost/jan2024-july2024/split/model_0.6506_auc_diff_0.0310.json'
+        print("Creating feature importance visualization for existing model")
+        create_feature_importance_plot(existing_model_path, X_train)
 
-        # Get feature importance from the best model
-        best_model_path = model_filename
-        best_model = xgb.XGBClassifier(enable_categorical=True)
-        best_model.load_model(best_model_path)
-        feature_importance = best_model.get_booster().get_score(importance_type='gain')
-        sorted_importance = sorted(feature_importance.items(), key=lambda x: x[1], reverse=True)
-        top_features = [feature for feature, importance in sorted_importance[:num_top_features]]
-
-        print(f"Top {num_top_features} features selected: {top_features}")
-
-        # Filter the data to include only the top features
-        X_train_top = X_train[top_features]
-        X_val_top = X_val[top_features]
-
-        # Run Optuna study with top features
-        print(f"Starting Optuna study with top {num_top_features} features...")
-        study_top = optimize_model(X_train_top, X_val_top, y_train, y_val, n_rounds=1, n_trials_per_round=10000)
-
-        print(f"Optuna study with top {num_top_features} features completed.")
-        print(f"Best accuracy: {study_top.best_value:.4f}")
-        print("Best parameters:", study_top.best_params)
-
-        # Create and evaluate the best model with top features
-        best_model_top, accuracy_top, auc_top, train_losses, val_losses, train_auc, val_auc = create_fit_and_evaluate_model(
-            study_top.best_params, X_train_top, X_val_top, y_train, y_val
+        # Phase 2: Train model with top features only
+        num_top_features = 125
+        top_features_model_path = train_model_with_top_features(
+            X_train, X_val, y_train, y_val, existing_model_path, num_top_features
         )
 
-        print(f"Best model (top {num_top_features} features) validation accuracy: {accuracy_top:.4f}")
-        print(f"Best model (top {num_top_features} features) validation AUC: {auc_top:.4f}")
-        print("--------------------")
+        # Visualize final model feature importance
+        print("Creating feature importance visualization for top features model")
+        create_feature_importance_plot(top_features_model_path, X_train[X_train.columns[:num_top_features]])
 
-        # Save the best model with top features
-        model_filename_top = f'models/xgboost/jan2024-july2024/split 125/model_top{num_top_features}_{accuracy_top:.4f}_auc_diff_{(auc_top - study_top.best_value):.4f}.json'
-        best_model_top.save_model(model_filename_top)
-        print(f"Best model with top {num_top_features} features saved as: {model_filename_top}")
-
-        # Plot learning curves for the top features model
-        plot_losses(train_losses, val_losses, train_auc, val_auc, num_top_features, accuracy_top, auc_top)
-
-        # Create SHAP graph for the best model with top features
-        print(f"Creating SHAP graph for the best model with top {num_top_features} features")
-        create_shap_graph(model_filename_top, X_train_top)
-        print("SHAP graph creation completed.")
+        print("Training pipeline completed successfully")
 
     except KeyboardInterrupt:
-        print("Process interrupted by user.")
+        print("Process interrupted by user")
+    except Exception as e:
+        print(f"Error during execution: {str(e)}")
+
+
+if __name__ == "__main__":
+    main()
