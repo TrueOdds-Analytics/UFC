@@ -951,13 +951,6 @@ class ResultsVisualizer:
         fixed_scale = (stats.avg_fixed_bet_size / fixed_net_profit) * 100 if fixed_net_profit != 0 else 0
         kelly_scale = (stats.avg_kelly_bet_size / kelly_net_profit) * 100 if kelly_net_profit != 0 else 0
 
-        # Optimal parameters panel
-        self.console.print(Panel(
-            f"Best confidence threshold: {config.confidence_threshold:.4f}\n"
-            f"Best Kelly ROI: {stats.kelly_roi:.2f}%",
-            title="Optimal Parameters"
-        ))
-
         # Results table
         table = Table(title=f"Betting Results ({config.confidence_threshold:.0%} confidence threshold)")
         table.add_column("Metric", style="cyan")
