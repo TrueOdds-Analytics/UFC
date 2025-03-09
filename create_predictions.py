@@ -731,9 +731,11 @@ class UFCPredictor:
 
         # Calculate Kelly criterion bet size
         if predicted_winner.lower() == fighter_a.lower():
-            odds_used = current_fight_data['closing_range_end']
+            odds_used = self.odds_calculator.round_to_nearest(current_fight_data['closing_range_end']) if \
+                current_fight_data['closing_range_end'] is not None else 0
         else:
-            odds_used = current_fight_data['closing_range_end_b']
+            odds_used = self.odds_calculator.round_to_nearest(current_fight_data['closing_range_end_b']) if \
+                current_fight_data['closing_range_end_b'] is not None else 0
 
         kelly_fraction = self.odds_calculator.calculate_kelly_fraction(
             winning_probability, odds_used, fractional_kelly
@@ -754,12 +756,12 @@ class UFCPredictor:
 def main():
     """Run example prediction."""
     # Fight details
-    fighter_a = "william gomis"
-    fighter_b = "Hyder Amil"
+    fighter_a = "Marvin Vettori"
+    fighter_b = "Roman Dolidze"
 
     # Odds data
-    fighter_a_odds = {'open': -186, 'closing': -220}
-    fighter_b_odds = {'open': 150, 'closing': 185}
+    fighter_a_odds = {'open': -138, 'closing': -132}
+    fighter_b_odds = {'open': 110, 'closing': 115}
 
     # Setup predictor
     predictor = UFCPredictor(
@@ -773,7 +775,7 @@ def main():
     prediction = predictor.predict_fight(
         fighter_a=fighter_a,
         fighter_b=fighter_b,
-        fight_date="2025-03-01",
+        fight_date="2025-03-15",
         fighter_a_odds=fighter_a_odds,
         fighter_b_odds=fighter_b_odds,
         fractional_kelly=0.5,
