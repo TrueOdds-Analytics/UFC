@@ -84,51 +84,26 @@ class OddsCalculator:
         return f * fractional_kelly
 
     @staticmethod
-    def process_odds(fight_data: Dict[str, Any]) -> Tuple[List[float], float, float, List[float], float, float]:
+    def process_closing_odds(closing_odds_a: float, closing_odds_b: float) -> Tuple[List[float], float, float]:
         """
-        Process opening and closing odds for a fight.
+        Process closing odds for a fight.
 
         Args:
-            fight_data: Dictionary containing fight odds data
+            closing_odds_a: Closing odds for fighter A
+            closing_odds_b: Closing odds for fighter B
 
         Returns:
             Tuple containing processed odds and derived metrics
         """
-        # Process opening odds
-        odds_a = fight_data.get('open_odds', np.nan)
-        odds_b = fight_data.get('open_odds_b', np.nan)
-
-        # Handle opening odds
-        if pd.notna(odds_a) and pd.notna(odds_b):
-            odds_a = OddsCalculator.round_to_nearest(odds_a)
-            odds_b = OddsCalculator.round_to_nearest(odds_b)
-        elif pd.notna(odds_a):
-            odds_a = OddsCalculator.round_to_nearest(odds_a)
-            odds_b = OddsCalculator.calculate_complementary_odd(odds_a)
-        elif pd.notna(odds_b):
-            odds_b = OddsCalculator.round_to_nearest(odds_b)
-            odds_a = OddsCalculator.calculate_complementary_odd(odds_b)
-        else:
-            # Default to -110/-110 if no odds provided
-            odds_a, odds_b = -110, -110
-
-        opening_odds = [odds_a, odds_b]
-        opening_odds_diff = odds_a - odds_b
-        opening_odds_ratio = odds_a / odds_b if odds_b != 0 else 0
-
         # Process closing odds
-        close_a = fight_data.get('closing_range_end', np.nan)
-        close_b = fight_data.get('closing_range_end_b', np.nan)
-
-        # Handle closing odds
-        if pd.notna(close_a) and pd.notna(close_b):
-            close_a = OddsCalculator.round_to_nearest(close_a)
-            close_b = OddsCalculator.round_to_nearest(close_b)
-        elif pd.notna(close_a):
-            close_a = OddsCalculator.round_to_nearest(close_a)
+        if pd.notna(closing_odds_a) and pd.notna(closing_odds_b):
+            close_a = OddsCalculator.round_to_nearest(closing_odds_a)
+            close_b = OddsCalculator.round_to_nearest(closing_odds_b)
+        elif pd.notna(closing_odds_a):
+            close_a = OddsCalculator.round_to_nearest(closing_odds_a)
             close_b = OddsCalculator.calculate_complementary_odd(close_a)
-        elif pd.notna(close_b):
-            close_b = OddsCalculator.round_to_nearest(close_b)
+        elif pd.notna(closing_odds_b):
+            close_b = OddsCalculator.round_to_nearest(closing_odds_b)
             close_a = OddsCalculator.calculate_complementary_odd(close_b)
         else:
             close_a, close_b = -110, -110
@@ -137,10 +112,7 @@ class OddsCalculator:
         closing_odds_diff = close_a - close_b
         closing_odds_ratio = close_a / close_b if close_b != 0 else 0
 
-        return (
-            opening_odds, opening_odds_diff, opening_odds_ratio,
-            closing_odds, closing_odds_diff, closing_odds_ratio
-        )
+        return closing_odds, closing_odds_diff, closing_odds_ratio
 
 
 class FighterStats:
@@ -309,8 +281,8 @@ class MatchupCreator:
         fighter_df = self._get_fighter_recent_fights(df, fighter_a, current_fight_date, n_past_fights)
         opponent_df = self._get_fighter_recent_fights(df, fighter_b, current_fight_date, n_past_fights)
 
-        # Check if we have enough data
-        if len(fighter_df) < n_past_fights or len(opponent_df) < n_past_fights:
+        # Check if we have enough data (at least one fight for each fighter)
+        if len(fighter_df) < 1 or len(opponent_df) < 1:
             print(f"Not enough past fight data for {fighter_a} or {fighter_b}")
             return None
 
@@ -320,7 +292,7 @@ class MatchupCreator:
             features_to_include, current_fight_date, current_fight_data, n_past_fights
         )
 
-        # Ensure correct column order by matching test data
+        # Align with test data schema
         matchup_df = self._align_with_test_data(matchup_df)
 
         # Save if output directory is provided
@@ -358,15 +330,22 @@ class MatchupCreator:
             n_past_fights: int
     ) -> pd.DataFrame:
         """Build a DataFrame with all matchup features."""
+        # Check if model uses open odds
+        model_uses_open_odds = current_fight_data.get('model_uses_open_odds', True)
+
         # Calculate mean feature values from past fights
         fighter_features = fighter_df[features_to_include].mean().values
         opponent_features = opponent_df[features_to_include].mean().values
 
         # Get past fight results
+        num_fighter_fights = min(len(fighter_df), n_past_fights)
+        num_opponent_fights = min(len(opponent_df), n_past_fights)
+
         results_fighter = fighter_df[['result', 'winner', 'weight_class', 'scheduled_rounds']] \
-            .head(n_past_fights).values.flatten()
+            .head(num_fighter_fights).values.flatten() if num_fighter_fights > 0 else np.array([])
+
         results_opponent = opponent_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']] \
-            .head(n_past_fights).values.flatten()
+            .head(num_opponent_fights).values.flatten() if num_opponent_fights > 0 else np.array([])
 
         # Pad results arrays to consistent length
         results_fighter = np.pad(
@@ -382,11 +361,32 @@ class MatchupCreator:
             constant_values=np.nan
         )
 
-        # Process odds data
-        odds_data = self.odds_calculator.process_odds(current_fight_data)
-        (current_fight_odds, current_fight_odds_diff, current_fight_odds_ratio,
-         current_fight_closing_odds, current_fight_closing_odds_diff,
-         current_fight_closing_odds_ratio) = odds_data
+        # Process closing odds from the fight data
+        closing_odds_a = current_fight_data.get('closing_range_end')
+        closing_odds_b = current_fight_data.get('closing_range_end_b')
+        closing_odds, closing_odds_diff, closing_odds_ratio = self.odds_calculator.process_closing_odds(
+            closing_odds_a, closing_odds_b
+        )
+
+        # Define all features that will be included in the model input
+        all_features = []
+
+        # Add fighter features
+        all_features.extend([fighter_features, opponent_features, results_fighter, results_opponent])
+
+        if model_uses_open_odds:
+            # Set fixed value for open odds (always -107)
+            open_odds_a = -107
+            open_odds_b = -107
+            open_odds = [open_odds_a, open_odds_b]
+            open_odds_diff = open_odds_a - open_odds_b
+            open_odds_ratio = open_odds_a / open_odds_b
+
+            # Add open odds features
+            all_features.extend([open_odds, [open_odds_diff, open_odds_ratio]])
+
+        # Add closing odds features
+        all_features.extend([closing_odds, [closing_odds_diff, closing_odds_ratio]])
 
         # Calculate fighter stats
         age_a, exp_a, days_a, win_streak_a, loss_streak_a = FighterStats.calculate_stats(
@@ -409,19 +409,41 @@ class MatchupCreator:
         loss_streak_diff = loss_streak_a - loss_streak_b
         loss_streak_ratio = safe_div(loss_streak_a, loss_streak_b, 1)
 
+        # Add age features
+        all_features.extend([[age_a, age_b, age_diff, age_ratio]])
+
         # Calculate ELO stats
-        elo_a = fighter_df['fight_outcome_elo'].iloc[0]
-        elo_b = opponent_df['fight_outcome_elo'].iloc[0]
+        elo_a = fighter_df['pre_fight_elo'].iloc[0] if 'pre_fight_elo' in fighter_df.columns and len(
+            fighter_df) > 0 else 1500
+        elo_b = opponent_df['pre_fight_elo'].iloc[0] if 'pre_fight_elo' in opponent_df.columns and len(
+            opponent_df) > 0 else 1500
         elo_diff = elo_a - elo_b
         elo_a_win_chance = 1 / (1 + 10 ** ((elo_b - elo_a) / 400))
         elo_b_win_chance = 1 - elo_a_win_chance
         elo_ratio = safe_div(elo_a, elo_b)
         elo_stats = [elo_a, elo_b, elo_diff, elo_a_win_chance, elo_b_win_chance, elo_ratio]
 
+        # Add ELO stats
+        all_features.extend([elo_stats])
+
+        # Add streak, experience and time stats
+        all_features.extend([
+            [win_streak_a, win_streak_b, win_streak_diff, win_streak_ratio],
+            [loss_streak_a, loss_streak_b, loss_streak_diff, loss_streak_ratio],
+            [exp_a, exp_b, exp_diff, exp_ratio],
+            [days_a, days_b, days_diff, days_ratio]
+        ])
+
         # Build column names for different feature groups
         feature_columns = self._build_feature_column_names(features_to_include, n_past_fights)
         results_columns = self._build_results_column_names(n_past_fights)
-        odds_age_columns = self._build_odds_age_column_names()
+
+        # Determine column names based on model type
+        if model_uses_open_odds:
+            odds_age_columns = self._build_odds_age_column_names()
+        else:
+            odds_age_columns = self._build_closing_odds_column_names()
+
         new_columns = self._build_new_column_names()
 
         # Combine all column names
@@ -429,20 +451,13 @@ class MatchupCreator:
                        odds_age_columns + new_columns + ['current_fight_date']
 
         # Combine all feature values
-        combined_features = np.concatenate([
-            fighter_features, opponent_features, results_fighter, results_opponent,
-            current_fight_odds, [current_fight_odds_diff, current_fight_odds_ratio],
-            current_fight_closing_odds, [current_fight_closing_odds_diff, current_fight_closing_odds_ratio],
-            [age_a, age_b, age_diff, age_ratio],
-            elo_stats,
-            [win_streak_a, win_streak_b, win_streak_diff, win_streak_ratio],
-            [loss_streak_a, loss_streak_b, loss_streak_diff, loss_streak_ratio],
-            [exp_a, exp_b, exp_diff, exp_ratio],
-            [days_a, days_b, days_diff, days_ratio]
-        ])
+        combined_features = np.concatenate(all_features)
 
         # Create DataFrame and add additional columns
-        matchup_df = pd.DataFrame([combined_features], columns=column_names[2:-1])
+        column_offset = 2  # fighter and fighter_b columns
+        feature_end_index = len(combined_features) + column_offset
+
+        matchup_df = pd.DataFrame([combined_features], columns=column_names[column_offset:feature_end_index])
         matchup_df.insert(0, 'fighter', fighter_a)
         matchup_df.insert(1, 'fighter_b', fighter_b)
         matchup_df['current_fight_date'] = current_fight_data['current_fight_date']
@@ -454,6 +469,15 @@ class MatchupCreator:
         matchup_df = self._add_diff_ratio_columns(matchup_df, features_to_include, n_past_fights)
 
         return matchup_df
+
+    def _build_closing_odds_column_names(self) -> List[str]:
+        """Build column names for closing odds and age features (no open odds)."""
+        return [
+            'current_fight_closing_odds', 'current_fight_closing_odds_b',
+            'current_fight_closing_odds_diff', 'current_fight_closing_odds_ratio',
+            'current_fight_age', 'current_fight_age_b',
+            'current_fight_age_diff', 'current_fight_age_ratio'
+        ]
 
     def _build_feature_column_names(self, features: List[str], n_past_fights: int) -> List[str]:
         """Build column names for feature columns."""
@@ -572,16 +596,18 @@ class ModelManager:
             matchup_df: pd.DataFrame,
             model_dir: str,
             val_data_path: str,
-            use_calibration: bool = True
+            use_calibration: bool = True,
+            model_index: int = None
     ) -> Tuple[str, float]:
         """
-        Generate predictions using an ensemble of models.
+        Generate predictions using an ensemble of models or a specific model.
 
         Args:
             matchup_df: DataFrame with matchup features
             model_dir: Directory containing model files
             val_data_path: Path to validation data for calibration
             use_calibration: Whether to calibrate probabilities
+            model_index: Index of specific model to use (None for ensemble)
 
         Returns:
             Tuple of (predicted_winner, winning_probability)
@@ -595,12 +621,20 @@ class ModelManager:
             'model_0.6734_auc_diff_0.0251.json'
         ]
 
-        # Load all models
+        # Load selected models
         models = []
-        for model_file in model_files:
-            model_path = os.path.join(model_dir, model_file)
-            model = ModelManager.load_model(model_path, 'xgboost')
-            models.append(model)
+        if model_index is not None:
+            if model_index < 0 or model_index >= len(model_files):
+                raise IndexError(f"Model index {model_index} is out of range (0-{len(model_files)-1})")
+            model_path = os.path.join(model_dir, model_files[model_index])
+            models.append(ModelManager.load_model(model_path, 'xgboost'))
+            print(f"Using model: {model_files[model_index]}")
+        else:
+            # Load all models for ensemble
+            for model_file in model_files:
+                model_path = os.path.join(model_dir, model_file)
+                models.append(ModelManager.load_model(model_path, 'xgboost'))
+            print(f"Using ensemble of {len(models)} models")
 
         # Ensure features match model expectations
         expected_features = models[0].get_booster().feature_names
@@ -625,8 +659,12 @@ class ModelManager:
                 y_pred_proba = model.predict_proba(X)
             y_pred_proba_list.append(y_pred_proba)
 
-        # Average predictions across models
-        y_pred_proba_avg = np.mean(y_pred_proba_list, axis=0)
+        # Average predictions across models if using ensemble
+        if len(y_pred_proba_list) > 1:
+            y_pred_proba_avg = np.mean(y_pred_proba_list, axis=0)
+        else:
+            y_pred_proba_avg = y_pred_proba_list[0]
+
         fighter_a_probability = y_pred_proba_avg[0][1]
         fighter_b_probability = 1 - fighter_a_probability
 
@@ -684,11 +722,13 @@ class UFCPredictor:
             fighter_a: str,
             fighter_b: str,
             fight_date: str,
-            fighter_a_odds: Dict[str, float],
-            fighter_b_odds: Dict[str, float],
+            closing_odds_a: float,
+            closing_odds_b: float,
             fractional_kelly: float = 0.5,
             use_calibration: bool = True,
-            n_past_fights: int = 3
+            n_past_fights: int = 3,
+            model_index: int = None,
+            model_uses_open_odds: bool = True
     ) -> Optional[FightPrediction]:
         """
         Predict the outcome of a UFC fight.
@@ -697,22 +737,23 @@ class UFCPredictor:
             fighter_a: Name of first fighter
             fighter_b: Name of second fighter
             fight_date: Date of the fight (YYYY-MM-DD)
-            fighter_a_odds: Dict with open and closing odds for fighter_a
-            fighter_b_odds: Dict with open and closing odds for fighter_b
+            closing_odds_a: Closing odds for fighter A
+            closing_odds_b: Closing odds for fighter B
             fractional_kelly: Fraction of Kelly criterion to use
             use_calibration: Whether to calibrate model probabilities
             n_past_fights: Number of past fights to consider
+            model_index: Specific model to use (None for ensemble)
+            model_uses_open_odds: Whether the model expects open odds features
 
         Returns:
             FightPrediction object with prediction results or None if prediction fails
         """
         # Prepare fight data
         current_fight_data = {
-            'open_odds': fighter_a_odds.get('open'),
-            'open_odds_b': fighter_b_odds.get('open'),
-            'closing_range_end': fighter_a_odds.get('closing'),
-            'closing_range_end_b': fighter_b_odds.get('closing'),
-            'current_fight_date': fight_date
+            'closing_range_end': closing_odds_a,
+            'closing_range_end_b': closing_odds_b,
+            'current_fight_date': fight_date,
+            'model_uses_open_odds': model_uses_open_odds  # Pass this flag to matchup creator
         }
 
         # Create matchup data
@@ -726,17 +767,16 @@ class UFCPredictor:
 
         # Get prediction
         predicted_winner, winning_probability = ModelManager.ensemble_prediction(
-            matchup_df, self.model_dir, self.val_data_path, use_calibration
+            matchup_df, self.model_dir, self.val_data_path, use_calibration, model_index
         )
 
         # Calculate Kelly criterion bet size
         if predicted_winner.lower() == fighter_a.lower():
-            odds_used = self.odds_calculator.round_to_nearest(current_fight_data['closing_range_end']) if \
-                current_fight_data['closing_range_end'] is not None else 0
+            odds_used = closing_odds_a
         else:
-            odds_used = self.odds_calculator.round_to_nearest(current_fight_data['closing_range_end_b']) if \
-                current_fight_data['closing_range_end_b'] is not None else 0
+            odds_used = closing_odds_b
 
+        odds_used = self.odds_calculator.round_to_nearest(odds_used)
         kelly_fraction = self.odds_calculator.calculate_kelly_fraction(
             winning_probability, odds_used, fractional_kelly
         )
@@ -759,9 +799,9 @@ def main():
     fighter_a = "Marvin Vettori"
     fighter_b = "Roman Dolidze"
 
-    # Odds data
-    fighter_a_odds = {'open': -138, 'closing': -132}
-    fighter_b_odds = {'open': 110, 'closing': 115}
+    # Closing odds only
+    closing_odds_a = -132
+    closing_odds_b = 115
 
     # Setup predictor
     predictor = UFCPredictor(
@@ -771,15 +811,18 @@ def main():
         output_dir="data/matchup data"
     )
 
-    # Get prediction
+    # Example 1: Using a model that requires open odds (backward compatibility)
+    print("== Example 1: Using a model that expects open odds (adding -107 values) ==")
     prediction = predictor.predict_fight(
         fighter_a=fighter_a,
         fighter_b=fighter_b,
         fight_date="2025-03-15",
-        fighter_a_odds=fighter_a_odds,
-        fighter_b_odds=fighter_b_odds,
+        closing_odds_a=closing_odds_a,
+        closing_odds_b=closing_odds_b,
         fractional_kelly=0.5,
-        use_calibration=True
+        use_calibration=True,
+        model_index=None,  # Use ensemble
+        model_uses_open_odds=True  # Add -107 placeholder values for open odds
     )
 
     # Print results
@@ -793,6 +836,25 @@ def main():
             print("Kelly fraction is negative or zero, suggesting not to bet.")
     else:
         print("Could not generate matchup data.")
+
+    # Example 2: Using a model trained without open odds features
+    print("\n== Example 2: Using a model trained without open odds features ==")
+    prediction = predictor.predict_fight(
+        fighter_a=fighter_a,
+        fighter_b=fighter_b,
+        fight_date="2025-03-15",
+        closing_odds_a=closing_odds_a,
+        closing_odds_b=closing_odds_b,
+        fractional_kelly=0.5,
+        use_calibration=True,
+        model_index=2,  # Use specific model
+        model_uses_open_odds=False  # Model doesn't expect open odds features
+    )
+
+    if prediction:
+        print(f"Predicted winner: {prediction.predicted_winner}")
+        print(f"Winning probability: {prediction.winning_probability:.2%}")
+        print(f"Using model that doesn't require open odds placeholders")
 
 
 if __name__ == "__main__":
