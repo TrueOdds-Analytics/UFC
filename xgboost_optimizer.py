@@ -36,7 +36,7 @@ def load_and_preprocess_data(odds_type='close_odds'):
     Load and preprocess the training and validation data.
 
     Args:
-        odds_type: Which odds to use in the model: 'open_odds', 'close_odds', or None
+        odds_type: Which odds to use in the model: 'open_odds', 'close_odds', 'drop_open' or None
 
     Returns:
         Tuple of (X_train, X_val, y_train, y_val)
@@ -64,6 +64,11 @@ def load_and_preprocess_data(odds_type='close_odds'):
         ]
     elif odds_type == 'close_odds':
         columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date']
+    elif odds_type == 'drop_open':
+        columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date',
+                           'current_fight_open_odds', 'current_fight_open_odds_b',
+                           'current_fight_open_odds_ratio', 'current_fight_open_odds_diff'
+                           ]
     else:
         columns_to_drop = list(train_data.columns[train_data.columns.str.contains('odd', case=False)]) + [
             'fighter_a', 'fighter_b', 'current_fight_date'
@@ -205,7 +210,7 @@ def train_xgboost_model(params, X_train, X_val, y_train, y_val):
         'verbosity': 0,
         'n_jobs': -1,
         'n_estimators': 1000,
-        'early_stopping_rounds': 250
+        'early_stopping_rounds': 100
     }
 
     # Update params with defaults if not already set
@@ -287,21 +292,26 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     else:
         auc_diff = 1.0  # High difference when AUC isn't available
 
-    # Save good models and plot learning curves
-    if accuracy > 0.67 and (auc_diff < 0.10):
+    # Save all models that meet the criteria (66% accuracy and AUC diff < 0.1)
+    if accuracy >= 0.66 and (auc_diff < 0.10):
+        # Keep track of best model for reporting purposes
         if accuracy > best_accuracy:
             best_accuracy = accuracy
             best_auc_diff = auc_diff
+            print(f"New best model found! Accuracy: {accuracy:.4f}, AUC diff: {auc_diff:.4f}")
 
-            # Save model
-            model_dir = 'models/xgboost/jan2024-dec2024/split 125/'
-            model_filename = f'{model_dir}model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
-            model.save_model(model_filename)
-            print(f"New best model saved: {model_filename}")
+        # Save the model
+        model_dir = 'models/xgboost/jan2024-dec2025/dynamicmatchup/'
+        model_filename = f'{model_dir}model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
+        model.save_model(model_filename)
+        print(f"Model saved: {model_filename}")
 
-            # Plot learning curves
-            plot_learning_curves(train_losses, val_losses, train_auc, val_auc,
-                                 len(X_train.columns), accuracy, auc)
+        # Plot learning curves for models that meet criteria
+        plot_learning_curves(train_losses, val_losses, train_auc, val_auc,
+                             len(X_train.columns), accuracy, auc)
+
+    # Report trial progress
+    print(f"Trial {trial.number}: Accuracy={accuracy:.4f}, AUC diff={auc_diff:.4f}")
 
     return accuracy
 
@@ -410,7 +420,7 @@ def main():
 
     try:
         # Load and preprocess data
-        X_train, X_val, y_train, y_val = load_and_preprocess_data(odds_type='close_odds')
+        X_train, X_val, y_train, y_val = load_and_preprocess_data(odds_type='drop_open')
         print("Data loaded. Starting optimization...")
 
         # Phase 1: Train initial model with all features
