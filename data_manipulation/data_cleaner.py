@@ -387,10 +387,11 @@ class MatchupProcessor:
             tester: int,
             include_names: bool
     ) -> List[List]:
-        """Process each fight to create matchup feature vectors."""
+        """Process each fight to create matchup feature vectors with support for fighters with fewer fights."""
         matchup_data = []
         skipped_count = 0
         processed_count = 0
+        partial_data_count = 0
 
         # Process each current fight
         for _, current_fight in df.iterrows():
@@ -408,22 +409,32 @@ class MatchupProcessor:
                 (df['fight_date'] < current_fight['fight_date'])
                 ].sort_values(by='fight_date', ascending=False).head(n_past_fights)
 
-            # Skip if insufficient past fights
-            if len(fighter_a_df) < n_past_fights or len(fighter_b_df) < n_past_fights:
+            # Skip if either fighter has no past fights
+            if len(fighter_a_df) == 0 or len(fighter_b_df) == 0:
                 skipped_count += 1
                 continue
 
-            # Extract features from past fights
+            # Flag if we have partial data (at least one fighter with fewer than n_past_fights)
+            has_partial_data = len(fighter_a_df) < n_past_fights or len(fighter_b_df) < n_past_fights
+            if has_partial_data:
+                partial_data_count += 1
+
+            # Extract features from available past fights
             fighter_a_features = fighter_a_df[features_to_include].mean().values
             fighter_b_features = fighter_b_df[features_to_include].mean().values
 
             # Extract recent fight results
-            results_fighter_a = fighter_a_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(
-                tester).values.flatten()
-            results_fighter_b = fighter_b_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
-                tester).values.flatten()
+            # Only extract the available fight results, up to tester number
+            num_a_results = min(len(fighter_a_df), tester)
+            num_b_results = min(len(fighter_b_df), tester)
 
-            # Pad results to ensure consistent length
+            results_fighter_a = fighter_a_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(
+                num_a_results).values.flatten() if num_a_results > 0 else np.array([])
+
+            results_fighter_b = fighter_b_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
+                num_b_results).values.flatten() if num_b_results > 0 else np.array([])
+
+            # Pad results with None values to ensure consistent length
             results_fighter_a = np.pad(
                 results_fighter_a,
                 (0, tester * 4 - len(results_fighter_a)),
@@ -468,7 +479,10 @@ class MatchupProcessor:
             combined_row = np.concatenate([combined_features, labels])
 
             # Get most recent date and current fight date
-            most_recent_date = max(fighter_a_df['fight_date'].max(), fighter_b_df['fight_date'].max())
+            most_recent_date_a = fighter_a_df['fight_date'].max() if len(fighter_a_df) > 0 else None
+            most_recent_date_b = fighter_b_df['fight_date'].max() if len(fighter_b_df) > 0 else None
+            most_recent_date = max(most_recent_date_a,
+                                   most_recent_date_b) if most_recent_date_a and most_recent_date_b else most_recent_date_a or most_recent_date_b
             current_fight_date = current_fight['fight_date']
 
             # Add to matchup data
@@ -481,7 +495,8 @@ class MatchupProcessor:
 
             processed_count += 1
 
-        print(f"Processed {processed_count} matchups, skipped {skipped_count} with insufficient past fights")
+        print(f"Processed {processed_count} matchups (including {partial_data_count} with partial fight history)")
+        print(f"Skipped {skipped_count} matchups where at least one fighter had no previous fights")
         return matchup_data
 
     def _process_fight_odds(self, odds_a: float, odds_b: float) -> Tuple[List[float], float, float]:
