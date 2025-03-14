@@ -42,6 +42,11 @@ class DataProcessor:
         val_data = pd.read_csv(val_path)
         test_data = pd.read_csv(test_path)
 
+        # test_data['current_fight_open_odds'] = 100
+        # test_data['current_fight_open_odds_b'] = 100
+        # val_data['current_fight_open_odds'] = 100
+        # val_data['current_fight_open_odds_b'] = 100
+
         # Define columns to preserve for display
         display_columns = ['current_fight_date', 'fighter_a', 'fighter_b']
 
@@ -158,7 +163,7 @@ class ModelManager:
         y_pred_proba_list = []
         for model in self.models:
             if use_calibration:
-                calibrated_model = CalibratedClassifierCV(model, cv='prefit', method='sigmoid')
+                calibrated_model = CalibratedClassifierCV(model, cv='prefit', method='isotonic')
                 calibrated_model.fit(X_val, y_val)
                 y_pred_proba = calibrated_model.predict_proba(X_test)
             else:
@@ -906,7 +911,7 @@ class ResultsVisualizer:
             kelly_monthly = f"{kelly_monthly_roi[month]:.2f}%"
             table.add_row(month, fixed_monthly, kelly_monthly)
 
-        table.add_row("Total", f"{fixed_total_roi:.2f}%", f"{kelly_total_roi:.2f}%")
+        table.add_row("Compounded Total", f"{fixed_total_roi:.2f}%", f"{kelly_total_roi:.2f}%")
         self.console.print(table)
 
     def print_overall_metrics(self, metrics: Dict[str, float]) -> None:
@@ -1014,17 +1019,17 @@ def run_betting_analysis(config: BettingConfig) -> None:
     # Load data
     X_val, X_test, y_val, y_test, test_data = data_processor.load_data(
         'data/train test data/val_data.csv',
-        'data/train test data/test_data 6d.csv'
+        'data/train test data/test_data.csv'
     )
 
     # Initialize and load models
-    model_dir = 'models/xgboost/jan2024-dec2024/split 125'
+    model_dir = 'models/xgboost/jan2024-dec2025/dynamicmatchup 200'
     model_files = [
-        'model_0.6709_auc_diff_0.0242.json',
-        'model_0.6709_auc_diff_0.0239.json',
-        'model_0.6709_auc_diff_0.0273.json',
-        'model_0.6734_auc_diff_0.0252.json',
-        'model_0.6734_auc_diff_0.0251.json'
+        'model_0.7071_auc_diff_0.0325.json',
+        'model_0.7071_auc_diff_0.0280.json',
+        'model_0.7071_auc_diff_0.0246.json',
+        'model_0.7071_auc_diff_0.0236.json',
+        'model_0.7071_auc_diff_0.0234.json'
     ]
 
     model_manager = ModelManager(model_dir, config.use_ensemble)
@@ -1091,8 +1096,8 @@ if __name__ == "__main__":
         use_calibration=True,
         initial_bankroll=10000,
         kelly_fraction=0.5,
-        fixed_bet_fraction=0.1,
-        max_bet_percentage=0.1,
+        fixed_bet_fraction=0.10,
+        max_bet_percentage=0.10,
         min_odds=-300,
         use_ensemble=True,
         odds_type='close'  # Options: 'open', 'close', 'average'

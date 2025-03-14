@@ -14,7 +14,7 @@ import os
 from datetime import datetime
 # Calculate Elo ratings (imported from Elo module)
 from data_manipulation.Elo import calculate_elo_ratings
-from helper import DataUtils, OddsUtils, FighterUtils, DateUtils
+from data_manipulation.helper import DataUtils, OddsUtils, FighterUtils, DateUtils
 
 # Suppress warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -734,7 +734,7 @@ def main():
     matchup_processor.split_train_val_test(
         '../data/matchup data/matchup_data_3_avg_name.csv',
         '2024-01-01',
-        '2025-12-31',
+        '2024-12-31',
         10
     )
 

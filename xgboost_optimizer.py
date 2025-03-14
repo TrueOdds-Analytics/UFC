@@ -139,7 +139,7 @@ def plot_learning_curves(train_losses, val_losses, train_auc, val_auc, feature_c
     plt.show()
 
 
-def create_feature_importance_plot(model_path, X_train, top_n=50, print_count=150):
+def create_feature_importance_plot(model_path, X_train, top_n, print_count):
     """
     Create and display SHAP feature importance plot.
 
@@ -210,7 +210,7 @@ def train_xgboost_model(params, X_train, X_val, y_train, y_val):
         'verbosity': 0,
         'n_jobs': -1,
         'n_estimators': 1000,
-        'early_stopping_rounds': 100
+        'early_stopping_rounds': 150
     }
 
     # Update params with defaults if not already set
@@ -269,8 +269,8 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Suggest parameters if not provided
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 25, 30, log=True),
-            'alpha': trial.suggest_float('alpha', 25, 30, log=True),
+            'lambda': trial.suggest_float('lambda', 5, 10, log=True),
+            'alpha': trial.suggest_float('alpha', 5, 10, log=True),
             'min_child_weight': trial.suggest_float('min_child_weight', 1, 10.0),
             'max_depth': trial.suggest_int('max_depth', 1, 6),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
@@ -293,7 +293,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         auc_diff = 1.0  # High difference when AUC isn't available
 
     # Save all models that meet the criteria (66% accuracy and AUC diff < 0.1)
-    if accuracy >= 0.66 and (auc_diff < 0.10):
+    if accuracy >= 0.69 and (auc_diff < 0.05):
         # Keep track of best model for reporting purposes
         if accuracy > best_accuracy:
             best_accuracy = accuracy
@@ -301,7 +301,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
             print(f"New best model found! Accuracy: {accuracy:.4f}, AUC diff: {auc_diff:.4f}")
 
         # Save the model
-        model_dir = 'models/xgboost/jan2024-dec2025/dynamicmatchup/'
+        model_dir = 'models/xgboost/jan2024-dec2025/dynamicmatchup 200/'
         model_filename = f'{model_dir}model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         print(f"Model saved: {model_filename}")
@@ -352,7 +352,7 @@ def optimize_model(X_train, X_val, y_train, y_val, n_trials=10000):
     return study.best_trial
 
 
-def train_model_with_top_features(X_train, X_val, y_train, y_val, model_path, num_top_features=125):
+def train_model_with_top_features(X_train, X_val, y_train, y_val, model_path, num_top_features):
     """
     Train a model using only the top features from an existing model.
 
@@ -370,7 +370,7 @@ def train_model_with_top_features(X_train, X_val, y_train, y_val, model_path, nu
     print(f"Training model with top {num_top_features} features from {model_path}")
 
     # Get feature importance from existing model
-    feature_importance_list = create_feature_importance_plot(model_path, X_train)
+    feature_importance_list = create_feature_importance_plot(model_path, X_train, 50, num_top_features)
     top_features = feature_importance_list[:num_top_features]
 
     print(f"Selected top {num_top_features} features")
@@ -424,22 +424,17 @@ def main():
         print("Data loaded. Starting optimization...")
 
         # Phase 1: Train initial model with all features
-        best_trial = optimize_model(X_train, X_val, y_train, y_val, n_trials=10000)
+        # best_trial = optimize_model(X_train, X_val, y_train, y_val, n_trials=10000)
 
         # Use an existing model for feature selection and visualization
-        existing_model_path = 'models/xgboost/jan2024-july2024/split/model_0.6506_auc_diff_0.0310.json'
+        existing_model_path = 'models/xgboost/jan2024-dec2025/dynamicmatchup/model_0.7055_auc_diff_0.0154.json'
         print("Creating feature importance visualization for existing model")
-        create_feature_importance_plot(existing_model_path, X_train)
 
         # Phase 2: Train model with top features only
-        num_top_features = 125
+        num_top_features = 200
         top_features_model_path = train_model_with_top_features(
             X_train, X_val, y_train, y_val, existing_model_path, num_top_features
         )
-
-        # Visualize final model feature importance
-        print("Creating feature importance visualization for top features model")
-        create_feature_importance_plot(top_features_model_path, X_train[X_train.columns[:num_top_features]])
 
         print("Training pipeline completed successfully")
 
