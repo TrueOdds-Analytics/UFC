@@ -435,7 +435,9 @@ class BettingEvaluator:
         correct_confident_predictions = 0
 
         bet_results = []
-        processed_fights = set()
+
+        # Dictionary to collect all instances of fights by fight_id
+        fight_instances = {}
 
         # Sort test data by date
         test_data = test_data.sort_values(
@@ -443,41 +445,11 @@ class BettingEvaluator:
             ascending=[True, True, True]
         ).reset_index(drop=True)
 
-        # Initialize daily tracking
-        daily_fixed_bankrolls = {}
-        daily_kelly_bankrolls = {}
-        daily_fixed_profits = {}
-        daily_kelly_profits = {}
-
-        current_date = None
-        available_fixed_bankroll = fixed_bankroll
-        available_kelly_bankroll = kelly_bankroll
-
-        # Evaluate each fight
+        # First pass: collect all fight instances
         for i in range(len(test_data)):
             row = test_data.iloc[i]
             fight_id = frozenset([row['fighter_a'], row['fighter_b']])
             fight_date = row['current_fight_date']
-
-            # Skip duplicate fights
-            if fight_id in processed_fights:
-                continue
-            processed_fights.add(fight_id)
-
-            # Handle new date
-            if fight_date != current_date:
-                if current_date is not None:
-                    # Update bankrolls at the end of each day
-                    fixed_bankroll += daily_fixed_profits.get(current_date, 0)
-                    kelly_bankroll += daily_kelly_profits.get(current_date, 0)
-                    daily_fixed_bankrolls[current_date] = fixed_bankroll
-                    daily_kelly_bankrolls[current_date] = kelly_bankroll
-
-                current_date = fight_date
-                available_fixed_bankroll = fixed_bankroll
-                available_kelly_bankroll = kelly_bankroll
-                daily_fixed_profits[current_date] = 0
-                daily_kelly_profits[current_date] = 0
 
             # Determine true winner
             true_winner = row['fighter_a'] if y_test.iloc[i] == 1 else row['fighter_b']
@@ -500,13 +472,73 @@ class BettingEvaluator:
             else:
                 models_agreeing = 1
 
+            # Add to fight instances
+            if fight_id not in fight_instances:
+                fight_instances[fight_id] = []
+
+            fight_instances[fight_id].append({
+                'index': i,
+                'row': row,
+                'true_winner': true_winner,
+                'winning_probability': winning_probability,
+                'predicted_winner': predicted_winner,
+                'models_agreeing': models_agreeing,
+                'y_pred_proba_avg': y_pred_proba_avg
+            })
+
+        # Initialize daily tracking
+        daily_fixed_bankrolls = {}
+        daily_kelly_bankrolls = {}
+        daily_fixed_profits = {}
+        daily_kelly_profits = {}
+
+        current_date = None
+        available_fixed_bankroll = fixed_bankroll
+        available_kelly_bankroll = kelly_bankroll
+
+        # Process unique fights with averaged probabilities
+        for fight_id, instances in fight_instances.items():
+            # Use the first instance's date and other metadata
+            first_instance = instances[0]
+            i = first_instance['index']
+            row = first_instance['row']
+            fight_date = row['current_fight_date']
+            true_winner = first_instance['true_winner']
+
+            # Average the winning probabilities and models agreeing
+            avg_winning_probability = sum(inst['winning_probability'] for inst in instances) / len(instances)
+            avg_models_agreeing = sum(inst['models_agreeing'] for inst in instances) / len(instances)
+
+            # Use the most common predicted winner
+            winner_counts = {}
+            for inst in instances:
+                winner = inst['predicted_winner']
+                winner_counts[winner] = winner_counts.get(winner, 0) + 1
+            predicted_winner = max(winner_counts.items(), key=lambda x: x[1])[0]
+
+            # Handle new date
+            if fight_date != current_date:
+                if current_date is not None:
+                    # Update bankrolls at the end of each day
+                    fixed_bankroll += daily_fixed_profits.get(current_date, 0)
+                    kelly_bankroll += daily_kelly_profits.get(current_date, 0)
+                    daily_fixed_bankrolls[current_date] = fixed_bankroll
+                    daily_kelly_bankrolls[current_date] = kelly_bankroll
+
+                current_date = fight_date
+                available_fixed_bankroll = fixed_bankroll
+                available_kelly_bankroll = kelly_bankroll
+                daily_fixed_profits[current_date] = 0
+                daily_kelly_profits[current_date] = 0
+
             # Track prediction performance
             confident_predictions += 1
             if predicted_winner == true_winner:
                 correct_confident_predictions += 1
 
             # Only consider bets that meet confidence threshold
-            if winning_probability >= self.config.confidence_threshold and models_agreeing >= (5 if self.config.use_ensemble else 1):
+            if avg_winning_probability >= self.config.confidence_threshold and avg_models_agreeing >= (
+            5 if self.config.use_ensemble else 1):
                 # Get appropriate odds based on configuration
                 odds = self._get_odds(row, predicted_winner)
 
@@ -522,14 +554,14 @@ class BettingEvaluator:
                     fight_date=fight_date,
                     true_winner=true_winner,
                     predicted_winner=predicted_winner,
-                    confidence=winning_probability,
+                    confidence=avg_winning_probability,
                     odds=odds,
-                    models_agreeing=models_agreeing
+                    models_agreeing=avg_models_agreeing
                 )
 
                 # Evaluate fixed fraction betting
                 fixed_result = self._evaluate_fixed_bet(
-                    available_fixed_bankroll, odds, winning_probability,
+                    available_fixed_bankroll, odds, avg_winning_probability,
                     predicted_winner, true_winner, daily_fixed_profits, current_date
                 )
 
@@ -550,7 +582,7 @@ class BettingEvaluator:
 
                 # Evaluate Kelly criterion betting
                 kelly_result = self._evaluate_kelly_bet(
-                    available_kelly_bankroll, odds, winning_probability,
+                    available_kelly_bankroll, odds, avg_winning_probability,
                     predicted_winner, true_winner, daily_kelly_profits, current_date
                 )
 

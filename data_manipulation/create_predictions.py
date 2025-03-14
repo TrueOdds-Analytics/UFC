@@ -391,7 +391,8 @@ class FighterMatchupPredictor:
 class UFCPredictor:
     """Makes fight predictions using the XGBoost model ensemble."""
 
-    def __init__(self, data_dir: str = "../data", model_dir: str = "../models/xgboost/jan2024-dec2025/dynamicmatchup 200"):
+    def __init__(self, data_dir: str = "../data",
+                 model_dir: str = "../models/xgboost/jan2024-dec2025/dynamicmatchup 200"):
         """Initialize the predictor with data and model directories."""
         self.data_dir = data_dir
         self.model_dir = model_dir
@@ -437,10 +438,10 @@ class UFCPredictor:
         data[category_columns] = data[category_columns].astype("category")
         return data
 
-    def predict_fight(self, fighter_a: str, fighter_b: str, closing_odds_a: float,
-                    closing_odds_b: float, fight_date: str = None) -> Dict:
+    def _make_single_prediction(self, fighter_a: str, fighter_b: str, closing_odds_a: float,
+                                closing_odds_b: float, fight_date: str = None, is_swapped: bool = False) -> Dict:
         """
-        Predict the outcome of a fight between two fighters.
+        Make a single prediction with the given fighter order.
 
         Args:
             fighter_a: Name of first fighter
@@ -448,13 +449,11 @@ class UFCPredictor:
             closing_odds_a: Closing odds for fighter A
             closing_odds_b: Closing odds for fighter B
             fight_date: Fight date in YYYY-MM-DD format
+            is_swapped: Whether this is a swapped prediction
 
         Returns:
             Dictionary with prediction results
         """
-        if not self.models:
-            raise ValueError("No models loaded. Call load_models() first.")
-
         # Step 1: Load validation data for calibration
         val_data_path = os.path.join(self.data_dir, "train test data", "val_data.csv")
         if not os.path.exists(val_data_path):
@@ -544,11 +543,13 @@ class UFCPredictor:
             fighter_b_win_prob = y_pred_proba[0]
             models_agreeing = 1
 
-        # Step 9: Return prediction results
-        print(f"\nPrediction Results:")
+        # Print prediction results
+        position_text = "SWAPPED POSITION" if is_swapped else "ORIGINAL POSITION"
+        print(f"\n{position_text} Prediction Results:")
         print(f"{fighter_a_orig} win probability: {fighter_a_win_prob:.2%}")
         print(f"{fighter_b_orig} win probability: {fighter_b_win_prob:.2%}")
         print(f"Predicted winner: {predicted_winner} with {predicted_winner_probability:.2%} probability")
+        print(f"Models agreeing: {models_agreeing}/{len(self.models)}")
 
         return {
             'fighter_a': fighter_a_orig,
@@ -560,6 +561,81 @@ class UFCPredictor:
             'models_agreeing': models_agreeing,
             'total_models': len(self.models)
         }
+
+    def predict_fight(self, fighter_a: str, fighter_b: str, closing_odds_a: float,
+                      closing_odds_b: float, fight_date: str = None) -> Dict:
+        """
+        Predict the outcome of a fight between two fighters using both fighter positions.
+        This averages predictions from both original and swapped fighter positions to
+        reduce any potential position bias in the model.
+
+        Args:
+            fighter_a: Name of first fighter
+            fighter_b: Name of second fighter
+            closing_odds_a: Closing odds for fighter A
+            closing_odds_b: Closing odds for fighter B
+            fight_date: Fight date in YYYY-MM-DD format
+
+        Returns:
+            Dictionary with prediction results
+        """
+        if not self.models:
+            raise ValueError("No models loaded. Call load_models() first.")
+
+        # Step 1: Make prediction with original fighter order
+        print("\n--- Making prediction with original fighter order ---")
+        original_prediction = self._make_single_prediction(
+            fighter_a, fighter_b, closing_odds_a, closing_odds_b, fight_date, is_swapped=False
+        )
+
+        # Step 2: Make prediction with swapped fighter order
+        print("\n--- Making prediction with swapped fighter order ---")
+        swapped_prediction = self._make_single_prediction(
+            fighter_b, fighter_a, closing_odds_b, closing_odds_a, fight_date, is_swapped=True
+        )
+
+        # Step 3: Average the win probabilities
+        # In swapped prediction, fighter_a refers to fighter_b from original, and vice versa
+        fighter_a_win_prob = (original_prediction['fighter_a_win_prob'] +
+                              swapped_prediction['fighter_b_win_prob']) / 2
+        fighter_b_win_prob = (original_prediction['fighter_b_win_prob'] +
+                              swapped_prediction['fighter_a_win_prob']) / 2
+
+        # Normalize to ensure probabilities sum to 1
+        total_prob = fighter_a_win_prob + fighter_b_win_prob
+        fighter_a_win_prob /= total_prob
+        fighter_b_win_prob /= total_prob
+
+        # Step 4: Determine the final predicted winner
+        if fighter_a_win_prob > fighter_b_win_prob:
+            predicted_winner = original_prediction['fighter_a']
+            predicted_win_prob = fighter_a_win_prob
+        else:
+            predicted_winner = original_prediction['fighter_b']
+            predicted_win_prob = fighter_b_win_prob
+
+        # Create the final prediction result
+        result = {
+            'fighter_a': original_prediction['fighter_a'],
+            'fighter_b': original_prediction['fighter_b'],
+            'fighter_a_win_prob': fighter_a_win_prob,
+            'fighter_b_win_prob': fighter_b_win_prob,
+            'predicted_winner': predicted_winner,
+            'predicted_win_prob': predicted_win_prob,
+            'models_agreeing_original': original_prediction['models_agreeing'],
+            'models_agreeing_swapped': swapped_prediction['models_agreeing'],
+            'total_models': original_prediction['total_models']
+        }
+
+        # Print the final averaged results
+        print(f"\n=== FINAL AVERAGED PREDICTION RESULTS ===")
+        print(f"{result['fighter_a']} win probability: {result['fighter_a_win_prob']:.2%}")
+        print(f"{result['fighter_b']} win probability: {result['fighter_b_win_prob']:.2%}")
+        print(f"Predicted winner: {result['predicted_winner']} with {result['predicted_win_prob']:.2%} probability")
+        print(f"Models agreeing: Original: {result['models_agreeing_original']}/{result['total_models']}, "
+              f"Swapped: {result['models_agreeing_swapped']}/{result['total_models']}")
+
+        return result
 
 
 def main():
@@ -590,7 +666,7 @@ def main():
     # Load models
     predictor.load_models(model_files, use_ensemble=True)
 
-    # Make prediction
+    # Make prediction with position swap averaging
     predictor.predict_fight(
         fighter_a,
         fighter_b,
