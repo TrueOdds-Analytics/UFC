@@ -683,7 +683,7 @@ class MatchupProcessor:
 
         # Remove duplicate fights
         val_data = self._remove_duplicate_fights(val_data)
-        # test_data = self._remove_duplicate_fights(test_data)
+        test_data = self._remove_duplicate_fights(test_data)
 
         # Sort datasets
         sort_cols = ['current_fight_date', 'fighter_a', 'fighter_b']
@@ -726,7 +726,7 @@ def main():
     fight_processor = FightDataProcessor()
     matchup_processor = MatchupProcessor()
 
-    # Uncomment the functions you want to run
+    # # Uncomment the functions you want to run
     # fight_processor.combine_rounds_stats('../data/ufc_fight_processed.csv')
     # calculate_elo_ratings('../data/combined_rounds.csv')
     # fight_processor.combine_fighters_stats("../data/combined_rounds.csv")
