@@ -727,10 +727,10 @@ def main():
     matchup_processor = MatchupProcessor()
 
     # # Uncomment the functions you want to run
-    # fight_processor.combine_rounds_stats('../data/ufc_fight_processed.csv')
-    # calculate_elo_ratings('../data/combined_rounds.csv')
-    # fight_processor.combine_fighters_stats("../data/combined_rounds.csv")
-    # matchup_processor.create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    fight_processor.combine_rounds_stats('../data/ufc_fight_processed.csv')
+    calculate_elo_ratings('../data/combined_rounds.csv')
+    fight_processor.combine_fighters_stats("../data/combined_rounds.csv")
+    matchup_processor.create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     matchup_processor.split_train_val_test(
         '../data/matchup data/matchup_data_3_avg_name.csv',
         '2024-01-01',
