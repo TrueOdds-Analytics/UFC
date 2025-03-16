@@ -13,6 +13,8 @@ from io import StringIO
 import sys
 from sklearn.calibration import CalibratedClassifierCV
 import pickle
+from sklearn.calibration import calibration_curve
+import matplotlib.pyplot as plt
 
 
 class CategoryEncoder:
@@ -649,6 +651,213 @@ def print_overall_metrics(y_test, y_pred, y_pred_proba):
     console.print(table)
 
 
+def create_and_save_calibration_curves(y_test, y_pred_proba_list, use_ensemble=True, output_dir='calibration_plots',
+                                       calibration_type='uncalibrated', model_names=None):
+    """
+    Create and save calibration curve plots for the model(s)
+
+    Args:
+        y_test: True labels
+        y_pred_proba_list: List of prediction probabilities from models
+        use_ensemble: Whether to use ensemble predictions
+        output_dir: Directory to save the plot files
+        calibration_type: Type of calibration ('uncalibrated', 'isotonic', 'sigmoid')
+        model_names: List of model names for plots
+
+    Returns:
+        Dictionary mapping plot types to file paths
+    """
+    # Create the base output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create subdirectory for this calibration type
+    calibration_dir = os.path.join(output_dir, calibration_type)
+    os.makedirs(calibration_dir, exist_ok=True)
+
+    plot_files = {}
+
+    # Use default model names if none provided
+    if model_names is None:
+        model_names = [f"Model_{i + 1}" for i in range(len(y_pred_proba_list))]
+
+    # First, create individual model plots if using ensemble
+    if use_ensemble and len(y_pred_proba_list) > 1:
+        plt.figure(figsize=(10, 6))
+        plt.plot([0, 1], [0, 1], 'k--', label='Perfectly calibrated')
+
+        for i, y_pred_proba in enumerate(y_pred_proba_list):
+            prob_true, prob_pred = calibration_curve(y_test, y_pred_proba[:, 1], n_bins=10)
+            plt.plot(prob_pred, prob_true, 's-', label=f'{model_names[i]}')
+
+        plt.xlabel('Mean predicted probability')
+        plt.ylabel('Fraction of positives')
+        plt.title(f'Individual Models Calibration Curves ({calibration_type.capitalize()})')
+        plt.legend(loc='best')
+        plt.grid(True)
+
+        filename = os.path.join(calibration_dir, f'individual_models_calibration_{calibration_type}.png')
+        plt.savefig(filename, dpi=100, bbox_inches='tight')
+        plt.close()
+        plot_files['individual_models'] = filename
+
+    # Now create the ensemble or single model plot
+    plt.figure(figsize=(12, 8))
+    plt.plot([0, 1], [0, 1], 'k--', linewidth=2, label='Perfectly calibrated')
+
+    if use_ensemble:
+        # Average predictions across all models
+        y_pred_proba_avg = np.mean([y_pred_proba for y_pred_proba in y_pred_proba_list], axis=0)
+        prob_true, prob_pred = calibration_curve(y_test, y_pred_proba_avg[:, 1], n_bins=10)
+        plt.plot(prob_pred, prob_true, 'o-', linewidth=2, markersize=8, label='Ensemble model')
+
+        # Add annotations for each point
+        for i, (x, y) in enumerate(zip(prob_pred, prob_true)):
+            plt.annotate(f'({x:.2f}, {y:.2f})',
+                         (x, y),
+                         textcoords="offset points",
+                         xytext=(0, 10),
+                         ha='center',
+                         fontsize=9)
+
+        title = f'Ensemble Model Calibration Curve ({calibration_type.capitalize()})'
+        filename = os.path.join(calibration_dir, f'ensemble_calibration_curve_{calibration_type}.png')
+    else:
+        # Single model
+        y_pred_proba = y_pred_proba_list[0]
+        prob_true, prob_pred = calibration_curve(y_test, y_pred_proba[:, 1], n_bins=10)
+        plt.plot(prob_pred, prob_true, 'o-', linewidth=2, markersize=8, label=model_names[0])
+
+        # Add annotations for each point
+        for i, (x, y) in enumerate(zip(prob_pred, prob_true)):
+            plt.annotate(f'({x:.2f}, {y:.2f})',
+                         (x, y),
+                         textcoords="offset points",
+                         xytext=(0, 10),
+                         ha='center',
+                         fontsize=9)
+
+        title = f'{model_names[0]} Calibration Curve ({calibration_type.capitalize()})'
+        filename = os.path.join(calibration_dir, f'{model_names[0]}_calibration_curve_{calibration_type}.png')
+
+    plt.xlabel('Mean predicted probability', fontsize=12)
+    plt.ylabel('Fraction of positives (true probability)', fontsize=12)
+    plt.title(title, fontsize=14)
+    plt.legend(loc='best', fontsize=12)
+    plt.grid(True)
+
+    # Add calibration interpretation text box
+    textstr = 'Interpretation:\n' + \
+              'Points above the diagonal: Model is under-confident\n' + \
+              'Points below the diagonal: Model is over-confident\n' + \
+              'Points on the diagonal: Perfect calibration'
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    plt.gcf().text(0.5, 0.02, textstr, fontsize=12, bbox=props,
+                   ha='center', va='center')
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.2)  # Make room for text box
+    plt.savefig(filename, dpi=100)
+    plt.close()
+    plot_files['main_model'] = filename
+
+    return plot_files
+
+
+def create_reliability_diagram(y_test, y_pred_proba_list, use_ensemble=True, output_dir='calibration_plots',
+                               calibration_type='uncalibrated', model_names=None):
+    """
+    Create a reliability diagram with histogram showing distribution of predictions
+
+    Args:
+        y_test: True labels
+        y_pred_proba_list: List of prediction probabilities from models
+        use_ensemble: Whether to use ensemble predictions
+        output_dir: Directory to save the plot file
+        calibration_type: Type of calibration ('uncalibrated', 'isotonic', 'sigmoid')
+        model_names: List of model names for plots
+
+    Returns:
+        Path to the saved plot file
+    """
+    # Create the base output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Create subdirectory for this calibration type
+    calibration_dir = os.path.join(output_dir, calibration_type)
+    os.makedirs(calibration_dir, exist_ok=True)
+
+    # Use default model names if none provided
+    if model_names is None:
+        model_names = [f"Model_{i + 1}" for i in range(len(y_pred_proba_list))]
+
+    # Get prediction probabilities
+    if use_ensemble:
+        y_pred_proba = np.mean([proba for proba in y_pred_proba_list], axis=0)
+        title = f"Ensemble Model Reliability Diagram ({calibration_type.capitalize()})"
+        filename = os.path.join(calibration_dir, f'ensemble_reliability_diagram_{calibration_type}.png')
+    else:
+        y_pred_proba = y_pred_proba_list[0]
+        title = f"{model_names[0]} Reliability Diagram ({calibration_type.capitalize()})"
+        filename = os.path.join(calibration_dir, f'{model_names[0]}_reliability_diagram_{calibration_type}.png')
+
+    # Extract positive class probabilities
+    y_pred_prob_pos = y_pred_proba[:, 1]
+
+    # Create figure with two subplots: histogram and calibration curve
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10),
+                                   gridspec_kw={'height_ratios': [1, 3]})
+
+    # Top plot: histogram of prediction distribution
+    ax1.hist(y_pred_prob_pos, bins=20, range=(0, 1), histtype='step',
+             lw=2, color='blue', density=True)
+    ax1.set_ylabel('Density')
+    ax1.set_xlim([0, 1])
+    ax1.set_title('Distribution of Predicted Probabilities')
+
+    # Bottom plot: reliability diagram
+    prob_true, prob_pred = calibration_curve(y_test, y_pred_prob_pos, n_bins=10)
+
+    ax2.plot(prob_pred, prob_true, 's-', label='Calibration curve', color='blue', linewidth=2)
+    ax2.plot([0, 1], [0, 1], 'k--', label='Perfectly calibrated')
+
+    # Add calibration gap areas
+    for i in range(len(prob_pred)):
+        if prob_true[i] > prob_pred[i]:  # Under-confident
+            ax2.fill_between([prob_pred[i], prob_pred[i]], [prob_pred[i], prob_true[i]],
+                             alpha=0.2, color='green')
+        elif prob_true[i] < prob_pred[i]:  # Over-confident
+            ax2.fill_between([prob_pred[i], prob_pred[i]], [prob_pred[i], prob_true[i]],
+                             alpha=0.2, color='red')
+
+    # Annotate points
+    for i, (x, y) in enumerate(zip(prob_pred, prob_true)):
+        ax2.annotate(f'({x:.2f}, {y:.2f})', (x, y), textcoords="offset points",
+                     xytext=(0, 10), ha='center')
+
+    ax2.set_xlabel('Mean predicted probability')
+    ax2.set_ylabel('Fraction of positives (true probability)')
+    ax2.set_title('Reliability Diagram (Calibration Curve)')
+    ax2.legend(loc='best')
+    ax2.grid(True)
+
+    # Add interpretation text box
+    textstr = 'Interpretation:\n' + \
+              'Green areas: Model is under-confident (true probability > predicted)\n' + \
+              'Red areas: Model is over-confident (predicted > true probability)\n' + \
+              'For Kelly betting: Under-confidence leads to smaller bets than optimal\n' + \
+              'Over-confidence leads to larger bets than optimal'
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    fig.text(0.5, 0.02, textstr, fontsize=10, bbox=props,
+             ha='center', va='center')
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.15)  # Make room for text box
+    plt.savefig(filename, dpi=100)
+    plt.close()
+
+    return filename
+
+
 def main(manual_threshold, use_calibration=True,
          initial_bankroll=10000, kelly_fraction=1.0, fixed_bet_fraction=0.1,
          max_bet_percentage=0.25, min_odds=-300, use_ensemble=True, odds_type='average'):
@@ -707,23 +916,27 @@ def main(manual_threshold, use_calibration=True,
     y_test = test_data_with_display['winner']
 
     model_files = [
-        'model_0.7087_auc_diff_0.0059.json',
+        'model_0.6940_auc_diff_0.0094.json',
         'model_0.7071_auc_diff_0.0073.json',
         'model_0.7071_auc_diff_0.0076.json',
         'model_0.7071_auc_diff_0.0078.json',
         'model_0.7071_auc_diff_0.0089.json'
     ]
 
+    # Extract model names for use in plots
+    model_names = [os.path.splitext(model_file)[0] for model_file in model_files]
+
     models = []
     calibrated_models = []
 
     if use_ensemble:
         for model_file in model_files:
-            model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup 200/{model_file}')
+            model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/{model_file}')
             models.append(load_model(model_path, 'xgboost'))
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup 200/{model_files[0]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/{model_files[0]}')
         models.append(load_model(model_path, 'xgboost'))
+        model_names = [model_names[0]]  # Keep only the first model name if not using ensemble
 
     # Ensure consistent feature ordering
     expected_features = models[0].get_booster().feature_names
@@ -731,7 +944,9 @@ def main(manual_threshold, use_calibration=True,
     X_test = X_test.reindex(columns=expected_features)
 
     # Calibrate models once using the validation data
+    calibration_type = 'uncalibrated'  # Default
     if use_calibration:
+        calibration_type = 'isotonic'  # Using isotonic calibration
         for model in models:
             calibrated_model = CalibratedClassifierCV(model, cv='prefit', method='isotonic')
             calibrated_model.fit(X_val, y_val)
@@ -839,6 +1054,70 @@ def main(manual_threshold, use_calibration=True,
         y_pred = np.array([1 if proba[1] > proba[0] else 0 for proba in y_pred_proba_avg])
 
     print_overall_metrics(y_test, y_pred, y_pred_proba_avg)
+    try:
+        console = Console()
+        console.print(f"\n[bold cyan]Generating {calibration_type.capitalize()} Calibration Plots[/bold cyan]")
+
+        # Create standard calibration curves with model names
+        calibration_files = create_and_save_calibration_curves(
+            y_test,
+            y_pred_proba_list,
+            use_ensemble,
+            calibration_type=calibration_type,
+            model_names=model_names
+        )
+
+        # Create reliability diagram with histogram
+        reliability_file = create_reliability_diagram(
+            y_test,
+            y_pred_proba_list,
+            use_ensemble,
+            calibration_type=calibration_type,
+            model_names=model_names
+        )
+
+        print(f"\n[{calibration_type.capitalize()} Calibration Plots Generated]")
+        print(f"Main calibration curve: {calibration_files['main_model']}")
+
+        if use_ensemble and 'individual_models' in calibration_files:
+            print(f"Individual models comparison: {calibration_files['individual_models']}")
+
+        print(f"Reliability diagram: {reliability_file}")
+
+        print("\nInterpreting Calibration for Kelly Betting:")
+        print("- Perfect calibration means optimal Kelly bet sizing")
+        print("- Under-confidence (points above diagonal) leads to smaller bets than optimal")
+        print("- Over-confidence (points below diagonal) leads to larger bets than optimal")
+        print("- For maximum profit with Kelly criterion, calibration is critical")
+
+        # Add analysis of calibration results
+        if use_ensemble:
+            y_pred_proba_avg = np.mean([y_pred_proba for y_pred_proba in y_pred_proba_list], axis=0)
+            prob_true, prob_pred = calibration_curve(y_test, y_pred_proba_avg[:, 1], n_bins=10)
+            model_label = "Ensemble model"
+        else:
+            y_pred_proba = y_pred_proba_list[0]
+            prob_true, prob_pred = calibration_curve(y_test, y_pred_proba[:, 1], n_bins=10)
+            model_label = model_names[0]
+
+        # Calculate average calibration error
+        calibration_error = np.mean(np.abs(prob_true - prob_pred))
+        print(f"\nAverage calibration error for {model_label}: {calibration_error:.4f}")
+
+        # Determine if model is generally over or under confident
+        if np.mean(prob_true - prob_pred) > 0:
+            print(f"Model tendency: Under-confident (true probabilities > predicted)")
+            print("Betting implication: Bets are smaller than optimal")
+        elif np.mean(prob_true - prob_pred) < 0:
+            print(f"Model tendency: Over-confident (predicted > true probabilities)")
+            print("Betting implication: Bets are larger than optimal")
+        else:
+            print(f"Model tendency: Well calibrated overall")
+            print("Betting implication: Optimal bet sizing")
+
+    except Exception as e:
+        print(f"\n[Warning] Error generating calibration plots: {str(e)}")
+        print("Continuing with analysis without calibration plots.")
 
     # Restore stdout and print final output
     sys.stdout = old_stdout
@@ -846,7 +1125,7 @@ def main(manual_threshold, use_calibration=True,
     console = Console(width=93)
     main_panel = Panel(
         output,
-        title=f"Past Fight Testing (Odds Type: {odds_type.capitalize()})",
+        title=f"Past Fight Testing (Odds Type: {odds_type.capitalize()}, Calibration: {calibration_type.capitalize()})",
         border_style="bold magenta",
         expand=True,
     )
@@ -861,5 +1140,5 @@ if __name__ == "__main__":
          fixed_bet_fraction=0.1,
          max_bet_percentage=0.1,
          min_odds=-300,
-         use_ensemble=True,
+         use_ensemble=False,
          odds_type='close')  # Options: 'open', 'close', 'average'
