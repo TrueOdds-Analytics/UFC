@@ -615,12 +615,12 @@ class UFCMatchupCreator:
 def main():
     """Create a fighter matchup file."""
     # Fighters
-    fighter_a = "Michael Johnson"
-    fighter_b = "Ottman Azaitar"
+    fighter_a = "Alex Pereira"
+    fighter_b = "magomed ankalaev"
 
     # Closing Odds
-    closing_odds_a = -225
-    closing_odds_b = 220
+    closing_odds_a = -107
+    closing_odds_b = -107
 
     # Open Odds
     open_odds_a = -200

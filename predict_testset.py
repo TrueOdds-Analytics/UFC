@@ -687,7 +687,11 @@ def create_and_save_calibration_curves(y_test, y_pred_proba_list, use_ensemble=T
 
         for i, y_pred_proba in enumerate(y_pred_proba_list):
             prob_true, prob_pred = calibration_curve(y_test, y_pred_proba[:, 1], n_bins=10)
-            plt.plot(prob_pred, prob_true, 's-', label=f'{model_names[i]}')
+
+            # Calculate calibration error
+            cal_error = np.mean(np.abs(prob_true - prob_pred))
+
+            plt.plot(prob_pred, prob_true, 's-', label=f'{model_names[i]} (Error: {cal_error:.4f})')
 
         plt.xlabel('Mean predicted probability')
         plt.ylabel('Fraction of positives')
@@ -708,7 +712,12 @@ def create_and_save_calibration_curves(y_test, y_pred_proba_list, use_ensemble=T
         # Average predictions across all models
         y_pred_proba_avg = np.mean([y_pred_proba for y_pred_proba in y_pred_proba_list], axis=0)
         prob_true, prob_pred = calibration_curve(y_test, y_pred_proba_avg[:, 1], n_bins=10)
-        plt.plot(prob_pred, prob_true, 'o-', linewidth=2, markersize=8, label='Ensemble model')
+
+        # Calculate calibration error
+        cal_error = np.mean(np.abs(prob_true - prob_pred))
+
+        plt.plot(prob_pred, prob_true, 'o-', linewidth=2, markersize=8,
+                 label=f'Ensemble model (Calibration Error: {cal_error:.4f})')
 
         # Add annotations for each point
         for i, (x, y) in enumerate(zip(prob_pred, prob_true)):
@@ -725,7 +734,12 @@ def create_and_save_calibration_curves(y_test, y_pred_proba_list, use_ensemble=T
         # Single model
         y_pred_proba = y_pred_proba_list[0]
         prob_true, prob_pred = calibration_curve(y_test, y_pred_proba[:, 1], n_bins=10)
-        plt.plot(prob_pred, prob_true, 'o-', linewidth=2, markersize=8, label=model_names[0])
+
+        # Calculate calibration error
+        cal_error = np.mean(np.abs(prob_true - prob_pred))
+
+        plt.plot(prob_pred, prob_true, 'o-', linewidth=2, markersize=8,
+                 label=f'{model_names[0]} (Calibration Error: {cal_error:.4f})')
 
         # Add annotations for each point
         for i, (x, y) in enumerate(zip(prob_pred, prob_true)):
@@ -749,7 +763,8 @@ def create_and_save_calibration_curves(y_test, y_pred_proba_list, use_ensemble=T
     textstr = 'Interpretation:\n' + \
               'Points above the diagonal: Model is under-confident\n' + \
               'Points below the diagonal: Model is over-confident\n' + \
-              'Points on the diagonal: Perfect calibration'
+              'Points on the diagonal: Perfect calibration\n' + \
+              f'Calibration Error: {cal_error:.4f} (Lower is better)'
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     plt.gcf().text(0.5, 0.02, textstr, fontsize=12, bbox=props,
                    ha='center', va='center')
@@ -817,7 +832,15 @@ def create_reliability_diagram(y_test, y_pred_proba_list, use_ensemble=True, out
     # Bottom plot: reliability diagram
     prob_true, prob_pred = calibration_curve(y_test, y_pred_prob_pos, n_bins=10)
 
-    ax2.plot(prob_pred, prob_true, 's-', label='Calibration curve', color='blue', linewidth=2)
+    # Calculate calibration error
+    cal_error = np.mean(np.abs(prob_true - prob_pred))
+
+    # Calculate direction (over or under confidence)
+    bias = np.mean(prob_true - prob_pred)
+    bias_type = "Under-confident" if bias > 0 else "Over-confident" if bias < 0 else "Well-calibrated"
+
+    ax2.plot(prob_pred, prob_true, 's-', label=f'Calibration curve (Error: {cal_error:.4f})',
+             color='blue', linewidth=2)
     ax2.plot([0, 1], [0, 1], 'k--', label='Perfectly calibrated')
 
     # Add calibration gap areas
@@ -836,7 +859,7 @@ def create_reliability_diagram(y_test, y_pred_proba_list, use_ensemble=True, out
 
     ax2.set_xlabel('Mean predicted probability')
     ax2.set_ylabel('Fraction of positives (true probability)')
-    ax2.set_title('Reliability Diagram (Calibration Curve)')
+    ax2.set_title(f'Reliability Diagram (Calibration Curve) - {bias_type}')
     ax2.legend(loc='best')
     ax2.grid(True)
 
@@ -845,18 +868,19 @@ def create_reliability_diagram(y_test, y_pred_proba_list, use_ensemble=True, out
               'Green areas: Model is under-confident (true probability > predicted)\n' + \
               'Red areas: Model is over-confident (predicted > true probability)\n' + \
               'For Kelly betting: Under-confidence leads to smaller bets than optimal\n' + \
-              'Over-confidence leads to larger bets than optimal'
+              'Over-confidence leads to larger bets than optimal\n\n' + \
+              f'Calibration Error: {cal_error:.4f} (Lower is better)\n' + \
+              f'Bias: {bias:.4f} ({bias_type})'
     props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
     fig.text(0.5, 0.02, textstr, fontsize=10, bbox=props,
              ha='center', va='center')
 
     plt.tight_layout()
-    plt.subplots_adjust(bottom=0.15)  # Make room for text box
+    plt.subplots_adjust(bottom=0.20)  # Make room for text box
     plt.savefig(filename, dpi=100)
     plt.close()
 
     return filename
-
 
 def main(manual_threshold, use_calibration=True,
          initial_bankroll=10000, kelly_fraction=1.0, fixed_bet_fraction=0.1,
@@ -915,12 +939,14 @@ def main(manual_threshold, use_calibration=True,
     X_test = test_data_with_display.drop(display_columns + ['winner'], axis=1)
     y_test = test_data_with_display['winner']
 
+    modelnum = 0
+
     model_files = [
-        'model_0.6940_auc_diff_0.0094.json',
-        'model_0.7071_auc_diff_0.0073.json',
-        'model_0.7071_auc_diff_0.0076.json',
-        'model_0.7071_auc_diff_0.0078.json',
-        'model_0.7071_auc_diff_0.0089.json'
+        'model_0.7019_auc_diff_0.0193.json',
+        'model_0.7050_auc_diff_0.0517.json',
+        'model_0.7019_auc_diff_0.0826.json',
+        'model_0.6924_auc_diff_0.0491.json',
+        'model_0.6987_auc_diff_0.0068.json'
     ]
 
     # Extract model names for use in plots
@@ -931,12 +957,12 @@ def main(manual_threshold, use_calibration=True,
 
     if use_ensemble:
         for model_file in model_files:
-            model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/{model_file}')
+            model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted 300/{model_file}')
             models.append(load_model(model_path, 'xgboost'))
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/{model_files[0]}')
+        model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted 300/{model_files[modelnum]}')
         models.append(load_model(model_path, 'xgboost'))
-        model_names = [model_names[0]]  # Keep only the first model name if not using ensemble
+        model_names = [model_names[modelnum]]  # Keep only the first model name if not using ensemble
 
     # Ensure consistent feature ordering
     expected_features = models[0].get_booster().feature_names
@@ -948,7 +974,7 @@ def main(manual_threshold, use_calibration=True,
     if use_calibration:
         calibration_type = 'isotonic'  # Using isotonic calibration
         for model in models:
-            calibrated_model = CalibratedClassifierCV(model, cv='prefit', method='isotonic')
+            calibrated_model = CalibratedClassifierCV(model, cv='prefit', method=calibration_type)
             calibrated_model.fit(X_val, y_val)
             calibrated_models.append(calibrated_model)
         # Use calibrated models for predictions

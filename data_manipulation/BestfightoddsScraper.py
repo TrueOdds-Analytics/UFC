@@ -301,7 +301,7 @@ if __name__ == "__main__":
     #
     # To run only one part, simply set the other flag to False.
     # ---------------------------------------------------------------------
-    run_scraping = False   # Change to False to skip scraping
+    run_scraping = True   # Change to False to skip scraping
     run_cleaning = True   # Change to False to skip cleaning
 
     if run_scraping:
