@@ -691,6 +691,19 @@ class MatchupProcessor:
         val_data = val_data.sort_values(by=sort_cols, ascending=True)
         test_data = test_data.sort_values(by=sort_cols, ascending=True)
 
+        # --- Added Check ---
+        # Verify that in every row, fighter_a comes before fighter_b alphabetically.
+        for df, name in [(test_data, "test_data"), (val_data, "val_data")]:
+            ordering = df['fighter_a'] <= df['fighter_b']
+            if not ordering.all():
+                # Get the rows where the ordering is violated
+                violations = df[~ordering][['fighter_a', 'fighter_b']]
+                print(f"In {name}, the following rows violate alphabetical order:")
+                print(violations.to_string(index=False))
+                raise ValueError(f"In {name}, not all fighter_a come before fighter_b alphabetically.")
+            else:
+                print("All of fighter_a comes before fighter_b alphabetically.")
+
         # Save datasets
         self.fight_processor._save_csv(train_data, 'train test data/train_data.csv')
         self.fight_processor._save_csv(val_data, 'train test data/val_data.csv')
@@ -707,12 +720,19 @@ class MatchupProcessor:
         return train_data, val_data, test_data
 
     def _remove_duplicate_fights(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Remove duplicate fights, keeping only one row per fight pair."""
+        """Remove duplicate fights, keeping only one row per fight pair,
+        and drop rows where fighter_a comes alphabetically after fighter_b."""
         df = df.copy()
-        df['fight_pair'] = df.apply(
-            lambda row: tuple(sorted([row['fighter_a'], row['fighter_b']])), axis=1
-        )
+        # First, filter out rows where fighter_a is not alphabetically before or equal to fighter_b.
+        df = df[df['fighter_a'] <= df['fighter_b']]
+
+        # Create a temporary fight_pair column based on sorted fighter names
+        df['fight_pair'] = df.apply(lambda row: tuple(sorted([row['fighter_a'], row['fighter_b']])), axis=1)
+
+        # Drop duplicates based on the fight_pair column
         df = df.drop_duplicates(subset=['fight_pair'], keep='first')
+
+        # Drop the temporary fight_pair column and reset the index
         return df.drop(columns=['fight_pair']).reset_index(drop=True)
 
 
