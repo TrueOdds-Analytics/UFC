@@ -293,7 +293,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         auc_diff = 1.0  # High difference when AUC isn't available
 
     # Save all models that meet the criteria (66% accuracy and AUC diff < 0.1)
-    if accuracy >= 0.69 and (auc_diff < 0.05):
+    if accuracy >= 0.68 and (auc_diff < 0.1):
         # Keep track of best model for reporting purposes
         if accuracy > best_accuracy:
             best_accuracy = accuracy
@@ -301,7 +301,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
             print(f"New best model found! Accuracy: {accuracy:.4f}, AUC diff: {auc_diff:.4f}")
 
         # Save the model
-        model_dir = 'models/xgboost/jan2024-dec2025/dynamicmatchup 200/'
+        model_dir = 'models/xgboost/jan2024-dec2025/dynamicmatchup val/'
         model_filename = f'{model_dir}model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         print(f"Model saved: {model_filename}")
@@ -424,7 +424,7 @@ def main():
         print("Data loaded. Starting optimization...")
 
         # Phase 1: Train initial model with all features
-        # best_trial = optimize_model(X_train, X_val, y_train, y_val, n_trials=10000)
+        best_trial = optimize_model(X_train, X_val, y_train, y_val, n_trials=10000)
 
         # Use an existing model for feature selection and visualization
         existing_model_path = 'models/xgboost/jan2024-dec2025/dynamicmatchup/model_0.7055_auc_diff_0.0154.json'

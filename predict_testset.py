@@ -203,14 +203,18 @@ def calculate_average_odds(open_odds, close_odds):
         return round(-100 / (avg_decimal - 1))
 
 
+# Modified parts of the code to use highest confidence instead of averaging
+
+# Modified parts of the code to use highest confidence fighter selection
+# while maintaining ensemble averaging
+
 def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, initial_bankroll=10000,
                   kelly_fraction=0.125, fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300,
                   max_underdog_odds=200, print_fights=True, max_bet_percentage=0.20, use_ensemble=True,
                   odds_type='average'):
     """
     Evaluate betting performance while ensuring consistent predictions regardless of event order.
-
-    This implementation preserves predictions based on unique fight identifiers before sorting.
+    This implementation selects the fighter with the highest confidence from the ensemble prediction.
     """
     # Store the original data and predictions by fight ID to ensure consistency
     fight_data = {}
@@ -223,7 +227,9 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
         # Calculate prediction for this fight
         if use_ensemble:
+            # Still average the model predictions for the ensemble
             y_pred_proba_avg = np.mean([y_pred_proba[i] for y_pred_proba in y_pred_proba_list], axis=0)
+
             # Track how many models agree with the ensemble
             models_agreeing = sum([1 for y_pred_proba in y_pred_proba_list if
                                    (y_pred_proba[i][1] > y_pred_proba[i][0]) == (
@@ -254,7 +260,6 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
     confident_bets = []
 
     # Sort fight dates for chronological processing
-    # Get sorted unique dates
     all_dates = sorted(set(row['current_fight_date'] for row in [data['row'] for data in fight_data.values()]))
 
     # Initialize bankroll tracking dictionaries
@@ -285,8 +290,16 @@ def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, in
 
             # Determine predicted winner and true winner
             true_winner = row['fighter_a'] if true_outcome == 1 else row['fighter_b']
-            winning_probability = max(y_pred_proba_avg)
-            predicted_winner = row['fighter_a'] if y_pred_proba_avg[1] > y_pred_proba_avg[0] else row['fighter_b']
+
+            # MODIFIED: Find the fighter prediction with higher confidence
+            if y_pred_proba_avg[0] > y_pred_proba_avg[1]:
+                # Fighter B has higher probability
+                predicted_winner = row['fighter_b']
+                winning_probability = y_pred_proba_avg[0]
+            else:
+                # Fighter A has higher probability
+                predicted_winner = row['fighter_a']
+                winning_probability = y_pred_proba_avg[1]
 
             # Track confident predictions
             confident_predictions += 1
@@ -652,7 +665,7 @@ def main(manual_threshold, use_calibration=True,
     # Load and preprocess data
     # Load data
     val_data = pd.read_csv('data/train test data/val_data.csv')
-    test_data = pd.read_csv('data/matchup data/specific_matchup_data.csv')
+    test_data = pd.read_csv('data/train test data/test_data.csv')
 
     # Define columns to display
     display_columns = ['current_fight_date', 'fighter_a', 'fighter_b']
@@ -811,11 +824,21 @@ def main(manual_threshold, use_calibration=True,
             earliest_fight_date, fixed_monthly_profit, kelly_monthly_profit
         )
 
-    # Calculate and print overall metrics
-    # Use model predictions to calculate overall metrics
-    y_pred_avg = np.mean([y_pred_proba[:, 1] for y_pred_proba in y_pred_proba_list], axis=0)
-    y_pred = (y_pred_avg > 0.5).astype(int)
-    print_overall_metrics(y_test, y_pred, np.column_stack((1 - y_pred_avg, y_pred_avg)))
+    # MODIFIED: Calculate and print overall metrics using ensemble predictions but selecting the class with higher confidence
+    if use_ensemble:
+        # Average predictions across all models
+        y_pred_proba_avg = np.mean([y_pred_proba_list[j] for j in range(len(y_pred_proba_list))], axis=0)
+
+        # For each sample, predict the class with highest confidence
+        y_pred = np.zeros(len(y_test))
+        for i in range(len(y_test)):
+            y_pred[i] = 1 if y_pred_proba_avg[i][1] > y_pred_proba_avg[i][0] else 0
+    else:
+        # If not using ensemble, just use the single model
+        y_pred_proba_avg = y_pred_proba_list[0]
+        y_pred = np.array([1 if proba[1] > proba[0] else 0 for proba in y_pred_proba_avg])
+
+    print_overall_metrics(y_test, y_pred, y_pred_proba_avg)
 
     # Restore stdout and print final output
     sys.stdout = old_stdout
