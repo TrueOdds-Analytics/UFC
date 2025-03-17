@@ -882,6 +882,7 @@ def create_reliability_diagram(y_test, y_pred_proba_list, use_ensemble=True, out
 
     return filename
 
+
 def main(manual_threshold, use_calibration=True,
          initial_bankroll=10000, kelly_fraction=1.0, fixed_bet_fraction=0.1,
          max_bet_percentage=0.25, min_odds=-300, use_ensemble=True, odds_type='average'):
@@ -906,28 +907,44 @@ def main(manual_threshold, use_calibration=True,
     # Separate target variables
     y_val, y_test = val_data['winner'], test_data['winner']
 
-    # Initialize our category encoder
-    encoder = CategoryEncoder()
+    # Check if encoder already exists
+    encoder_path = 'models/encoders/category_encoder.pkl'
+    if os.path.exists(encoder_path):
+        # Load existing encoder
+        print(f"Loading existing encoder from {encoder_path}")
+        encoder = CategoryEncoder.load(encoder_path)
 
-    # First fit the encoder on validation data to learn consistent categorical mappings
-    X_val, encoder = preprocess_data(
-        val_data.drop(['winner'] + display_columns, axis=1),
-        encoder=encoder,
-        fit=True  # Important: fit the encoder on validation data
-    )
+        # Process validation data with the loaded encoder (without refitting)
+        X_val, _ = preprocess_data(
+            val_data.drop(['winner'] + display_columns, axis=1),
+            encoder=encoder,
+            fit=False  # Don't fit again, just transform
+        )
+    else:
+        # Initialize our category encoder and fit it
+        print("Creating and fitting new encoder")
+        encoder = CategoryEncoder()
 
-    # Now use the same encoder to transform test data (without fitting again)
+        # First fit the encoder on validation data to learn consistent categorical mappings
+        X_val, encoder = preprocess_data(
+            val_data.drop(['winner'] + display_columns, axis=1),
+            encoder=encoder,
+            fit=True  # Important: fit the encoder on validation data
+        )
+
+        # Ensure the encoder directory exists
+        os.makedirs('models/encoders', exist_ok=True)
+
+        # Save the encoder for future use
+        encoder.save(encoder_path)
+        print(f"Encoder saved to {encoder_path}")
+
+    # Now use the encoder to transform test data (without fitting again)
     X_test, _ = preprocess_data(
         test_data.drop(['winner'] + display_columns, axis=1),
         encoder=encoder,
         fit=False  # Don't fit on test data, just apply the mappings
     )
-
-    # Ensure the encoder directory exists
-    os.makedirs('models/encoders', exist_ok=True)
-
-    # Save the encoder for future use
-    encoder.save('models/encoders/category_encoder.pkl')
 
     # Concatenate features with display columns
     test_data_with_display = pd.concat([X_test, test_data[display_columns], y_test], axis=1)
@@ -942,8 +959,8 @@ def main(manual_threshold, use_calibration=True,
     modelnum = 0
 
     model_files = [
-        'model_0.7019_auc_diff_0.0193.json',
-        'model_0.7050_auc_diff_0.0517.json',
+        'model_0.7082_auc_diff_0.0408.json',
+        'model_0.7177_auc_diff_0.0697.json',
         'model_0.7019_auc_diff_0.0826.json',
         'model_0.6924_auc_diff_0.0491.json',
         'model_0.6987_auc_diff_0.0068.json'
@@ -957,10 +974,11 @@ def main(manual_threshold, use_calibration=True,
 
     if use_ensemble:
         for model_file in model_files:
-            model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted 300/{model_file}')
+            model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/{model_file}')
             models.append(load_model(model_path, 'xgboost'))
     else:
-        model_path = os.path.abspath(f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted 300/{model_files[modelnum]}')
+        model_path = os.path.abspath(
+            f'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/{model_files[modelnum]}')
         models.append(load_model(model_path, 'xgboost'))
         model_names = [model_names[modelnum]]  # Keep only the first model name if not using ensemble
 

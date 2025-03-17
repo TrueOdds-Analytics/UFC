@@ -460,6 +460,10 @@ class MatchupProcessor:
                 current_fight['closing_range_end'], current_fight['closing_range_end_b']
             )
 
+            # Calculate the difference between closing and opening odds for each fighter
+            current_fight_closing_open_diff_a = current_fight['closing_range_end'] - current_fight['open_odds']
+            current_fight_closing_open_diff_b = current_fight['closing_range_end_b'] - current_fight['open_odds_b']
+
             current_fight_ages = [current_fight['age'], current_fight['age_b']]
             current_fight_age_diff = current_fight['age'] - current_fight['age_b']
             current_fight_age_ratio = self.utils.safe_divide(current_fight['age'], current_fight['age_b'])
@@ -472,7 +476,8 @@ class MatchupProcessor:
             combined_features = np.concatenate([
                 fighter_a_features, fighter_b_features, results_fighter_a, results_fighter_b,
                 current_fight_odds, [current_fight_odds_diff, current_fight_odds_ratio],
-                current_fight_closing_odds, [current_fight_closing_odds_diff, current_fight_closing_odds_ratio],
+                current_fight_closing_odds, [current_fight_closing_odds_diff, current_fight_closing_odds_ratio,
+                                             current_fight_closing_open_diff_a, current_fight_closing_open_diff_b],
                 current_fight_ages, [current_fight_age_diff, current_fight_age_ratio],
                 elo_stats, [elo_ratio], other_stats
             ])
@@ -596,7 +601,8 @@ class MatchupProcessor:
             'current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
             'current_fight_open_odds_ratio',
             'current_fight_closing_odds', 'current_fight_closing_odds_b', 'current_fight_closing_odds_diff',
-            'current_fight_closing_odds_ratio',
+            'current_fight_closing_odds_ratio', 'current_fight_closing_open_diff_a',
+            'current_fight_closing_open_diff_b',
             'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff', 'current_fight_age_ratio'
         ]
 

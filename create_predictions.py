@@ -190,6 +190,10 @@ class FighterMatchupPredictor:
         current_fight_closing_odds, current_fight_closing_odds_diff, current_fight_closing_odds_ratio = \
             self._process_fight_odds(current_fight['closing_range_end'], current_fight['closing_range_end_b'])
 
+        # Calculate the difference between closing and opening odds for each fighter
+        current_fight_closing_open_diff_a = current_fight['closing_range_end'] - current_fight['open_odds']
+        current_fight_closing_open_diff_b = current_fight['closing_range_end_b'] - current_fight['open_odds_b']
+
         # Process ages
         current_fight_ages = [current_fight['age'], current_fight['age_b']]
         current_fight_age_diff = current_fight['age'] - current_fight['age_b']
@@ -265,12 +269,17 @@ class FighterMatchupPredictor:
         matchup_values['current_fight_pre_fight_elo_b_win_chance'] = elo_b_win_prob
         matchup_values['current_fight_pre_fight_elo_ratio'] = elo_ratio
 
+        # Add the new closing-opening odds difference columns
+        matchup_values['current_fight_closing_open_diff_a'] = current_fight_closing_open_diff_a
+        matchup_values['current_fight_closing_open_diff_b'] = current_fight_closing_open_diff_b
+
         # Combine all features
         combined_features = np.concatenate([
             fighter_a_features, fighter_b_features,
             results_fighter_a, results_fighter_b,
             current_fight_odds, [current_fight_odds_diff, current_fight_odds_ratio],
-            current_fight_closing_odds, [current_fight_closing_odds_diff, current_fight_closing_odds_ratio],
+            current_fight_closing_odds, [current_fight_closing_odds_diff, current_fight_closing_odds_ratio,
+                                         current_fight_closing_open_diff_a, current_fight_closing_open_diff_b],
             current_fight_ages, [current_fight_age_diff, current_fight_age_ratio],
             elo_stats, [elo_ratio],
             other_stats
@@ -313,7 +322,8 @@ class FighterMatchupPredictor:
             'current_fight_days_since_last_ratio',
             'current_fight_pre_fight_elo_a', 'current_fight_pre_fight_elo_b', 'current_fight_pre_fight_elo_diff',
             'current_fight_pre_fight_elo_a_win_chance', 'current_fight_pre_fight_elo_b_win_chance',
-            'current_fight_pre_fight_elo_ratio'
+            'current_fight_pre_fight_elo_ratio',
+            'current_fight_closing_open_diff_a', 'current_fight_closing_open_diff_b'  # Added new columns
         ]
 
         # Create a copy of the DataFrame to ensure we preserve calculated values
@@ -549,6 +559,7 @@ class FighterMatchupPredictor:
             'current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
             'current_fight_open_odds_ratio', 'current_fight_closing_odds', 'current_fight_closing_odds_b',
             'current_fight_closing_odds_diff', 'current_fight_closing_odds_ratio',
+            'current_fight_closing_open_diff_a', 'current_fight_closing_open_diff_b',  # Added new columns
             'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff', 'current_fight_age_ratio'
         ]
         return base_columns + feature_columns + results_columns + odds_age_columns + new_columns + \
