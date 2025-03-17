@@ -65,10 +65,13 @@ def load_and_preprocess_data(odds_type='close_odds'):
     elif odds_type == 'close_odds':
         columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date']
     elif odds_type == 'drop_open':
-        columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date',
-                           'current_fight_open_odds', 'current_fight_open_odds_b',
-                           'current_fight_open_odds_ratio', 'current_fight_open_odds_diff'
-                           ]
+        base_columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date']
+
+        # Assuming df is your DataFrame, this will find all columns with 'open' in their name
+        open_columns = [col for col in df.columns if 'open' in col.lower()]
+
+        # Combine the lists
+        columns_to_drop = base_columns_to_drop + open_columns
     else:
         columns_to_drop = list(train_data.columns[train_data.columns.str.contains('odd', case=False)]) + [
             'fighter_a', 'fighter_b', 'current_fight_date'
@@ -293,7 +296,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
         auc_diff = 1.0  # High difference when AUC isn't available
 
     # Save all models that meet the criteria (66% accuracy and AUC diff < 0.1)
-    if accuracy >= 0.69 and (auc_diff < 0.1):
+    if accuracy >= 0.66 and (auc_diff < 0.1):
         # Keep track of best model for reporting purposes
         if accuracy > best_accuracy:
             best_accuracy = accuracy
@@ -424,7 +427,7 @@ def main():
         print("Data loaded. Starting optimization...")
 
         # Phase 1: Train initial model with all features
-        # best_trial = optimize_model(X_train, X_val, y_train, y_val, n_trials=10000)
+        best_trial = optimize_model(X_train, X_val, y_train, y_val, n_trials=10000)
 
         # Use an existing model for feature selection and visualization
         existing_model_path = 'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/model_0.6940_auc_diff_0.0102.json'
