@@ -642,16 +642,7 @@ class MatchupProcessor:
             years_back: int
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
-        Split matchup data into training, validation, and test sets.
-
-        Args:
-            matchup_data_file: Path to matchup data CSV
-            start_date: Start date for test set (YYYY-MM-DD)
-            end_date: End date for test set (YYYY-MM-DD)
-            years_back: Number of years of data to include
-
-        Returns:
-            Tuple of (train_data, val_data, test_data) DataFrames
+        Split matchup data into training, validation, and test sets with random fighter ordering.
         """
         print(f"Splitting data from {start_date} to {end_date} with {years_back} years history...")
         matchup_df = self.fight_processor._load_csv(matchup_data_file)
@@ -687,28 +678,15 @@ class MatchupProcessor:
         train_data = remaining_data.iloc[:split_index].copy()
         val_data = remaining_data.iloc[split_index:].copy()
 
-        # Remove duplicate fights
-        val_data = self._remove_duplicate_fights(val_data)
-        test_data = self._remove_duplicate_fights(test_data)
+        # Remove duplicate fights with random ordering (no alphabetical enforcement)
+        test_data = self._remove_duplicate_fights(test_data, random=False)
 
-        # Sort datasets
-        sort_cols = ['current_fight_date', 'fighter_a', 'fighter_b']
-        train_data = train_data.sort_values(by=sort_cols, ascending=True)
-        val_data = val_data.sort_values(by=sort_cols, ascending=True)
-        test_data = test_data.sort_values(by=sort_cols, ascending=True)
+        # Sort datasets by date only
+        train_data = train_data.sort_values(by='current_fight_date', ascending=True)
+        val_data = val_data.sort_values(by='current_fight_date', ascending=True)
+        test_data = test_data.sort_values(by='current_fight_date', ascending=True)
 
-        # --- Added Check ---
-        # Verify that in every row, fighter_a comes before fighter_b alphabetically.
-        for df, name in [(test_data, "test_data"), (val_data, "val_data")]:
-            ordering = df['fighter_a'] <= df['fighter_b']
-            if not ordering.all():
-                # Get the rows where the ordering is violated
-                violations = df[~ordering][['fighter_a', 'fighter_b']]
-                print(f"In {name}, the following rows violate alphabetical order:")
-                print(violations.to_string(index=False))
-                raise ValueError(f"In {name}, not all fighter_a come before fighter_b alphabetically.")
-            else:
-                print("All of fighter_a comes before fighter_b alphabetically.")
+        # Remove the alphabetical ordering check
 
         # Save datasets
         self.fight_processor._save_csv(train_data, 'train test data/train_data.csv')
@@ -725,18 +703,53 @@ class MatchupProcessor:
 
         return train_data, val_data, test_data
 
-    def _remove_duplicate_fights(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Remove duplicate fights, keeping only one row per fight pair,
-        and drop rows where fighter_a comes alphabetically after fighter_b."""
+    def _remove_duplicate_fights(self, df: pd.DataFrame, random=True) -> pd.DataFrame:
+        """
+        Remove duplicate fights, with option to enforce alphabetical ordering or keep random duplicates.
+
+        Args:
+            df: DataFrame with fighter data
+            random: If True, keep random duplicates. If False, enforce alphabetical ordering.
+
+        Returns:
+            DataFrame with duplicates removed
+        """
         df = df.copy()
-        # First, filter out rows where fighter_a is not alphabetically before or equal to fighter_b.
-        df = df[df['fighter_a'] <= df['fighter_b']]
 
         # Create a temporary fight_pair column based on sorted fighter names
         df['fight_pair'] = df.apply(lambda row: tuple(sorted([row['fighter_a'], row['fighter_b']])), axis=1)
 
-        # Drop duplicates based on the fight_pair column
-        df = df.drop_duplicates(subset=['fight_pair'], keep='first')
+        if random:
+            # Shuffle the data to randomize which duplicate is kept
+            df = df.sample(frac=1, random_state=42)  # Set random_state for reproducibility
+
+            # Drop duplicates based on the fight_pair column
+            df = df.drop_duplicates(subset=['fight_pair'], keep='first')
+        else:
+            # Simpler approach to avoid the index warning:
+            # 1. Group by fight pair
+            # 2. For each group, select the row where fighter_a <= fighter_b if it exists
+            # 3. Otherwise, take the first row
+
+            result_rows = []
+
+            # Process each unique fight pair
+            for pair, group in df.groupby('fight_pair'):
+                # Check if any row has fighter_a alphabetically before fighter_b
+                alpha_rows = group[group['fighter_a'] <= group['fighter_b']]
+
+                if len(alpha_rows) > 0:
+                    # Add the first alphabetically ordered row
+                    result_rows.append(alpha_rows.iloc[0])
+                else:
+                    # No alphabetically ordered row exists, take the first row
+                    result_rows.append(group.iloc[0])
+
+            # Create a new DataFrame from the selected rows
+            df = pd.DataFrame(result_rows)
+
+            # Sort by date and then alphabetically by fighter_a
+            df = df.sort_values(by=['current_fight_date', 'fighter_a'], ascending=[True, True])
 
         # Drop the temporary fight_pair column and reset the index
         return df.drop(columns=['fight_pair']).reset_index(drop=True)
@@ -753,10 +766,10 @@ def main():
     matchup_processor = MatchupProcessor()
 
     # # Uncomment the functions you want to run
-    fight_processor.combine_rounds_stats('../data/ufc_fight_processed.csv')
-    calculate_elo_ratings('../data/combined_rounds.csv')
-    fight_processor.combine_fighters_stats("../data/combined_rounds.csv")
-    matchup_processor.create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    # fight_processor.combine_rounds_stats('../data/ufc_fight_processed.csv')
+    # calculate_elo_ratings('../data/combined_rounds.csv')
+    # fight_processor.combine_fighters_stats("../data/combined_rounds.csv")
+    # matchup_processor.create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
     matchup_processor.split_train_val_test(
         '../data/matchup data/matchup_data_3_avg_name.csv',
         '2024-01-01',

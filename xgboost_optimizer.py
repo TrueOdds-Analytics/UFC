@@ -67,8 +67,8 @@ def load_and_preprocess_data(odds_type='close_odds'):
     elif odds_type == 'drop_open':
         base_columns_to_drop = ['fighter_a', 'fighter_b', 'current_fight_date']
 
-        # Assuming df is your DataFrame, this will find all columns with 'open' in their name
-        open_columns = [col for col in df.columns if 'open' in col.lower()]
+        # Use train_data instead of df to find columns with 'open'
+        open_columns = [col for col in train_data.columns if 'open' in col.lower()]
 
         # Combine the lists
         columns_to_drop = base_columns_to_drop + open_columns
@@ -272,8 +272,8 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
     # Suggest parameters if not provided
     if params is None:
         params = {
-            'lambda': trial.suggest_float('lambda', 5, 10, log=True),
-            'alpha': trial.suggest_float('alpha', 5, 10, log=True),
+            'lambda': trial.suggest_float('lambda', 25, 30, log=True),
+            'alpha': trial.suggest_float('alpha', 25, 30, log=True),
             'min_child_weight': trial.suggest_float('min_child_weight', 1, 10.0),
             'max_depth': trial.suggest_int('max_depth', 1, 6),
             'max_delta_step': trial.suggest_int('max_delta_step', 0, 10),
@@ -304,7 +304,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
             print(f"New best model found! Accuracy: {accuracy:.4f}, AUC diff: {auc_diff:.4f}")
 
         # Save the model
-        model_dir = 'models/xgboost/jan2024-dec2025/dynamicmatchup sorted 300/'
+        model_dir = 'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/'
         model_filename = f'{model_dir}model_{accuracy:.4f}_auc_diff_{auc_diff:.4f}.json'
         model.save_model(model_filename)
         print(f"Model saved: {model_filename}")
@@ -423,14 +423,14 @@ def main():
 
     try:
         # Load and preprocess data
-        X_train, X_val, y_train, y_val = load_and_preprocess_data(odds_type='drop_open')
+        X_train, X_val, y_train, y_val = load_and_preprocess_data(odds_type='close_odds')
         print("Data loaded. Starting optimization...")
 
         # Phase 1: Train initial model with all features
         best_trial = optimize_model(X_train, X_val, y_train, y_val, n_trials=10000)
 
         # Use an existing model for feature selection and visualization
-        existing_model_path = 'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/model_0.6940_auc_diff_0.0102.json'
+        # existing_model_path = 'models/xgboost/jan2024-dec2025/dynamicmatchup sorted/model_0.7082_auc_diff_0.0408.json'
         print("Creating feature importance visualization for existing model")
 
         # Phase 2: Train model with top features only

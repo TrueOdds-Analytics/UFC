@@ -897,7 +897,6 @@ def main(manual_threshold, use_calibration=True,
     MAX_BET_PERCENTAGE = max_bet_percentage
 
     # Load and preprocess data
-    # Load data
     val_data = pd.read_csv('data/train test data/val_data.csv')
     test_data = pd.read_csv('data/train test data/test_data.csv')
 
@@ -956,11 +955,11 @@ def main(manual_threshold, use_calibration=True,
     X_test = test_data_with_display.drop(display_columns + ['winner'], axis=1)
     y_test = test_data_with_display['winner']
 
-    modelnum = 0
+    modelnum = 1
 
     model_files = [
-        'model_0.7082_auc_diff_0.0408.json',
-        'model_0.7177_auc_diff_0.0697.json',
+        'model_0.7033_auc_diff_0.0132.json',
+        'model_0.7033_auc_diff_0.0117.json',
         'model_0.7019_auc_diff_0.0826.json',
         'model_0.6924_auc_diff_0.0491.json',
         'model_0.6987_auc_diff_0.0068.json'
