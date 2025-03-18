@@ -1368,71 +1368,62 @@ def evaluate_single_model(model_file, model_path, X_val, y_val, X_test, y_test, 
                           initial_bankroll, kelly_fraction, fixed_bet_fraction, max_bet_percentage,
                           min_odds, odds_type, use_calibration=True, calibration_type='isotonic'):
     """
-    Evaluate a single model and return comprehensive metrics including before/after calibration data
+    Evaluate a single model and return its metrics using a fixed confidence threshold of 0.5
+
+    Args:
+        model_file: Name of the model file
+        model_path: Path to the model directory
+        X_val, y_val: Validation data features and targets
+        X_test, y_test: Test data features and targets
+        test_data_with_display: Test data with display columns
+        initial_bankroll: Initial bankroll for betting simulation
+        kelly_fraction: Kelly fraction for betting
+        fixed_bet_fraction: Fixed fraction for betting
+        max_bet_percentage: Maximum bet percentage
+        min_odds: Minimum odds to consider
+        odds_type: Type of odds to use ('open', 'close', 'average')
+        use_calibration: Whether to use calibration
+        calibration_type: Type of calibration ('isotonic', 'range_based', 'uncalibrated')
+
+    Returns:
+        Dictionary containing model metrics
     """
     # Load the model
     full_model_path = os.path.join(model_path, model_file)
     model = load_model(full_model_path, 'xgboost')
 
-    # First get uncalibrated probabilities (original model output)
-    uncalibrated_proba = model.predict_proba(X_test)
-
-    # Calculate original calibration metrics
-    orig_true, orig_pred = calibration_curve(y_test, uncalibrated_proba[:, 1], n_bins=10)
-    original_calibration_error = np.mean(np.abs(orig_true - orig_pred))
-    original_calibration_bias = np.mean(orig_true - orig_pred)
-    original_bias_type = "Under-confident" if original_calibration_bias > 0.01 else \
-        "Over-confident" if original_calibration_bias < -0.01 else "Well-calibrated"
-
-    # Apply calibration if requested
+    # Apply calibration if needed
     if use_calibration:
         if calibration_type == 'range_based':
             # Define custom ranges for different probability regions
             calibration_ranges = [0.25, 0.45, 0.65, 0.85]
 
             # Apply range-based calibration
-            model_list = [model]
-            y_pred_proba_list, calibrators = calibrate_predictions_with_range_method(
+            model_list = [model]  # Put in list format for the function
+            y_pred_proba_list, _ = calibrate_predictions_with_range_method(
                 model_list, X_val, y_val, X_test, ranges=calibration_ranges
             )
-            y_pred_proba = y_pred_proba_list[0]
+            y_pred_proba = y_pred_proba_list[0]  # Get the first (and only) model's predictions
         else:
-            # Use standard scikit-learn calibration
-            calibration_type = 'isotonic'
+            # Use standard scikit-learn calibration (isotonic by default)
+            calibration_type = 'isotonic'  # Default to isotonic if not range_based
             calibrated_model = CalibratedClassifierCV(model, cv='prefit', method=calibration_type)
             calibrated_model.fit(X_val, y_val)
             y_pred_proba = calibrated_model.predict_proba(X_test)
     else:
         calibration_type = 'uncalibrated'
-        y_pred_proba = uncalibrated_proba.copy()  # Use a copy to avoid modifying the original
-
-    # Calculate calibrated calibration metrics
-    cal_true, cal_pred = calibration_curve(y_test, y_pred_proba[:, 1], n_bins=10)
-    calibrated_calibration_error = np.mean(np.abs(cal_true - cal_pred))
-    calibrated_calibration_bias = np.mean(cal_true - cal_pred)
-
-    # Determine calibration tendency after calibration
-    calibration_tendency = "Under-confident" if calibrated_calibration_bias > 0.01 else \
-        "Over-confident" if calibrated_calibration_bias < -0.01 else \
-            "Well-calibrated"
-
-    # Calculate improvement percentage
-    if original_calibration_error > 0:
-        calibration_improvement = ((original_calibration_error - calibrated_calibration_error) /
-                                   original_calibration_error) * 100
-    else:
-        calibration_improvement = 0.0
+        y_pred_proba = model.predict_proba(X_test)
 
     # Put in list format for evaluate_bets
     y_pred_proba_list = [y_pred_proba]
 
-    # Binary predictions (for accuracy calculation)
+    # Binary predictions
     y_pred = np.array([1 if proba[1] > proba[0] else 0 for proba in y_pred_proba])
 
-    # Fixed threshold of 0.5 for evaluation
+    # Fixed threshold of 0.5
     threshold = 0.5
 
-    # Evaluate betting performance
+    # Evaluate betting performance with fixed threshold
     bet_results = evaluate_bets(
         y_test, y_pred_proba_list, test_data_with_display, threshold,
         initial_bankroll, kelly_fraction, fixed_bet_fraction,
@@ -1457,37 +1448,40 @@ def evaluate_single_model(model_file, model_path, X_val, y_val, X_test, y_test, 
     # Calculate overall model accuracy
     overall_accuracy = accuracy_score(y_test, y_pred)
 
+    # Calculate calibration error
+    prob_true, prob_pred = calibration_curve(y_test, y_pred_proba[:, 1], n_bins=10)
+    calibration_error = np.mean(np.abs(prob_true - prob_pred))
+
     # Calculate AUC
     auc = roc_auc_score(y_test, y_pred_proba[:, 1]) if len(np.unique(y_test)) > 1 else 0
 
-    # Return comprehensive metrics dictionary
+    # Determine if model is generally over or under confident
+    calibration_bias = np.mean(prob_true - prob_pred)
+    if calibration_bias > 0.01:
+        calibration_tendency = "Under-confident"
+    elif calibration_bias < -0.01:
+        calibration_tendency = "Over-confident"
+    else:
+        calibration_tendency = "Well-calibrated"
+
+    # Return metrics as dictionary
     metrics = {
         'model_name': os.path.splitext(model_file)[0],
         'calibration_type': calibration_type,
-        # Original calibration metrics
-        'original_calibration_error': original_calibration_error,
-        'original_calibration_bias': original_calibration_bias,
-        'original_calibration_tendency': original_bias_type,
-        # Calibrated metrics
-        'calibrated_calibration_error': calibrated_calibration_error,
-        'calibrated_calibration_bias': calibrated_calibration_bias,
         'calibration_tendency': calibration_tendency,
-        'calibration_improvement': calibration_improvement,
-        # Model performance
-        'confidence_threshold': threshold,
+        'calibration_bias': calibration_bias,
+        'confidence_threshold': threshold,  # Fixed threshold of 0.5
         'overall_accuracy': overall_accuracy,
         'auc': auc,
-        # Fixed fraction results
+        'calibration_error': calibration_error,
         'fixed_roi': fixed_roi,
-        'fixed_accuracy': fixed_accuracy,
-        'fixed_total_bets': fixed_total_bets,
-        'fixed_final_bankroll': fixed_final_bankroll,
-        # Kelly results
         'kelly_roi': kelly_roi,
+        'fixed_accuracy': fixed_accuracy,
         'kelly_accuracy': kelly_accuracy,
+        'fixed_total_bets': fixed_total_bets,
         'kelly_total_bets': kelly_total_bets,
+        'fixed_final_bankroll': fixed_final_bankroll,
         'kelly_final_bankroll': kelly_final_bankroll,
-        # Prediction stats
         'confident_predictions': confident_predictions,
         'correct_confident_predictions': correct_confident_predictions
     }
@@ -1500,7 +1494,22 @@ def evaluate_model_by_name(model_name, model_directory='models/xgboost/jan2024-d
                            kelly_fraction=0.5, fixed_bet_fraction=0.1, max_bet_percentage=0.1,
                            min_odds=-300, odds_type='close'):
     """
-    Evaluate a single model by name with comprehensive metrics reporting
+    Evaluate a single model by name
+
+    Args:
+        model_name: Name of the model file (with or without .json extension)
+        model_directory: Path to directory containing model files
+        use_calibration: Whether to use calibration
+        calibration_type: Type of calibration ('isotonic', 'range_based', 'uncalibrated')
+        initial_bankroll: Initial bankroll for betting simulation
+        kelly_fraction: Kelly fraction for betting
+        fixed_bet_fraction: Fixed fraction for betting
+        max_bet_percentage: Maximum bet percentage
+        min_odds: Minimum odds to consider
+        odds_type: Type of odds to use ('open', 'close', 'average')
+
+    Returns:
+        Dictionary containing model metrics
     """
     # Add .json extension if not provided
     if not model_name.endswith('.json'):
@@ -1532,7 +1541,7 @@ def evaluate_model_by_name(model_name, model_directory='models/xgboost/jan2024-d
         print(f"Loading existing encoder from {encoder_path}")
         encoder = CategoryEncoder.load(encoder_path)
 
-        # Process validation data with the loaded encoder
+        # Process validation data with the loaded encoder (without refitting)
         X_val, _ = preprocess_data(
             val_data.drop(['winner'] + display_columns, axis=1),
             encoder=encoder,
@@ -1543,11 +1552,11 @@ def evaluate_model_by_name(model_name, model_directory='models/xgboost/jan2024-d
         print("Creating and fitting new encoder")
         encoder = CategoryEncoder()
 
-        # First fit the encoder on validation data
+        # First fit the encoder on validation data to learn consistent categorical mappings
         X_val, encoder = preprocess_data(
             val_data.drop(['winner'] + display_columns, axis=1),
             encoder=encoder,
-            fit=True
+            fit=True  # Important: fit the encoder on validation data
         )
 
         # Ensure the encoder directory exists
@@ -1557,11 +1566,11 @@ def evaluate_model_by_name(model_name, model_directory='models/xgboost/jan2024-d
         encoder.save(encoder_path)
         print(f"Encoder saved to {encoder_path}")
 
-    # Now use the encoder to transform test data
+    # Now use the encoder to transform test data (without fitting again)
     X_test, _ = preprocess_data(
         test_data.drop(['winner'] + display_columns, axis=1),
         encoder=encoder,
-        fit=False
+        fit=False  # Don't fit on test data, just apply the mappings
     )
 
     # Concatenate features with display columns
@@ -1592,27 +1601,20 @@ def evaluate_model_by_name(model_name, model_directory='models/xgboost/jan2024-d
     console = Console()
     console.print(f"\n[bold cyan]Model Evaluation: {metrics['model_name']}[/bold cyan]")
 
-    # Create results table with updated metrics
+    # Create results table
     table = Table(title=f"Model Performance Metrics")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", justify="right", style="magenta")
 
-    # Add metrics to table - updated to use new metric names
+    # Add metrics to table
     table.add_row("Model Name", metrics['model_name'])
     table.add_row("Calibration Type", metrics['calibration_type'])
     table.add_row("Confidence Threshold", f"{metrics['confidence_threshold']:.2f}")
     table.add_row("Kelly ROI", f"{metrics['kelly_roi']:.2f}%")
     table.add_row("Fixed ROI", f"{metrics['fixed_roi']:.2f}%")
-
-    # Calibration metrics - using the new structure
-    table.add_row("Original Calibration Error", f"{metrics['original_calibration_error']:.4f}")
-    table.add_row("Calibrated Calibration Error", f"{metrics['calibrated_calibration_error']:.4f}")
-
-    if calibration_type != 'uncalibrated':
-        table.add_row("Calibration Improvement", f"{metrics['calibration_improvement']:.1f}%")
-
-    table.add_row("Original Tendency", metrics['original_calibration_tendency'])
+    table.add_row("Calibration Error", f"{metrics['calibration_error']:.4f}")
     table.add_row("Calibration Tendency", metrics['calibration_tendency'])
+    table.add_row("Calibration Bias", f"{metrics['calibration_bias']:.4f}")
     table.add_row("Overall Accuracy", f"{metrics['overall_accuracy']:.4f}")
     table.add_row("AUC", f"{metrics['auc']:.4f}")
     table.add_row("Kelly Betting Accuracy", f"{metrics['kelly_accuracy']:.4f}")
@@ -1719,8 +1721,6 @@ def evaluate_model_by_name(model_name, model_directory='models/xgboost/jan2024-d
 
     except Exception as e:
         print(f"\n[Warning] Error generating calibration plots: {str(e)}")
-        import traceback
-        traceback.print_exc()
 
     # Save metrics to CSV
     metrics_df = pd.DataFrame([metrics])
@@ -1747,7 +1747,19 @@ def evaluate_all_models(model_directory='models/xgboost/jan2024-dec2025/dynamicm
                         kelly_fraction=0.5, fixed_bet_fraction=0.1, max_bet_percentage=0.1,
                         min_odds=-300, odds_type='close', output_file='model_comparison.csv'):
     """
-    Evaluate all models in a directory with comprehensive calibration metrics
+    Evaluate all models in a directory and save metrics to CSV
+
+    Args:
+        model_directory: Path to directory containing model files
+        use_calibration: Whether to use calibration
+        calibration_type: Type of calibration ('isotonic', 'range_based', 'uncalibrated')
+        initial_bankroll: Initial bankroll for betting simulation
+        kelly_fraction: Kelly fraction for betting
+        fixed_bet_fraction: Fixed fraction for betting
+        max_bet_percentage: Maximum bet percentage
+        min_odds: Minimum odds to consider
+        odds_type: Type of odds to use ('open', 'close', 'average')
+        output_file: Path to output CSV file
     """
     # Redirect stdout to capture output
     old_stdout = sys.stdout
@@ -1835,7 +1847,7 @@ def evaluate_all_models(model_directory='models/xgboost/jan2024-dec2025/dynamicm
                 X_val = X_val.reindex(columns=expected_features)
                 X_test = X_test.reindex(columns=expected_features)
 
-            # Evaluate the current model with comprehensive metrics
+            # Evaluate the current model
             metrics = evaluate_single_model(
                 model_file, model_directory, X_val, y_val, X_test, y_test,
                 test_data_with_display, initial_bankroll, kelly_fraction,
@@ -1844,22 +1856,17 @@ def evaluate_all_models(model_directory='models/xgboost/jan2024-dec2025/dynamicm
             )
 
             all_metrics.append(metrics)
-
-            # Print summary of this model's results
-            cal_improvement_str = f"{metrics['calibration_improvement']:.1f}%" if use_calibration else "N/A"
             print(f"Model {model_file}")
+            print(f"  Threshold: {metrics['confidence_threshold']:.2f}")
             print(f"  Kelly ROI: {metrics['kelly_roi']:.2f}%")
-            print(
-                f"  Original Cal Error: {metrics['original_calibration_error']:.4f} ({metrics['original_calibration_tendency']})")
-            print(
-                f"  Calibrated Error: {metrics['calibrated_calibration_error']:.4f} ({metrics['calibration_tendency']})")
-            print(f"  Calibration Improvement: {cal_improvement_str}")
-            print(f"  Accuracy: {metrics['overall_accuracy']:.4f}, AUC: {metrics['auc']:.4f}")
+            print(f"  Fixed ROI: {metrics['fixed_roi']:.2f}%")
+            print(f"  Calibration Error: {metrics['calibration_error']:.4f} ({metrics['calibration_tendency']})")
+            print(f"  Betting Accuracy: {metrics['kelly_accuracy']:.4f}")
+            print(f"  Overall Accuracy: {metrics['overall_accuracy']:.4f}")
+            print(f"  AUC: {metrics['auc']:.4f}")
 
         except Exception as e:
             print(f"Error evaluating model {model_file}: {str(e)}")
-            import traceback
-            traceback.print_exc()
 
     # Write metrics to CSV
     metrics_df = write_metrics_to_csv(all_metrics, output_file)
@@ -1868,68 +1875,29 @@ def evaluate_all_models(model_directory='models/xgboost/jan2024-dec2025/dynamicm
     console = Console()
     console.print("\n[bold cyan]Model Comparison Summary[/bold cyan]")
 
-    # Create more informative table for range-based calibration
-    if calibration_type == 'range_based':
-        table = Table(title=f"Top 10 Models by Kelly ROI (Range-Based Calibration)")
-        table.add_column("Model", style="cyan", width=30)
-        table.add_column("Kelly ROI", justify="right", style="green")
-        table.add_column("Orig Error", justify="right", style="red")
-        table.add_column("Cal Error", justify="right", style="yellow")
-        table.add_column("Improve", justify="right", style="cyan")
-        table.add_column("Tendency", justify="right", style="magenta", width=15)
-        table.add_column("AUC", justify="right", style="blue")
-    else:
-        table = Table(title=f"Top 10 Models by Kelly ROI (Calibration: {calibration_type})")
-        table.add_column("Model", style="cyan", width=30)
-        table.add_column("Kelly ROI", justify="right", style="green")
-        table.add_column("Cal Error", justify="right", style="yellow")
-        table.add_column("Tendency", justify="right", style="magenta", width=15)
-        table.add_column("Accuracy", justify="right", style="blue")
-        table.add_column("AUC", justify="right", style="red")
+    table = Table(title=f"Top 10 Models by Kelly ROI (Calibration: {calibration_type})")
+    table.add_column("Model", style="cyan")
+    table.add_column("Kelly ROI", justify="right", style="green")
+    table.add_column("Threshold", justify="right", style="blue")
+    table.add_column("Cal. Error", justify="right", style="yellow")
+    table.add_column("Tendency", justify="right", style="magenta")
+    table.add_column("Accuracy", justify="right", style="blue")
+    table.add_column("AUC", justify="right", style="red")
 
     # Display top 10 models by Kelly ROI
     max_models = min(10, len(metrics_df))
     for _, row in metrics_df.head(max_models).iterrows():
-        if calibration_type == 'range_based':
-            table.add_row(
-                row['model_name'],
-                f"{row['kelly_roi']:.2f}%",
-                f"{row['original_calibration_error']:.4f}",
-                f"{row['calibrated_calibration_error']:.4f}",
-                f"{row['calibration_improvement']:.1f}%",
-                row['calibration_tendency'],
-                f"{row['auc']:.4f}"
-            )
-        else:
-            table.add_row(
-                row['model_name'],
-                f"{row['kelly_roi']:.2f}%",
-                f"{row['calibrated_calibration_error']:.4f}",
-                row['calibration_tendency'],
-                f"{row['overall_accuracy']:.4f}",
-                f"{row['auc']:.4f}"
-            )
+        table.add_row(
+            row['model_name'],
+            f"{row['kelly_roi']:.2f}%",
+            f"{row['confidence_threshold']:.2f}",
+            f"{row['calibration_error']:.4f}",
+            row['calibration_tendency'],
+            f"{row['overall_accuracy']:.4f}",
+            f"{row['auc']:.4f}"
+        )
 
     console.print(table)
-
-    # Additional stats for when using range-based calibration
-    if calibration_type == 'range_based':
-        avg_improvement = metrics_df['calibration_improvement'].mean()
-        max_improvement = metrics_df['calibration_improvement'].max()
-        avg_orig_error = metrics_df['original_calibration_error'].mean()
-        avg_cal_error = metrics_df['calibrated_calibration_error'].mean()
-
-        console.print("\n[bold cyan]Range-Based Calibration Summary[/bold cyan]")
-        summary_table = Table()
-        summary_table.add_column("Metric", style="cyan")
-        summary_table.add_column("Value", style="yellow")
-
-        summary_table.add_row("Average Calibration Improvement", f"{avg_improvement:.1f}%")
-        summary_table.add_row("Maximum Calibration Improvement", f"{max_improvement:.1f}%")
-        summary_table.add_row("Average Original Error", f"{avg_orig_error:.4f}")
-        summary_table.add_row("Average Calibrated Error", f"{avg_cal_error:.4f}")
-
-        console.print(summary_table)
 
     # Restore stdout and print final output
     sys.stdout = old_stdout
@@ -1948,36 +1916,16 @@ def evaluate_all_models(model_directory='models/xgboost/jan2024-dec2025/dynamicm
 
 def write_metrics_to_csv(metrics_list, output_file='model_comparison.csv'):
     """
-    Write comprehensive model metrics to a CSV file with clear organization of columns
+    Write model metrics to a CSV file
+
+    Args:
+        metrics_list: List of dictionaries containing model metrics
+        output_file: Path to output CSV file
     """
+    import pandas as pd
+
     # Convert to DataFrame
     metrics_df = pd.DataFrame(metrics_list)
-
-    # Organize columns in logical groups
-    column_order = [
-        # Identifiers
-        'model_name', 'calibration_type',
-        # Performance metrics
-        'kelly_roi', 'fixed_roi', 'overall_accuracy', 'auc',
-        # Calibration metrics
-        'original_calibration_error', 'calibrated_calibration_error',
-        'calibration_improvement', 'original_calibration_tendency',
-        'calibration_tendency', 'original_calibration_bias', 'calibrated_calibration_bias',
-        # Betting metrics
-        'kelly_accuracy', 'fixed_accuracy', 'kelly_total_bets', 'fixed_total_bets',
-        'kelly_final_bankroll', 'fixed_final_bankroll', 'confidence_threshold',
-        # Other metrics
-        'confident_predictions', 'correct_confident_predictions'
-    ]
-
-    # Ensure all columns from the metrics are included
-    all_columns = set(metrics_df.columns)
-    ordered_columns = [col for col in column_order if col in all_columns]
-    remaining_columns = [col for col in all_columns if col not in ordered_columns]
-    final_columns = ordered_columns + remaining_columns
-
-    # Reorder columns
-    metrics_df = metrics_df[final_columns]
 
     # Sort by Kelly ROI (descending)
     metrics_df = metrics_df.sort_values('kelly_roi', ascending=False)
