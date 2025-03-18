@@ -626,19 +626,19 @@ class UFCMatchupCreator:
 def main():
     """Create a fighter matchup file."""
     # Fighters
-    fighter_a = "Chidi Njokuani"
-    fighter_b = "Elizeu Zaleski Dos Santos"
-
-    # Closing Odds
-    closing_odds_a = 175
-    closing_odds_b = -196
+    fighter_a = "Alexander Hernandez"
+    fighter_b = "Kurt Holobaugh"
 
     # Open Odds
-    open_odds_a = 175
-    open_odds_b = -225
+    open_odds_a = -175
+    open_odds_b = 145
+
+    # Closing Odds
+    closing_odds_a = -185
+    closing_odds_b = 175
 
     # Specify fight date
-    fight_date = "2025-03-15"
+    fight_date = "2025-03-08"
 
     # Get the directory of the current script
     current_dir = os.path.dirname(os.path.abspath(__file__))

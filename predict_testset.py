@@ -1409,22 +1409,22 @@ def main(manual_threshold, use_calibration=True, calibration_type='range_based',
     modelnum = 0  # Index for single model selection when not using ensemble
 
     # Range Based
-    model_files = [
-        'model_0.7009_auc_diff_0.0038.json',
-        'model_0.7057_auc_diff_0.0020.json',
-        'model_0.7009_auc_diff_0.0019.json',
-        'model_0.7064_auc_diff_0.0038.json',
-        'model_0.7025_auc_diff_0.0004.json'
-    ]
+    # model_files = [
+    #     'model_0.7009_auc_diff_0.0038.json',
+    #     'model_0.7057_auc_diff_0.0020.json',
+    #     'model_0.7009_auc_diff_0.0019.json',
+    #     'model_0.7064_auc_diff_0.0038.json',
+    #     'model_0.7025_auc_diff_0.0004.json'
+    # ]
 
     # Isotonic
-    # model_files = [
-    #     'model_0.7009_auc_diff_0.0161.json',
-    #     'model_0.7002_auc_diff_0.0410.json',
-    #     'model_0.7025_auc_diff_0.0221.json',
-    #     'model_0.7009_auc_diff_0.0293.json',
-    #     'model_0.7009_auc_diff_0.0038.json'
-    # ]
+    model_files = [
+        'model_0.7009_auc_diff_0.0161.json',
+        'model_0.7002_auc_diff_0.0410.json',
+        'model_0.7025_auc_diff_0.0221.json',
+        'model_0.7009_auc_diff_0.0293.json',
+        'model_0.7009_auc_diff_0.0038.json'
+    ]
 
     # Extract model names for use in plots
     model_names = [os.path.splitext(model_file)[0] for model_file in model_files]
@@ -1681,7 +1681,7 @@ if __name__ == "__main__":
          use_calibration=True,
          calibration_type='isotonic',  # Use 'range_based', 'isotonic', or False
          initial_bankroll=10000,
-         kelly_fraction=0.25,
+         kelly_fraction=0.5,
          fixed_bet_fraction=0.1,
          max_bet_percentage=0.1,
          min_odds=-300,
