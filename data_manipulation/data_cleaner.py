@@ -684,9 +684,7 @@ class MatchupProcessor:
         # Sort datasets by date only
         train_data = train_data.sort_values(by='current_fight_date', ascending=True)
         val_data = val_data.sort_values(by='current_fight_date', ascending=True)
-        test_data = test_data.sort_values(by='current_fight_date', ascending=True)
-
-        # Remove the alphabetical ordering check
+        test_data = test_data.sort_values(by=['current_fight_date', 'fighter_a'], ascending=[True, True])
 
         # Save datasets
         self.fight_processor._save_csv(train_data, 'train test data/train_data.csv')
@@ -726,10 +724,6 @@ class MatchupProcessor:
             # Drop duplicates based on the fight_pair column
             df = df.drop_duplicates(subset=['fight_pair'], keep='first')
         else:
-            # Simpler approach to avoid the index warning:
-            # 1. Group by fight pair
-            # 2. For each group, select the row where fighter_a <= fighter_b if it exists
-            # 3. Otherwise, take the first row
 
             result_rows = []
 
