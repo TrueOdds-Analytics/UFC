@@ -1,12 +1,52 @@
+"""
+Core matchup prediction functionality for UFC fights
+"""
 import os
-from datetime import datetime
-from typing import List, Dict, Optional, Union
-
 import numpy as np
 import pandas as pd
+from datetime import datetime
+from typing import List, Dict, Tuple, Optional, Union
 
 # Import from the original module
-from src.data_processing.cleaning.data_cleaner import FightDataProcessor, DataUtils, OddsUtils
+try:
+    from src.data_processing.cleaning.data_cleaner import FightDataProcessor
+
+    ORIGINAL_PROCESSOR_AVAILABLE = True
+except ImportError:
+    ORIGINAL_PROCESSOR_AVAILABLE = False
+    print("WARNING: Original FightDataProcessor not found. Some functionality may be limited.")
+
+from config import PATHS, IMPORTANT_COLUMNS, EXCLUDED_COLUMNS, DEBUG
+from utils import (
+    safe_divide, process_odds_pair, rename_column, resolve_fight_date,
+    generate_matchup_filename, ensure_directory_exists, create_result_columns
+)
+
+
+class FightDataProcessorFallback:
+    """Fallback implementation if the original FightDataProcessor is not available"""
+
+    def __init__(self, data_dir):
+        self.data_dir = data_dir
+
+    def _load_csv(self, filepath):
+        """Load a CSV file into a pandas DataFrame"""
+        try:
+            return pd.read_csv(filepath)
+        except Exception as e:
+            print(f"Error loading CSV file {filepath}: {e}")
+            raise
+
+    def _save_csv(self, df, filepath):
+        """Save a pandas DataFrame to a CSV file"""
+        try:
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            df.to_csv(filepath, index=False)
+            print(f"Saved to {filepath}")
+        except Exception as e:
+            print(f"Error saving CSV file {filepath}: {e}")
+            raise
 
 
 class FighterMatchupPredictor:
@@ -21,9 +61,12 @@ class FighterMatchupPredictor:
         """
         # Use absolute path resolution to avoid path concatenation issues
         self.data_dir = os.path.abspath(data_dir)
-        self.fight_processor = FightDataProcessor(self.data_dir)
-        self.utils = DataUtils()
-        self.odds_utils = OddsUtils()
+
+        # Initialize the fight processor
+        if ORIGINAL_PROCESSOR_AVAILABLE:
+            self.fight_processor = FightDataProcessor(self.data_dir)
+        else:
+            self.fight_processor = FightDataProcessorFallback(self.data_dir)
 
     def create_fighter_matchup(
             self,
@@ -49,33 +92,26 @@ class FighterMatchupPredictor:
             closing_odds_b: Closing odds for fighter B
             fight_date: Date of the fight in YYYY-MM-DD format or datetime object
             n_past_fights: Number of past fights to consider for statistics (default: 3)
+            save_individual_file: Whether to save the matchup to an individual file
 
         Returns:
             DataFrame with the matchup data formatted for prediction
         """
-        print(f"Creating matchup: {fighter_a} vs {fighter_b}")
-        print(f"Open Odds: {fighter_a} ({open_odds_a}) vs {fighter_b} ({open_odds_b})")
-        print(f"Closing Odds: {fighter_a} ({closing_odds_a}) vs {fighter_b} ({closing_odds_b})")
-        print(f"Using data directory: {self.data_dir}")
+        if DEBUG:
+            print(f"Creating matchup: {fighter_a} vs {fighter_b}")
+            print(f"Open Odds: {fighter_a} ({open_odds_a}) vs {fighter_b} ({open_odds_b})")
+            print(f"Closing Odds: {fighter_a} ({closing_odds_a}) vs {fighter_b} ({closing_odds_b})")
+            print(f"Using data directory: {self.data_dir}")
 
         # Process the fight date
-        if fight_date is None:
-            current_date = datetime.now()
-            print(f"Using current date: {current_date.strftime('%Y-%m-%d')}")
-        elif isinstance(fight_date, str):
-            try:
-                current_date = datetime.strptime(fight_date, '%Y-%m-%d')
-                print(f"Using specified fight date: {fight_date}")
-            except ValueError:
-                print("Invalid date format. Using current date instead.")
-                current_date = datetime.now()
-        else:
-            current_date = fight_date
-            print(f"Using specified fight date: {current_date.strftime('%Y-%m-%d')}")
+        current_date = resolve_fight_date(fight_date)
+        if DEBUG:
+            print(f"Using fight date: {current_date.strftime('%Y-%m-%d')}")
 
         # Load combined fighter stats data
-        fighter_stats_file = os.path.join(self.data_dir, "processed/combined_sorted_fighter_stats.csv")
-        print(f"Attempting to load fighter stats from: {fighter_stats_file}")
+        fighter_stats_file = os.path.join(self.data_dir, PATHS['processed_fighter_stats'])
+        if DEBUG:
+            print(f"Attempting to load fighter stats from: {fighter_stats_file}")
 
         # Check if file exists before loading
         if not os.path.exists(fighter_stats_file):
@@ -98,13 +134,8 @@ class FighterMatchupPredictor:
             raise ValueError(f"Fighter '{fighter_b}' not found in the dataset")
 
         # Define columns to exclude from features
-        columns_to_exclude = [
-            'fighter', 'fighter_lower', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
-            'result', 'winner', 'weight_class', 'scheduled_rounds',
-            'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b'
-        ]
         features_to_include = [
-            col for col in df.columns if col not in columns_to_exclude
+            col for col in df.columns if col not in EXCLUDED_COLUMNS
                                          and col != 'age' and not col.endswith('_age')
         ]
 
@@ -136,15 +167,15 @@ class FighterMatchupPredictor:
         results_fighter_b = np.pad(results_fighter_b, (0, tester * 4 - len(results_fighter_b)),
                                    'constant', constant_values=np.nan)
 
-        # Calculate current stats for both fighters using the working implementation approach
-        current_stats_a = self._calculate_fighter_stats_fixed(fighter_a_lower, df, current_date, n_past_fights)
-        current_stats_b = self._calculate_fighter_stats_fixed(fighter_b_lower, df, current_date, n_past_fights)
+        # Calculate current stats for both fighters
+        current_stats_a = self._calculate_fighter_stats(fighter_a_lower, df, current_date, n_past_fights)
+        current_stats_b = self._calculate_fighter_stats(fighter_b_lower, df, current_date, n_past_fights)
 
         age_a, exp_a, days_since_a, win_streak_a, loss_streak_a = current_stats_a
         age_b, exp_b, days_since_b, win_streak_b, loss_streak_b = current_stats_b
 
         current_fight_age_diff = age_a - age_b
-        current_fight_age_ratio = self.utils.safe_divide(age_a, age_b)
+        current_fight_age_ratio = safe_divide(age_a, age_b)
 
         # Get ELO ratings
         if 'fight_outcome_elo' in fighter_a_df.columns and 'fight_outcome_elo' in fighter_b_df.columns:
@@ -184,11 +215,11 @@ class FighterMatchupPredictor:
 
         # Process odds
         current_fight_odds, current_fight_odds_diff, current_fight_odds_ratio = \
-            self._process_fight_odds(current_fight['open_odds'], current_fight['open_odds_b'])
+            process_odds_pair(current_fight['open_odds'], current_fight['open_odds_b'])
 
         # Process closing odds
         current_fight_closing_odds, current_fight_closing_odds_diff, current_fight_closing_odds_ratio = \
-            self._process_fight_odds(current_fight['closing_range_end'], current_fight['closing_range_end_b'])
+            process_odds_pair(current_fight['closing_range_end'], current_fight['closing_range_end_b'])
 
         # Calculate the difference between closing and opening odds for each fighter
         current_fight_closing_open_diff_a = current_fight['closing_range_end'] - current_fight['open_odds']
@@ -200,18 +231,18 @@ class FighterMatchupPredictor:
         # Process ELO stats
         elo_a_win_prob = 1 / (1 + 10 ** ((elo_b - elo_a) / 400))
         elo_b_win_prob = 1 / (1 + 10 ** ((elo_a - elo_b) / 400))
-        elo_ratio = self.utils.safe_divide(elo_a, elo_b)
+        elo_ratio = safe_divide(elo_a, elo_b)
         elo_stats = [elo_a, elo_b, elo_diff, elo_a_win_prob, elo_b_win_prob]
 
         # Create explicit other stats
         win_streak_diff = win_streak_a - win_streak_b
-        win_streak_ratio = self.utils.safe_divide(win_streak_a, win_streak_b)
+        win_streak_ratio = safe_divide(win_streak_a, win_streak_b)
         loss_streak_diff = loss_streak_a - loss_streak_b
-        loss_streak_ratio = self.utils.safe_divide(loss_streak_a, loss_streak_b)
+        loss_streak_ratio = safe_divide(loss_streak_a, loss_streak_b)
         exp_diff = exp_a - exp_b
-        exp_ratio = self.utils.safe_divide(exp_a, exp_b)
+        exp_ratio = safe_divide(exp_a, exp_b)
         days_since_diff = days_since_a - days_since_b
-        days_since_ratio = self.utils.safe_divide(days_since_a, days_since_b)
+        days_since_ratio = safe_divide(days_since_a, days_since_b)
 
         # Create comprehensive other_stats array with all required stats
         other_stats = [
@@ -287,7 +318,7 @@ class FighterMatchupPredictor:
         column_names = self._generate_column_names(features_to_include, ['winner'], n_past_fights, tester, True)
         matchup_data = [fighter_a, fighter_b, most_recent_date] + combined_features.tolist() + labels + [current_date]
         matchup_df = pd.DataFrame([matchup_data], columns=column_names)
-        matchup_df.columns = [self.utils.rename_columns_general(col) for col in matchup_df.columns]
+        matchup_df.columns = [rename_column(col) for col in matchup_df.columns]
 
         # Add/update columns with explicitly calculated statistics
         for col_name, col_value in matchup_values.items():
@@ -296,7 +327,7 @@ class FighterMatchupPredictor:
         matchup_df = self._calculate_matchup_features(matchup_df, features_to_include, n_past_fights)
 
         # Remove unnecessary columns
-        removed_features_file = os.path.join(self.data_dir, "train_test", "removed_features.txt")
+        removed_features_file = os.path.join(self.data_dir, PATHS['removed_features'])
         if os.path.exists(removed_features_file):
             with open(removed_features_file, 'r') as f:
                 removed_features = [line.strip() for line in f if line.strip()]
@@ -306,29 +337,11 @@ class FighterMatchupPredictor:
         if 'fight_date' in matchup_df.columns:
             matchup_df = matchup_df.drop(columns=['fight_date'])
 
-        # Define important columns that should always be kept
-        important_columns = [
-            'fighter_a', 'fighter_b',
-            'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff', 'current_fight_age_ratio',
-            'current_fight_win_streak_a', 'current_fight_win_streak_b', 'current_fight_win_streak_diff',
-            'current_fight_win_streak_ratio',
-            'current_fight_loss_streak_a', 'current_fight_loss_streak_b', 'current_fight_loss_streak_diff',
-            'current_fight_loss_streak_ratio',
-            'current_fight_years_experience_a', 'current_fight_years_experience_b',
-            'current_fight_years_experience_diff', 'current_fight_years_experience_ratio',
-            'current_fight_days_since_last_a', 'current_fight_days_since_last_b', 'current_fight_days_since_last_diff',
-            'current_fight_days_since_last_ratio',
-            'current_fight_pre_fight_elo_a', 'current_fight_pre_fight_elo_b', 'current_fight_pre_fight_elo_diff',
-            'current_fight_pre_fight_elo_a_win_chance', 'current_fight_pre_fight_elo_b_win_chance',
-            'current_fight_pre_fight_elo_ratio',
-            'current_fight_closing_open_diff_a', 'current_fight_closing_open_diff_b'  # Added new columns
-        ]
-
         # Create a copy of the DataFrame to ensure we preserve calculated values
         pre_aligned_df = matchup_df.copy()
 
         # Align with test dataset features if available
-        test_data_file = os.path.join(self.data_dir, "train_test", "test_data.csv")
+        test_data_file = os.path.join(self.data_dir, PATHS['test_data'])
         if os.path.exists(test_data_file):
             test_df = self.fight_processor._load_csv(test_data_file)
             test_columns = test_df.columns.tolist()
@@ -337,7 +350,7 @@ class FighterMatchupPredictor:
             all_columns = test_columns.copy()
 
             # Add our important columns if they're not already in the test data
-            for col in important_columns:
+            for col in IMPORTANT_COLUMNS:
                 if col not in all_columns and col in matchup_df.columns:
                     all_columns.append(col)
 
@@ -354,45 +367,49 @@ class FighterMatchupPredictor:
             # Update matchup_df with the aligned DataFrame
             matchup_df = final_df
 
-            print(f"Columns from test data: {len(test_columns)}")
-            print(f"Important columns kept: {sum(1 for col in important_columns if col in matchup_df.columns)}")
-            print(f"Total columns kept: {len(matchup_df.columns)}")
+            if DEBUG:
+                print(f"Columns from test data: {len(test_columns)}")
+                print(f"Important columns kept: {sum(1 for col in IMPORTANT_COLUMNS if col in matchup_df.columns)}")
+                print(f"Total columns kept: {len(matchup_df.columns)}")
         else:
             print(f"Warning: test_data.csv not found at {test_data_file}")
 
         # Verify the values in important columns were maintained
-        for col in important_columns:
+        for col in IMPORTANT_COLUMNS:
             if col in matchup_df.columns and col in pre_aligned_df.columns:
                 if pd.isna(matchup_df[col].iloc[0]) and not pd.isna(pre_aligned_df[col].iloc[0]):
                     print(f"WARNING: Value lost during alignment for {col}")
                     # Restore the value from the pre-aligned DataFrame
                     matchup_df[col] = pre_aligned_df[col]
 
-        # Create matchup data directory if it doesn't exist
-        matchup_dir = os.path.join(self.data_dir, 'live_data')
-        os.makedirs(matchup_dir, exist_ok=True)
-
         # Save the matchup data if requested
         if save_individual_file:
+            # Create matchup data directory if it doesn't exist
+            matchup_dir = os.path.join(self.data_dir, PATHS['live_data'])
+            ensure_directory_exists(matchup_dir)
+
+            # Generate output filename
             output_filename = os.path.join(
                 matchup_dir,
-                f"{fighter_a.replace(' ', '_')}_vs_{fighter_b.replace(' ', '_')}_matchup.csv"
+                generate_matchup_filename(fighter_a, fighter_b)
             )
             self.fight_processor._save_csv(matchup_df, output_filename)
-            print(f"Created matchup prediction data for {fighter_a} vs {fighter_b}")
-            print(f"Output saved to: {output_filename}")
+            if DEBUG:
+                print(f"Created matchup prediction data for {fighter_a} vs {fighter_b}")
+                print(f"Output saved to: {output_filename}")
 
         # Debug info - print all columns
-        print(f"Final DataFrame has {len(matchup_df.columns)} columns including:")
-        for col in important_columns:
-            if col in matchup_df.columns:
-                print(f"- {col}: {matchup_df[col].values[0]}")
-            else:
-                print(f"- {col}: NOT PRESENT")
+        if DEBUG:
+            print(f"Final DataFrame has {len(matchup_df.columns)} columns including:")
+            for col in IMPORTANT_COLUMNS:
+                if col in matchup_df.columns:
+                    print(f"- {col}: {matchup_df[col].values[0]}")
+                else:
+                    print(f"- {col}: NOT PRESENT")
 
         return matchup_df
 
-    def _calculate_fighter_stats_fixed(
+    def _calculate_fighter_stats(
             self,
             fighter_name_lower: str,
             df: pd.DataFrame,
@@ -400,7 +417,7 @@ class FighterMatchupPredictor:
             n_past_fights: int
     ) -> tuple:
         """
-        Calculate fighter statistics using the same approach as the working implementation.
+        Calculate fighter statistics (age, experience, days since last fight, win and loss streaks).
         Uses lowercase fighter name for consistent matching.
 
         Args:
@@ -476,53 +493,11 @@ class FighterMatchupPredictor:
         else:
             print(f"Winner column not found for {fighter_name_lower}")
 
-        print(f"Calculated stats for {fighter_name_lower}: age={current_age}, exp={years_of_experience}, "
-              f"days={days_since_last_fight}, win_streak={win_streak}, loss_streak={loss_streak}")
+        if DEBUG:
+            print(f"Calculated stats for {fighter_name_lower}: age={current_age}, exp={years_of_experience}, "
+                  f"days={days_since_last_fight}, win_streak={win_streak}, loss_streak={loss_streak}")
 
         return current_age, years_of_experience, days_since_last_fight, win_streak, loss_streak
-
-    def _calculate_fighter_stats(
-            self,
-            fighter_name: str,
-            df: pd.DataFrame,
-            current_date: datetime,
-            n_past_fights: int
-    ) -> tuple:
-        """
-        Calculate fighter statistics (age, experience, days since last fight, win and loss streaks).
-        This is the original implementation which has issues with case sensitivity.
-        """
-        fighter_all_fights = df[(df['fighter'] == fighter_name) & (df['fight_date'] < current_date)] \
-            .sort_values(by='fight_date', ascending=False)
-        fighter_recent_fights = fighter_all_fights.head(n_past_fights)
-        if fighter_recent_fights.empty:
-            return np.nan, np.nan, np.nan, np.nan, np.nan
-
-        last_fight_date = fighter_recent_fights['fight_date'].iloc[0]
-        first_fight_date = fighter_all_fights['fight_date'].iloc[-1] if len(fighter_all_fights) > 0 else last_fight_date
-        days_since_last_fight = (current_date - last_fight_date).days
-
-        last_known_age = fighter_recent_fights['age'].iloc[0] if 'age' in fighter_recent_fights.columns else 30
-        current_age = np.ceil(last_known_age + days_since_last_fight / 365.25)
-        years_of_experience = (current_date - first_fight_date).days / 365.25
-
-        win_streak = fighter_recent_fights['win_streak'].iloc[0] if 'win_streak' in fighter_recent_fights.columns else 0
-        loss_streak = fighter_recent_fights['loss_streak'].iloc[
-            0] if 'loss_streak' in fighter_recent_fights.columns else 0
-
-        if 'winner' in fighter_recent_fights.columns:
-            most_recent_result = fighter_recent_fights['winner'].iloc[0]
-            if most_recent_result == 1:
-                win_streak += 1
-                loss_streak = 0
-            elif most_recent_result == 0:
-                loss_streak += 1
-                win_streak = 0
-        return current_age, years_of_experience, days_since_last_fight, win_streak, loss_streak
-
-    def _process_fight_odds(self, odds_a: float, odds_b: float) -> tuple:
-        """Process betting odds for a fight (returns [decimal_odds_a, decimal_odds_b], difference, ratio)."""
-        return self.odds_utils.process_odds_pair(odds_a, odds_b)
 
     def _generate_column_names(
             self,
@@ -533,13 +508,8 @@ class FighterMatchupPredictor:
             include_names: bool
     ) -> List[str]:
         """Generate column names for the matchup DataFrame."""
-        results_columns = []
-        for i in range(1, tester + 1):
-            results_columns += [
-                f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}", f"scheduled_rounds_fight_{i}",
-                f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}",
-                f"scheduled_rounds_b_fight_{i}"
-            ]
+        results_columns = create_result_columns(n_past_fights, tester)
+
         new_columns = [
             'current_fight_pre_fight_elo_a', 'current_fight_pre_fight_elo_b', 'current_fight_pre_fight_elo_diff',
             'current_fight_pre_fight_elo_a_win_chance', 'current_fight_pre_fight_elo_b_win_chance',
@@ -561,7 +531,7 @@ class FighterMatchupPredictor:
             'current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
             'current_fight_open_odds_ratio', 'current_fight_closing_odds', 'current_fight_closing_odds_b',
             'current_fight_closing_odds_diff', 'current_fight_closing_odds_ratio',
-            'current_fight_closing_open_diff_a', 'current_fight_closing_open_diff_b',  # Added new columns
+            'current_fight_closing_open_diff_a', 'current_fight_closing_open_diff_b',
             'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff', 'current_fight_age_ratio'
         ]
         return base_columns + feature_columns + results_columns + odds_age_columns + new_columns + \
@@ -582,250 +552,5 @@ class FighterMatchupPredictor:
             if col_a in df.columns and col_b in df.columns:
                 diff_columns[f"matchup_{feature}_diff_avg_last_{n_past_fights}"] = df[col_a] - df[col_b]
                 ratio_columns[f"matchup_{feature}_ratio_avg_last_{n_past_fights}"] = \
-                    self.utils.safe_divide(df[col_a], df[col_b])
+                    safe_divide(df[col_a], df[col_b])
         return pd.concat([df, pd.DataFrame(diff_columns), pd.DataFrame(ratio_columns)], axis=1)
-
-
-class UFCMatchupCreator:
-    """Creates matchup data for UFC fights."""
-
-    def __init__(self, data_dir: str = "data"):
-        """Initialize the matchup creator with a data directory."""
-        # Use absolute path resolution
-        self.data_dir = os.path.abspath(data_dir)
-        self.matchup_predictor = FighterMatchupPredictor(self.data_dir)
-
-    def create_matchup(
-            self,
-            fighter_a: str,
-            fighter_b: str,
-            open_odds_a: float,
-            open_odds_b: float,
-            closing_odds_a: float,
-            closing_odds_b: float,
-            fight_date: str = None
-    ) -> pd.DataFrame:
-        """
-        Create a matchup file for a UFC fight.
-
-        Args:
-            fighter_a: Name of first fighter
-            fighter_b: Name of second fighter
-            open_odds_a: Opening odds for fighter A
-            open_odds_b: Opening odds for fighter B
-            closing_odds_a: Closing odds for fighter A
-            closing_odds_b: Closing odds for fighter B
-            fight_date: Fight date in YYYY-MM-DD format
-
-        Returns:
-            DataFrame with the matchup data
-        """
-        return self.matchup_predictor.create_fighter_matchup(
-            fighter_a, fighter_b, open_odds_a, open_odds_b, closing_odds_a, closing_odds_b, fight_date
-        )
-
-    def create_multiple_matchups(
-            self,
-            matchups: List[Dict],
-            output_filename: str = "all_matchups.csv"
-    ) -> pd.DataFrame:
-        """
-        Create multiple matchups for UFC fights and combine them into a single DataFrame,
-        sorted alphabetically by fighter_a.
-
-        Args:
-            matchups: List of dictionaries, each containing matchup data with keys:
-                     'fighter_a', 'fighter_b', 'open_odds_a', 'open_odds_b',
-                     'closing_odds_a', 'closing_odds_b', and optionally 'fight_date'
-            output_filename: Name of the output CSV file (default: "all_matchups.csv")
-
-        Returns:
-            Combined DataFrame with all matchup data, sorted by fighter_a
-        """
-        all_dfs = []
-        for i, matchup in enumerate(matchups):
-            print(f"\nProcessing matchup {i + 1} of {len(matchups)}")
-
-            # Extract matchup data with defaults for optional parameters
-            fighter_a = matchup['fighter_a']
-            fighter_b = matchup['fighter_b']
-            open_odds_a = matchup['open_odds_a']
-            open_odds_b = matchup['open_odds_b']
-            closing_odds_a = matchup['closing_odds_a']
-            closing_odds_b = matchup['closing_odds_b']
-            fight_date = matchup.get('fight_date', None)  # Optional parameter
-
-            try:
-                # Use the internal method with save_individual_file=False to avoid individual file saving
-                df = self.matchup_predictor.create_fighter_matchup(
-                    fighter_a, fighter_b, open_odds_a, open_odds_b,
-                    closing_odds_a, closing_odds_b, fight_date,
-                    save_individual_file=False
-                )
-                all_dfs.append(df)
-            except Exception as e:
-                print(f"Error creating matchup {fighter_a} vs {fighter_b}: {str(e)}")
-
-        # Combine all DataFrames
-        if not all_dfs:
-            print("No matchups were successfully created")
-            return pd.DataFrame()
-
-        combined_df = pd.concat(all_dfs, ignore_index=True)
-
-        # Sort by fighter_a alphabetically
-        if 'fighter_a' in combined_df.columns:
-            combined_df = combined_df.sort_values(by='fighter_a')
-
-        # Create matchup data directory if it doesn't exist
-        matchup_dir = os.path.join(self.data_dir, 'matchup data')
-        os.makedirs(matchup_dir, exist_ok=True)
-
-        # Save the combined data
-        output_path = os.path.join(matchup_dir, output_filename)
-        self.matchup_predictor.fight_processor._save_csv(combined_df, output_path)
-        print(f"\nCreated {len(all_dfs)} matchups successfully out of {len(matchups)} requested")
-        print(f"Combined output saved to: {output_path}")
-
-        return combined_df
-
-
-def main():
-    """Create fighter matchup files."""
-    # Get the directory of the current script
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-
-    # Data directory should be in the same directory level as the script
-    data_dir = os.path.join(current_dir, "data")
-
-    print(f"Current directory: {current_dir}")
-    print(f"Using data directory: {data_dir}")
-
-    # Verify data directory exists
-    if not os.path.exists(data_dir):
-        print(f"Data directory not found: {data_dir}")
-        # Try to find data directory in the project
-        possible_dirs = [
-            os.path.join(current_dir, "data"),
-            os.path.join(os.path.dirname(current_dir), "data"),
-            "data",  # Try relative to working directory
-            "C:/Users/William/PycharmProjects/UFC/data"  # Hardcoded path based on your error message
-        ]
-
-        for path in possible_dirs:
-            if os.path.exists(path):
-                data_dir = path
-                print(f"Found data directory at: {data_dir}")
-                break
-        else:
-            print("Could not find data directory. Please check the path.")
-            return
-
-    # Define multiple matchups
-    matchups = [
-        {
-            'fighter_a': "Austin Hubbard",
-            'fighter_b': "MarQuel Mederos",
-            'open_odds_a': 160,
-            'open_odds_b': -192,
-            'closing_odds_a': 171,
-            'closing_odds_b': -202,
-            'fight_date': "2025-03-29"
-        },
-        {
-            'fighter_a': "Brandon Moreno",
-            'fighter_b': "Steve Erceg",
-            'open_odds_a': -188,
-            'open_odds_b': 150,
-            'closing_odds_a': -195,
-            'closing_odds_b': 166,
-            'fight_date': "2025-03-29"
-        },
-        {
-            'fighter_a': "Christian Rodriguez",
-            'fighter_b': "Melquizael Costa",
-            'open_odds_a': -175,
-            'open_odds_b': 130,
-            'closing_odds_a': -145,
-            'closing_odds_b': 126,
-            'fight_date': "2025-03-29"
-        },
-        {
-            'fighter_a': "CJ Vergara",
-            'fighter_b': "Edgar Chairez",
-            'open_odds_a': 175,
-            'open_odds_b': -250,
-            'closing_odds_a': 256,
-            'closing_odds_b': -302,
-            'fight_date': "2025-03-29"
-        },
-        {
-            'fighter_a': "David Martinez",
-            'fighter_b': "Saimon Oliveira",
-            'open_odds_a': -175,
-            'open_odds_b': 145,
-            'closing_odds_a': -185,
-            'closing_odds_b': 175,
-            'fight_date': "2025-03-29"
-        },
-        {
-            'fighter_a': "Drew Dober",
-            'fighter_b': "Manuel Torres",
-            'open_odds_a': -120,
-            'open_odds_b': -110,
-            'closing_odds_a': 106,
-            'closing_odds_b': 122,
-            'fight_date': "2025-03-29"
-        },
-        {
-            'fighter_a': "Gabriel Miranda",
-            'fighter_b': "Jamall Emmers",
-            'open_odds_a': 180,
-            'open_odds_b': -218,
-            'closing_odds_a': 276,
-            'closing_odds_b': -347,
-            'fight_date': "2025-03-29"
-        },
-        {
-            'fighter_a': "Kevin Borjas",
-            'fighter_b': "Ronaldo Rodriguez	",
-            'open_odds_a': 110,
-            'open_odds_b': -150,
-            'closing_odds_a': 128,
-            'closing_odds_b': -148,
-            'fight_date': "2025-03-29"
-        }
-    ]
-
-    # Create matchup creator
-    matchup_creator = UFCMatchupCreator(data_dir)
-
-    try:
-        # Option 1: Create a single matchup
-        print("\nCreating a single matchup:")
-        matchup = matchups[0]  # Take the first matchup
-        matchup_creator.create_matchup(
-            matchup['fighter_a'],
-            matchup['fighter_b'],
-            matchup['open_odds_a'],
-            matchup['open_odds_b'],
-            matchup['closing_odds_a'],
-            matchup['closing_odds_b'],
-            matchup['fight_date']
-        )
-
-        # Option 2: Create multiple matchups
-        print("\nCreating multiple matchups:")
-        matchup_creator.create_multiple_matchups(matchups)
-
-    except Exception as e:
-        print(f"Error creating matchup(s): {str(e)}")
-        import traceback
-        traceback.print_exc()
-
-
-if __name__ == "__main__":
-    start_time = datetime.now()
-    main()
-    end_time = datetime.now()
-    print(f"Total runtime: {end_time - start_time}")
