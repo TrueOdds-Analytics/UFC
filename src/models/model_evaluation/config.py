@@ -58,7 +58,7 @@ DATA_PATHS = {
 DISPLAY_COLUMNS = ['current_fight_date', 'fighter_a', 'fighter_b']
 
 # Output directory for plots
-OUTPUT_DIR = 'outputs/calibration_plots'
+OUTPUT_DIR = '../outputs/calibration_plots'
 
 
 # Ensure the existence of required directories
