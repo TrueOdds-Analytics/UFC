@@ -34,7 +34,8 @@ class FighterMatchupPredictor:
             closing_odds_a: float,
             closing_odds_b: float,
             fight_date: Optional[Union[str, datetime]] = None,
-            n_past_fights: int = 3
+            n_past_fights: int = 3,
+            save_individual_file: bool = True
     ) -> pd.DataFrame:
         """
         Create a specific matchup between two fighters.
@@ -139,12 +140,11 @@ class FighterMatchupPredictor:
         current_stats_a = self._calculate_fighter_stats_fixed(fighter_a_lower, df, current_date, n_past_fights)
         current_stats_b = self._calculate_fighter_stats_fixed(fighter_b_lower, df, current_date, n_past_fights)
 
-        # Debug output to verify stats were calculated correctly
-        print(f"Stats for {fighter_a}: {current_stats_a}")
-        print(f"Stats for {fighter_b}: {current_stats_b}")
-
         age_a, exp_a, days_since_a, win_streak_a, loss_streak_a = current_stats_a
         age_b, exp_b, days_since_b, win_streak_b, loss_streak_b = current_stats_b
+
+        current_fight_age_diff = age_a - age_b
+        current_fight_age_ratio = self.utils.safe_divide(age_a, age_b)
 
         # Get ELO ratings
         if 'fight_outcome_elo' in fighter_a_df.columns and 'fight_outcome_elo' in fighter_b_df.columns:
@@ -196,8 +196,6 @@ class FighterMatchupPredictor:
 
         # Process ages
         current_fight_ages = [current_fight['age'], current_fight['age_b']]
-        current_fight_age_diff = current_fight['age'] - current_fight['age_b']
-        current_fight_age_ratio = self.utils.safe_divide(current_fight['age'], current_fight['age_b'])
 
         # Process ELO stats
         elo_a_win_prob = 1 / (1 + 10 ** ((elo_b - elo_a) / 400))
@@ -374,11 +372,15 @@ class FighterMatchupPredictor:
         matchup_dir = os.path.join(self.data_dir, 'matchup data')
         os.makedirs(matchup_dir, exist_ok=True)
 
-        # Save the matchup data
-        output_filename = os.path.join(matchup_dir, 'specific_matchup_data.csv')
-        self.fight_processor._save_csv(matchup_df, output_filename)
-        print(f"Created matchup prediction data for {fighter_a} vs {fighter_b}")
-        print(f"Output saved to: {output_filename}")
+        # Save the matchup data if requested
+        if save_individual_file:
+            output_filename = os.path.join(
+                matchup_dir,
+                f"{fighter_a.replace(' ', '_')}_vs_{fighter_b.replace(' ', '_')}_matchup.csv"
+            )
+            self.fight_processor._save_csv(matchup_df, output_filename)
+            print(f"Created matchup prediction data for {fighter_a} vs {fighter_b}")
+            print(f"Output saved to: {output_filename}")
 
         # Debug info - print all columns
         print(f"Final DataFrame has {len(matchup_df.columns)} columns including:")
@@ -622,24 +624,74 @@ class UFCMatchupCreator:
             fighter_a, fighter_b, open_odds_a, open_odds_b, closing_odds_a, closing_odds_b, fight_date
         )
 
+    def create_multiple_matchups(
+            self,
+            matchups: List[Dict],
+            output_filename: str = "all_matchups.csv"
+    ) -> pd.DataFrame:
+        """
+        Create multiple matchups for UFC fights and combine them into a single DataFrame,
+        sorted alphabetically by fighter_a.
+
+        Args:
+            matchups: List of dictionaries, each containing matchup data with keys:
+                     'fighter_a', 'fighter_b', 'open_odds_a', 'open_odds_b',
+                     'closing_odds_a', 'closing_odds_b', and optionally 'fight_date'
+            output_filename: Name of the output CSV file (default: "all_matchups.csv")
+
+        Returns:
+            Combined DataFrame with all matchup data, sorted by fighter_a
+        """
+        all_dfs = []
+        for i, matchup in enumerate(matchups):
+            print(f"\nProcessing matchup {i + 1} of {len(matchups)}")
+
+            # Extract matchup data with defaults for optional parameters
+            fighter_a = matchup['fighter_a']
+            fighter_b = matchup['fighter_b']
+            open_odds_a = matchup['open_odds_a']
+            open_odds_b = matchup['open_odds_b']
+            closing_odds_a = matchup['closing_odds_a']
+            closing_odds_b = matchup['closing_odds_b']
+            fight_date = matchup.get('fight_date', None)  # Optional parameter
+
+            try:
+                # Use the internal method with save_individual_file=False to avoid individual file saving
+                df = self.matchup_predictor.create_fighter_matchup(
+                    fighter_a, fighter_b, open_odds_a, open_odds_b,
+                    closing_odds_a, closing_odds_b, fight_date,
+                    save_individual_file=False
+                )
+                all_dfs.append(df)
+            except Exception as e:
+                print(f"Error creating matchup {fighter_a} vs {fighter_b}: {str(e)}")
+
+        # Combine all DataFrames
+        if not all_dfs:
+            print("No matchups were successfully created")
+            return pd.DataFrame()
+
+        combined_df = pd.concat(all_dfs, ignore_index=True)
+
+        # Sort by fighter_a alphabetically
+        if 'fighter_a' in combined_df.columns:
+            combined_df = combined_df.sort_values(by='fighter_a')
+
+        # Create matchup data directory if it doesn't exist
+        matchup_dir = os.path.join(self.data_dir, 'matchup data')
+        os.makedirs(matchup_dir, exist_ok=True)
+
+        # Save the combined data
+        output_path = os.path.join(matchup_dir, output_filename)
+        self.matchup_predictor.fight_processor._save_csv(combined_df, output_path)
+        print(f"\nCreated {len(all_dfs)} matchups successfully out of {len(matchups)} requested")
+        print(f"Combined output saved to: {output_path}")
+
+        return combined_df
+
 
 def main():
-    """Create a fighter matchup file."""
-    # Fighters
-    fighter_a = "Alexander Hernandez"
-    fighter_b = "Kurt Holobaugh"
-
-    # Open Odds
-    open_odds_a = -175
-    open_odds_b = 145
-
-    # Closing Odds
-    closing_odds_a = -185
-    closing_odds_b = 175
-
-    # Specify fight date
-    fight_date = "2025-03-08"
-
+    """Create fighter matchup files."""
     # Get the directory of the current script
     current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -669,20 +721,105 @@ def main():
             print("Could not find data directory. Please check the path.")
             return
 
-    # Create matchup data
+    # Define multiple matchups
+    matchups = [
+        {
+            'fighter_a': "Austin Hubbard",
+            'fighter_b': "MarQuel Mederos",
+            'open_odds_a': 160,
+            'open_odds_b': -192,
+            'closing_odds_a': 171,
+            'closing_odds_b': -202,
+            'fight_date': "2025-03-29"
+        },
+        {
+            'fighter_a': "Brandon Moreno",
+            'fighter_b': "Steve Erceg",
+            'open_odds_a': -188,
+            'open_odds_b': 150,
+            'closing_odds_a': -195,
+            'closing_odds_b': 166,
+            'fight_date': "2025-03-29"
+        },
+        {
+            'fighter_a': "Christian Rodriguez",
+            'fighter_b': "Melquizael Costa",
+            'open_odds_a': -175,
+            'open_odds_b': 130,
+            'closing_odds_a': -145,
+            'closing_odds_b': 126,
+            'fight_date': "2025-03-29"
+        },
+        {
+            'fighter_a': "CJ Vergara",
+            'fighter_b': "Edgar Chairez",
+            'open_odds_a': 175,
+            'open_odds_b': -250,
+            'closing_odds_a': 256,
+            'closing_odds_b': -302,
+            'fight_date': "2025-03-29"
+        },
+        {
+            'fighter_a': "David Martinez",
+            'fighter_b': "Saimon Oliveira",
+            'open_odds_a': -175,
+            'open_odds_b': 145,
+            'closing_odds_a': -185,
+            'closing_odds_b': 175,
+            'fight_date': "2025-03-29"
+        },
+        {
+            'fighter_a': "Drew Dober",
+            'fighter_b': "Manuel Torres",
+            'open_odds_a': -120,
+            'open_odds_b': -110,
+            'closing_odds_a': 106,
+            'closing_odds_b': 122,
+            'fight_date': "2025-03-29"
+        },
+        {
+            'fighter_a': "Gabriel Miranda",
+            'fighter_b': "Jamall Emmers",
+            'open_odds_a': 180,
+            'open_odds_b': -218,
+            'closing_odds_a': 276,
+            'closing_odds_b': -347,
+            'fight_date': "2025-03-29"
+        },
+        {
+            'fighter_a': "Kevin Borjas",
+            'fighter_b': "Ronaldo Rodriguez	",
+            'open_odds_a': 110,
+            'open_odds_b': -150,
+            'closing_odds_a': 128,
+            'closing_odds_b': -148,
+            'fight_date': "2025-03-29"
+        }
+    ]
+
+    # Create matchup creator
     matchup_creator = UFCMatchupCreator(data_dir)
+
     try:
+        # Option 1: Create a single matchup
+        print("\nCreating a single matchup:")
+        matchup = matchups[0]  # Take the first matchup
         matchup_creator.create_matchup(
-            fighter_a,
-            fighter_b,
-            open_odds_a,
-            open_odds_b,
-            closing_odds_a,
-            closing_odds_b,
-            fight_date
+            matchup['fighter_a'],
+            matchup['fighter_b'],
+            matchup['open_odds_a'],
+            matchup['open_odds_b'],
+            matchup['closing_odds_a'],
+            matchup['closing_odds_b'],
+            matchup['fight_date']
         )
+
+        # Option 2: Create multiple matchups
+        print("\nCreating multiple matchups:")
+        matchup_creator.create_multiple_matchups(matchups)
+
     except Exception as e:
-        print(f"Error creating matchup: {str(e)}")
+        print(f"Error creating matchup(s): {str(e)}")
         import traceback
         traceback.print_exc()
 

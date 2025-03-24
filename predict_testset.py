@@ -1351,7 +1351,7 @@ def main(manual_threshold, use_calibration=True, calibration_type='range_based',
 
     # Load and preprocess data
     val_data = pd.read_csv('data/train test data/val_data.csv')
-    test_data = pd.read_csv('data/train test data/test_data.csv')
+    test_data = pd.read_csv('data/matchup data/all_matchups.csv')
 
     # Define columns to display
     display_columns = ['current_fight_date', 'fighter_a', 'fighter_b']
