@@ -306,7 +306,7 @@ if __name__ == "__main__":
 
     if run_scraping:
         # Read fighter list
-        combined_rounds_df = pd.read_csv("data/processed/combined_rounds.csv")
+        combined_rounds_df = pd.read_csv("../../../data/processed/combined_rounds.csv")
         fighters = list(set(combined_rounds_df["fighter"].unique().tolist()))
 
         # For testing (optional):
@@ -319,7 +319,7 @@ if __name__ == "__main__":
         odds_df = scraper.scrape_all(fighters)
 
         # Save raw data
-        odds_df.to_csv("data/raw/fight_odds.csv", index=False)
+        odds_df.to_csv("../../../data/raw/fight_odds.csv", index=False)
         print("\nRaw data saved!")
 
         # Print scraping summary
@@ -337,8 +337,8 @@ if __name__ == "__main__":
 
     if run_cleaning:
         # Clean and save processed data
-        input_file = "data/raw/fight_odds.csv"
-        output_file = "data/processed/cleaned_fight_odds.csv"
+        input_file = "../../../data/raw/fight_odds.csv"
+        output_file = "../../../data/processed/cleaned_fight_odds.csv"
         cleaned_odds_df = BestFightOddsScraperSelenium.clean_fight_odds_from_csv(input_file, output_file)
         print("\nCleaned data saved!")
 
