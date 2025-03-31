@@ -11,76 +11,67 @@ from config import resolve_data_dir
 # Example matchup definitions - used when running without arguments
 EXAMPLE_MATCHUPS = [
     {
-        'fighter_a': "Austin Hubbard",
-        'fighter_b': "MarQuel Mederos",
-        'open_odds_a': 160,
-        'open_odds_b': -192,
-        'closing_odds_a': 171,
-        'closing_odds_b': -202,
-        'fight_date': "2025-03-29"
+        'fighter_a': "Brad Tavares",
+        'fighter_b': "Gerald Meerschaert",
+        'open_odds_a': -210,
+        'open_odds_b': 162,
+        'closing_odds_a': -260,
+        'closing_odds_b': 215,
+        'fight_date': "2025-04-05"
     },
     {
-        'fighter_a': "Brandon Moreno",
-        'fighter_b': "Steve Erceg",
-        'open_odds_a': -188,
-        'open_odds_b': 150,
-        'closing_odds_a': -195,
-        'closing_odds_b': 166,
-        'fight_date': "2025-03-29"
-    },
-    {
-        'fighter_a': "Christian Rodriguez",
-        'fighter_b': "Melquizael Costa",
-        'open_odds_a': -175,
-        'open_odds_b': 130,
-        'closing_odds_a': -145,
-        'closing_odds_b': 126,
-        'fight_date': "2025-03-29"
-    },
-    {
-        'fighter_a': "CJ Vergara",
-        'fighter_b': "Edgar Chairez",
-        'open_odds_a': 175,
+        'fighter_a': "ChangHo Lee",
+        'fighter_b': "Cortavious Romious",
+        'open_odds_a': 205,
         'open_odds_b': -250,
-        'closing_odds_a': 256,
-        'closing_odds_b': -302,
-        'fight_date': "2025-03-29"
+        'closing_odds_a': -160,
+        'closing_odds_b': 138,
+        'fight_date': "2025-04-05"
     },
     {
-        'fighter_a': "David Martinez",
-        'fighter_b': "Saimon Oliveira",
-        'open_odds_a': -175,
-        'open_odds_b': 145,
-        'closing_odds_a': -185,
+        'fighter_a': "Daniel Frunza",
+        'fighter_b': "Rhys McKee",
+        'open_odds_a': -200,
+        'open_odds_b': 150,
+        'closing_odds_a': -161,
+        'closing_odds_b': 139,
+        'fight_date': "2025-04-05"
+    },
+    {
+        'fighter_a': "Daniel Santos",
+        'fighter_b': "Davey Grant",
+        'open_odds_a': -225,
+        'open_odds_b': 163,
+        'closing_odds_a': -159,
+        'closing_odds_b': 137,
+        'fight_date': "2025-04-05"
+    },
+    {
+        'fighter_a': "Joanderson Brito",
+        'fighter_b': "Pat Sabatini",
+        'open_odds_a': -265,
+        'open_odds_b': 200,
+        'closing_odds_a': -207,
         'closing_odds_b': 175,
-        'fight_date': "2025-03-29"
+        'fight_date': "2025-04-05"
     },
     {
-        'fighter_a': "Drew Dober",
-        'fighter_b': "Manuel Torres",
-        'open_odds_a': -120,
-        'open_odds_b': -110,
-        'closing_odds_a': 106,
-        'closing_odds_b': 122,
-        'fight_date': "2025-03-29"
+        'fighter_a': "Luis Gurule",
+        'fighter_b': "Ode Osbourne",
+        'open_odds_a': -250,
+        'open_odds_b': 175,
+        'closing_odds_a': -220,
+        'closing_odds_b': 185,
+        'fight_date': "2025-04-05"
     },
     {
-        'fighter_a': "Gabriel Miranda",
-        'fighter_b': "Jamall Emmers",
-        'open_odds_a': 180,
-        'open_odds_b': -218,
-        'closing_odds_a': 276,
-        'closing_odds_b': -347,
-        'fight_date': "2025-03-29"
-    },
-    {
-        'fighter_a': "Kevin Borjas",
-        'fighter_b': "Ronaldo Rodriguez",
+        'fighter_a': "Pedro Falcao",
+        'fighter_b': "Victor Henry",
         'open_odds_a': 110,
         'open_odds_b': -150,
-        'closing_odds_a': 128,
-        'closing_odds_b': -148,
-        'fight_date': "2025-03-29"
+        'closing_odds_a': 175,
+        'closing_odds_b': -211,
+        'fight_date': "2025-04-05"
     }
 ]
 

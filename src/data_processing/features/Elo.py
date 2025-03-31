@@ -1,11 +1,28 @@
 import pandas as pd
 import re
+import os
 from datetime import datetime
+import shutil
 
 
 def calculate_elo_ratings(file_path, initial_rating=1500):
+    """
+    Calculate Elo ratings for UFC fighters based on their fight history.
+    Modifies the input CSV file by adding pre_fight_elo, fight_outcome_elo, and elo_difference columns.
+    """
+    # Print file path for debugging
+    print(f"Processing Elo ratings for file: {file_path}")
+
+    # Check if file exists
+    if not os.path.exists(file_path):
+        print(f"ERROR: File not found at {file_path}")
+        return None
+
     # Read and sort the CSV file
     df = pd.read_csv(file_path)
+    print(f"Successfully read file with {len(df)} rows")
+
+    # Convert date column
     df['fight_date'] = pd.to_datetime(df['fight_date'])
     df = df.sort_values(by=['fight_date', 'id'])
 
@@ -74,9 +91,24 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
     elo_ratings = {}
     fight_counts = {}
 
+    # Make sure we have these columns
+    if 'pre_fight_elo' not in df.columns:
+        df['pre_fight_elo'] = initial_rating
+    if 'fight_outcome_elo' not in df.columns:
+        df['fight_outcome_elo'] = initial_rating
+    if 'elo_difference' not in df.columns:
+        df['elo_difference'] = 0.0
+
+    print("Starting Elo rating calculations...")
     # First pass: Calculate Elo ratings
     for index, fighter in df.iterrows():
-        opponent = df[(df['id'] == fighter['id']) & (df['fighter'] != fighter['fighter'])].iloc[0]
+        # Find the opponent
+        opponents = df[(df['id'] == fighter['id']) & (df['fighter'] != fighter['fighter'])]
+        if len(opponents) == 0:
+            print(f"Warning: No opponent found for fighter {fighter['fighter']} in fight ID {fighter['id']}")
+            continue
+
+        opponent = opponents.iloc[0]
 
         fighter_rating = elo_ratings.get(fighter['fighter'], initial_rating)
         opponent_rating = elo_ratings.get(opponent['fighter'], initial_rating)
@@ -104,7 +136,7 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
         expected_score = 1 / (1 + 10 ** ((opponent_rating - fighter_rating) / 400))
         actual_score = 1 if fighter['winner'] == 1 else 0
         elo_change = k * margin_factor * weight_class_factor * age_factor * additional_factor * title_multiplier * (
-                    actual_score - expected_score)
+                actual_score - expected_score)
 
         # Update Elo rating for the fighter
         new_rating = fighter_rating + elo_change
@@ -117,12 +149,17 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
         # Update DataFrame column for post-fight Elo
         df.at[index, 'fight_outcome_elo'] = new_rating
 
+    print("Completed Elo calculation, now calculating predictions...")
     # Second pass: Calculate accuracy (unchanged)
     correct_predictions = total_predictions = total_fights = fights_with_elo_difference = 0
     threshold = -1
 
     for index, fighter in df.iterrows():
-        opponent = df[(df['id'] == fighter['id']) & (df['fighter'] != fighter['fighter'])].iloc[0]
+        opponents = df[(df['id'] == fighter['id']) & (df['fighter'] != fighter['fighter'])]
+        if len(opponents) == 0:
+            continue
+
+        opponent = opponents.iloc[0]
 
         elo_difference = fighter['pre_fight_elo'] - opponent['pre_fight_elo']
         df.at[index, 'elo_difference'] = elo_difference
@@ -151,12 +188,64 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
     top_fighters = pd.Series(elo_ratings).sort_values(ascending=False).head(50)
     print(top_fighters)
 
-    # Save the updated DataFrame
-    df.to_csv(file_path, index=False)
+    # Use a safer save approach
+    try:
+        # Save using a temporary file first
+        temp_file = file_path + '.tmp'
+        print(f"Saving Elo data to temporary file: {temp_file}")
+        df.to_csv(temp_file, index=False)
+
+        # Move the temporary file to the target location
+        print(f"Moving temporary file to final location: {file_path}")
+        shutil.move(temp_file, file_path)
+
+        # Verify the file was saved correctly
+        if os.path.exists(file_path):
+            file_size = os.path.getsize(file_path)
+            print(f"File saved successfully. Size: {file_size} bytes")
+        else:
+            print("ERROR: File not found after save attempt")
+    except Exception as e:
+        print(f"ERROR saving data: {str(e)}")
+        print("Attempting direct save...")
+        try:
+            df.to_csv(file_path, index=False)
+            print("Direct save completed")
+        except Exception as e2:
+            print(f"Direct save also failed: {str(e2)}")
+
+    # Verify the data was saved with Elo columns
+    print(f"\nVerifying Elo data was added to {file_path}...")
+    try:
+        verification_df = pd.read_csv(file_path)
+        if 'pre_fight_elo' in verification_df.columns:
+            print(
+                f"Verification: pre_fight_elo column exists with {verification_df['pre_fight_elo'].notna().sum()} non-null values")
+        else:
+            print("ERROR: pre_fight_elo column not found in saved file")
+
+        if 'fight_outcome_elo' in verification_df.columns:
+            print(
+                f"Verification: fight_outcome_elo column exists with {verification_df['fight_outcome_elo'].notna().sum()} non-null values")
+        else:
+            print("ERROR: fight_outcome_elo column not found in saved file")
+
+        if 'elo_difference' in verification_df.columns:
+            print(
+                f"Verification: elo_difference column exists with {verification_df['elo_difference'].notna().sum()} non-null values")
+        else:
+            print("ERROR: elo_difference column not found in saved file")
+    except Exception as e:
+        print(f"Verification failed: {str(e)}")
 
     return df
 
 
 if __name__ == "__main__":
-    file_path = "data/processed/combined_rounds.csv"
+    # When run directly, use the project root relative path
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(script_dir, "../../.."))  # Go up three levels to project root
+    file_path = os.path.join(project_root, "data/processed/combined_rounds.csv")
+
+    print(f"Running Elo calculation on {file_path}")
     calculate_elo_ratings(file_path)

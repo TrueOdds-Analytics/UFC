@@ -249,7 +249,7 @@ class OddsUtils:
         final_stats = final_stats.copy().loc[:, ~final_stats.columns.duplicated()]
 
         # Read odds data
-        odds_df = pd.read_csv('data/processed/cleaned_fight_odds.csv')
+        odds_df = pd.read_csv("C:/Users/William/PycharmProjects/UFC/data/processed/cleaned_fight_odds.csv")
 
         # Standardize fighter names
         final_stats['fighter'] = final_stats['fighter'].str.lower().str.strip()

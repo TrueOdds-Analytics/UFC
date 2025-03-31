@@ -43,7 +43,7 @@ RANGE_CALIBRATION_RANGES = [0.25, 0.45, 0.65, 0.85]  # Creates 5 regions
 # Data file paths
 DATA_PATHS = {
     'val_data': '../../../data/train_test/val_data.csv',
-    'test_data': '../../../data/live_data/all_matchups.csv',
+    'test_data': '../../../data/train_test/test_data.csv',
     'encoder_path': '../../../saved_models/encoders/category_encoder.pkl',
     'model_base_path': '../../../saved_models/xgboost/jan2024-dec2025/dynamicmatchup sorted 425/'
 }
@@ -53,3 +53,5 @@ DISPLAY_COLUMNS = ['current_fight_date', 'fighter_a', 'fighter_b']
 
 # Output directory for plots
 OUTPUT_DIR = '../../outputs/calibration_plots'
+
+

@@ -24,7 +24,7 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 class FightDataProcessor:
     """Process and transform UFC fight data for analysis."""
 
-    def __init__(self, data_dir: str = "data"):
+    def __init__(self, data_dir: str = "../../../data"):
         """
         Initialize the processor with data directory.
 
@@ -38,13 +38,30 @@ class FightDataProcessor:
 
     def _load_csv(self, filepath: str) -> pd.DataFrame:
         """Load a CSV file into a DataFrame."""
+        # Handle forward/backward slashes
+        filepath = filepath.replace('/', os.sep)
+
+        # Create full path
         full_path = os.path.join(self.data_dir, filepath) if not os.path.isabs(filepath) else filepath
+
+        # Check if file exists
+        if not os.path.exists(full_path):
+            print(f"Warning: File not found at {full_path}")
+
         return pd.read_csv(full_path)
 
     def _save_csv(self, df: pd.DataFrame, filepath: str) -> None:
         """Save DataFrame to CSV file."""
+        # Handle forward/backward slashes
+        filepath = filepath.replace('/', os.sep)
+
+        # Create full path
         full_path = os.path.join(self.data_dir, filepath) if not os.path.isabs(filepath) else filepath
+
+        # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
+
+        # Save the file
         df.to_csv(full_path, index=False)
         print(f"Saved to {full_path}")
 
@@ -60,7 +77,7 @@ class FightDataProcessor:
         """
         print("Loading and preprocessing data...")
         ufc_stats = self._load_csv(file_path)
-        fighter_stats = self._load_csv('src/data_processing/scraping/rough_data/ufc_fighter_tott.csv')
+        fighter_stats = self._load_csv('raw/ufc_fighter_tott.csv')
         ufc_stats = self.utils.preprocess_data(ufc_stats, fighter_stats)
 
         # Get numeric columns for aggregation
@@ -138,7 +155,7 @@ class FightDataProcessor:
         )
 
         print("Saving processed data...")
-        self._save_csv(final_stats, 'combined_rounds.csv')
+        self._save_csv(final_stats, 'processed/combined_rounds.csv')
 
         return final_stats
 
@@ -257,7 +274,7 @@ class FightDataProcessor:
         )
 
         # Save the result
-        self._save_csv(final_combined_df, 'combined_sorted_fighter_stats.csv')
+        self._save_csv(final_combined_df, 'processed/combined_sorted_fighter_stats.csv')
 
         return final_combined_df
 
@@ -308,7 +325,7 @@ class FightDataProcessor:
 class MatchupProcessor:
     """Process and prepare matchup data for predictive modeling."""
 
-    def __init__(self, data_dir: str = "../data"):
+    def __init__(self, data_dir: str = "../../../data"):
         """
         Initialize the processor with data directory.
 
@@ -687,12 +704,12 @@ class MatchupProcessor:
         test_data = test_data.sort_values(by=['current_fight_date', 'fighter_a'], ascending=[True, True])
 
         # Save datasets
-        self.fight_processor._save_csv(train_data, 'data/train_test/train_data.csv')
-        self.fight_processor._save_csv(val_data, 'data/train_test/val_data.csv')
-        self.fight_processor._save_csv(test_data, 'data/train_test/test_data.csv')
+        self.fight_processor._save_csv(train_data, 'train_test/train_data.csv')
+        self.fight_processor._save_csv(val_data, 'train_test/val_data.csv')
+        self.fight_processor._save_csv(test_data, 'train_test/test_data.csv')
 
         # Save removed features
-        with open(os.path.join(self.fight_processor.data_dir, 'data/train_test/removed_features.txt'), 'w') as file:
+        with open(os.path.join(self.fight_processor.data_dir, 'train_test/removed_features.txt'), 'w') as file:
             file.write(','.join(removed_features))
 
         print(
@@ -760,12 +777,12 @@ def main():
     matchup_processor = MatchupProcessor()
 
     # # Uncomment the functions you want to run
-    fight_processor.combine_rounds_stats('data/processed/ufc_fight_processed.csv')
-    calculate_elo_ratings('data/processed/combined_rounds.csv')
-    fight_processor.combine_fighters_stats("data/processed/combined_rounds.csv")
-    matchup_processor.create_matchup_data("../data/combined_sorted_fighter_stats.csv", 3, True)
+    fight_processor.combine_rounds_stats('processed/ufc_fight_processed.csv')
+    calculate_elo_ratings("C:/Users/William/PycharmProjects/UFC/data/processed/combined_rounds.csv")
+    fight_processor.combine_fighters_stats('processed/combined_rounds.csv')
+    matchup_processor.create_matchup_data('processed/combined_sorted_fighter_stats.csv', 3, True)
     matchup_processor.split_train_val_test(
-        'data/live_data/matchup_data_3_avg_name.csv',
+        'matchup data/matchup_data_3_avg_name.csv',
         '2024-01-01',
         '2025-12-31',
         10
