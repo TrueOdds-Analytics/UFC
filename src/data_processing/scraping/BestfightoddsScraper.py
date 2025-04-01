@@ -19,7 +19,7 @@ import queue
 
 
 class BestFightOddsScraperSelenium:
-    def __init__(self, num_workers=24):
+    def __init__(self, num_workers=48):
         self.num_workers = num_workers
         self.unprocessed_fighters = []
         self.progress_queue = queue.Queue()
@@ -294,53 +294,173 @@ class BestFightOddsScraperSelenium:
 if __name__ == "__main__":
     start_time = time.time()
 
-    # ---------------------------------------------------------------------
-    # Set these flags to control which parts of the process to run:
-    #   run_scraping: Scrape data and save raw CSV.
-    #   run_cleaning: Clean the raw CSV and save the cleaned version.
-    #
-    # To run only one part, simply set the other flag to False.
-    # ---------------------------------------------------------------------
-    run_scraping = True   # Change to False to skip scraping
-    run_cleaning = True   # Change to False to skip cleaning
+    # --- Configuration ---
+    # run_scraping: Controls if scraping and processing of new data occurs
+    run_scraping = True
+    # run_append_new: Controls if comparison and appending to master file occurs
+    # Typically, you'd want this True if run_scraping is True
+    run_append_new = True
+
+    # File Paths
+    master_fighter_list_file = "../../../data/processed/combined_rounds.csv"
+    # This is your main, persistent cleaned data file
+    existing_cleaned_data_file = "../../../data/processed/cleaned_fight_odds.csv"
+    # Temporary files for the current run's scrape results
+    temp_raw_scrape_file = "../../../data/raw/fight_odds_temp_raw.csv"
+    temp_cleaned_scrape_file = "../../../data/processed/fight_odds_temp_cleaned.csv"
+
+    # --- Step 1: Load Existing Cleaned Data ---
+    df_existing = pd.DataFrame()
+    existing_identifiers = set() # To store unique (Matchup, Date) tuples
+
+    print(f"--- Loading existing data from: {existing_cleaned_data_file} ---")
+    if os.path.exists(existing_cleaned_data_file):
+        try:
+            df_existing = pd.read_csv(existing_cleaned_data_file)
+            if not df_existing.empty and 'Matchup' in df_existing.columns and 'Date' in df_existing.columns:
+                # Ensure columns used for identification are strings for consistent hashing
+                df_existing['Matchup'] = df_existing['Matchup'].astype(str)
+                df_existing['Date'] = df_existing['Date'].astype(str)
+                # Create a set of existing (Matchup, Date) tuples for fast lookup
+                existing_identifiers = set(df_existing.apply(lambda row: (row['Matchup'], row['Date']), axis=1))
+                print(f"Loaded {len(df_existing)} records ({len(existing_identifiers)} unique identifiers).")
+            else:
+                 print("Existing file is empty or missing 'Matchup'/'Date' columns.")
+        except Exception as e:
+            print(f"Warning: Could not load or process existing file {existing_cleaned_data_file}. Assuming empty. Error: {e}")
+            df_existing = pd.DataFrame() # Ensure it's empty on error
+            existing_identifiers = set()
+    else:
+        print("Existing cleaned data file not found. Will create a new one if new data is found.")
+
+    # --- Step 2: Scrape Data (Full Rescrape, as per original logic) ---
+    df_new_cleaned = pd.DataFrame() # Initialize empty DataFrame for newly cleaned data
 
     if run_scraping:
-        # Read fighter list
-        combined_rounds_df = pd.read_csv("../../../data/processed/combined_rounds.csv")
-        fighters = list(set(combined_rounds_df["fighter"].unique().tolist()))
+        print("\n--- Starting Full Scrape ---")
+        try:
+            # Read fighter list from master source
+            combined_rounds_df = pd.read_csv(master_fighter_list_file)
+            fighters = list(set(combined_rounds_df["fighter"].unique().tolist()))
+            print(f"Preparing to scrape {len(fighters)} fighters from {master_fighter_list_file}")
 
-        # For testing (optional):
-        # fighters = fighters[:10]
+            # Initialize scraper
+            scraper = BestFightOddsScraperSelenium(num_workers=48) # Adjust workers if needed
 
-        # Initialize scraper
-        scraper = BestFightOddsScraperSelenium(num_workers=24)
+            # Scrape data
+            new_odds_df_raw = scraper.scrape_all(fighters)
 
-        # Scrape data
-        odds_df = scraper.scrape_all(fighters)
+            # Save raw data from this scrape to a temporary file
+            new_odds_df_raw.to_csv(temp_raw_scrape_file, index=False)
+            print(f"\nRaw scrape data saved to temporary file: {temp_raw_scrape_file}")
 
-        # Save raw data
-        odds_df.to_csv("../../../data/raw/fight_odds.csv", index=False)
-        print("\nRaw data saved!")
+            # Print scraping summary (same as before)
+            print("\nScraping Summary:")
+            total_processed = len(fighters) - len(scraper.unprocessed_fighters)
+            print(f"Total fighters processed: {total_processed}")
+            success_rate = (total_processed / len(fighters)) * 100 if fighters else 0
+            print(f"Success rate: {success_rate:.2f}%")
+            if scraper.unprocessed_fighters:
+                print(f"\nUnprocessed fighters ({len(scraper.unprocessed_fighters)}):") # Condensed output
+            else:
+                print("\nAll fighters processed successfully!")
 
-        # Print scraping summary
-        print("\nScraping Summary:")
-        total_processed = len(fighters) - len(scraper.unprocessed_fighters)
-        print(f"Total fighters processed: {total_processed}")
-        success_rate = (total_processed / len(fighters)) * 100 if fighters else 0
-        print(f"Success rate: {success_rate:.2f}%")
-        if scraper.unprocessed_fighters:
-            print("\nUnprocessed fighters:")
-            for fighter in scraper.unprocessed_fighters:
-                print(f"- {fighter}")
-        else:
-            print("\nAll fighters processed successfully!")
+            # --- Step 3: Clean the Newly Scraped Data ---
+            print(f"\n--- Cleaning scraped data from {temp_raw_scrape_file} ---")
+            if not new_odds_df_raw.empty:
+                try:
+                    # Clean the *temporary raw file*, output to *temporary cleaned file*
+                    df_new_cleaned = BestFightOddsScraperSelenium.clean_fight_odds_from_csv(
+                        temp_raw_scrape_file, temp_cleaned_scrape_file
+                    )
+                    print(f"Cleaned data saved temporarily to: {temp_cleaned_scrape_file}")
+                    if df_new_cleaned.empty:
+                        print("Warning: Cleaning process resulted in an empty DataFrame.")
+                except Exception as e:
+                    print(f"Error during cleaning of new data: {e}")
+                    traceback.print_exc()
+                    df_new_cleaned = pd.DataFrame() # Ensure empty on error
+            else:
+                print("Raw scrape data was empty, skipping cleaning.")
 
-    if run_cleaning:
-        # Clean and save processed data
-        input_file = "../../../data/raw/fight_odds.csv"
-        output_file = "../../../data/processed/cleaned_fight_odds.csv"
-        cleaned_odds_df = BestFightOddsScraperSelenium.clean_fight_odds_from_csv(input_file, output_file)
-        print("\nCleaned data saved!")
+        except Exception as e:
+            print(f"An error occurred during the scraping or cleaning phase: {e}")
+            traceback.print_exc()
+            df_new_cleaned = pd.DataFrame() # Ensure empty if scraping/cleaning failed
+    else:
+        print("\n--- Scraping and Cleaning of new data skipped via configuration ---")
+
+
+    # --- Step 4: Compare, Identify New Rows, and Append ---
+    if run_append_new:
+        print(f"\n--- Comparing and Appending New Records to {existing_cleaned_data_file} ---")
+
+        # Ensure df_new_cleaned is a DataFrame, even if empty from previous steps
+        if not isinstance(df_new_cleaned, pd.DataFrame):
+             df_new_cleaned = pd.DataFrame()
+
+        # Proceed only if the newly cleaned data is not empty and has the key columns
+        if not df_new_cleaned.empty and 'Matchup' in df_new_cleaned.columns and 'Date' in df_new_cleaned.columns:
+            # Ensure key columns are strings for comparison
+            df_new_cleaned['Matchup'] = df_new_cleaned['Matchup'].astype(str)
+            df_new_cleaned['Date'] = df_new_cleaned['Date'].astype(str)
+
+            # Identify rows in the new data whose (Matchup, Date) are NOT in the existing set
+            new_rows_mask = df_new_cleaned.apply(
+                lambda row: (row['Matchup'], row['Date']) not in existing_identifiers,
+                axis=1
+            )
+            df_genuinely_new = df_new_cleaned[new_rows_mask]
+
+            if not df_genuinely_new.empty:
+                print(f"Identified {len(df_genuinely_new)} genuinely new fight records to add.")
+
+                # Append only the new rows to the existing DataFrame
+                # Use ignore_index=True to reset the index for the combined DataFrame
+                df_final = pd.concat([df_existing, df_genuinely_new], ignore_index=True)
+
+                # Optional: Sort the final DataFrame for consistency
+                df_final = df_final.sort_values(by=['Matchup', 'Date'])
+
+                # Save the updated DataFrame back to the original file path
+                try:
+                    df_final.to_csv(existing_cleaned_data_file, index=False)
+                    print(f"Successfully appended new records. Master file updated: {existing_cleaned_data_file} (Total records: {len(df_final)})")
+                except Exception as e:
+                    print(f"ERROR: Failed to save updated master file: {e}")
+                    traceback.print_exc()
+
+            else:
+                print("No genuinely new fight records found in the latest scrape to append.")
+                # Optionally, re-save the existing DataFrame to ensure consistent format/columns if needed
+                # try:
+                #    df_existing.to_csv(existing_cleaned_data_file, index=False)
+                #    print(f"Re-saved existing data (no changes) to {existing_cleaned_data_file}")
+                # except Exception as e:
+                #    print(f"Warning: Failed to re-save existing file: {e}")
+
+        elif run_scraping: # If scraping ran but produced no usable cleaned data
+             print("Newly scraped data was empty or unusable after cleaning. No comparison performed.")
+        else: # If scraping didn't run
+             print("Scraping was skipped. No new data to compare or append.")
+
+    else:
+        print("\n--- Comparison and Appending skipped via configuration ---")
+
+
+    # --- Step 5: Cleanup Temporary Files (Optional) ---
+    # You might want to keep these for debugging issues
+    # print("\n--- Cleaning up temporary files ---")
+    # try:
+    #     if os.path.exists(temp_raw_scrape_file):
+    #         os.remove(temp_raw_scrape_file)
+    #         # print(f"Removed temporary raw file: {temp_raw_scrape_file}")
+    #     if os.path.exists(temp_cleaned_scrape_file):
+    #         os.remove(temp_cleaned_scrape_file)
+    #         # print(f"Removed temporary cleaned file: {temp_cleaned_scrape_file}")
+    # except Exception as e:
+    #     print(f"Warning: Error removing temporary files: {e}")
+
 
     end_time = time.time()
     elapsed_time = end_time - start_time
