@@ -35,11 +35,11 @@ DEFAULT_CONFIG = {
 
 # Model files for ensemble
 MODEL_FILES = [
-    'model_0.7009_auc_diff_0.0161.json',
-    'model_0.7002_auc_diff_0.0410.json',
+    'model_0.7009_auc_diff_0.0072.json',
     'model_0.7025_auc_diff_0.0221.json',
-    'model_0.7009_auc_diff_0.0293.json',
-    'model_0.7009_auc_diff_0.0038.json'
+    'model_0.7009_auc_diff_0.0005.json',
+    'model_0.7057_auc_diff_0.0020.json',
+    'model_0.7080_auc_diff_0.0037.json'
 ]
 
 # Range-based calibration settings

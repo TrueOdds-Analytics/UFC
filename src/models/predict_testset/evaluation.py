@@ -13,7 +13,7 @@ from betting_utils import (
 
 def evaluate_bets(y_test, y_pred_proba_list, test_data, confidence_threshold, initial_bankroll=10000,
                   kelly_fraction=0.125, fixed_bet_fraction=0.001, default_bet=0.00, min_odds=-300,
-                  max_underdog_odds=200, print_fights=True, max_bet_percentage=0.20, use_ensemble=True,
+                  max_underdog_odds=300, print_fights=True, max_bet_percentage=0.20, use_ensemble=True,
                   odds_type='average'):
     """
     Evaluate betting performance while ensuring consistent predictions regardless of event order.
