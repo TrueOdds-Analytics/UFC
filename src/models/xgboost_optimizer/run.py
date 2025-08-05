@@ -23,24 +23,21 @@ def main():
 
     try:
         # Step 1: Load and preprocess data
-        X_train, X_val, y_train, y_val = load_and_preprocess_data(odds_type='close_odds')
+        X_train, X_val, y_train, y_val = load_and_preprocess_data(odds_type='None')
         print("Data loaded. Starting optimization...")
 
         # Step 2: Train initial model with all features (optional)
         # Uncomment to run initial optimization
         # best_trial = optimize_model(X_train, X_val, y_train, y_val)
 
-        # Step 3: Use an existing model for feature selection and visualization
+        # Step 3: Use an existing model for feature selection and visualization and Train model with top features only
         print("Creating feature importance visualization for existing model")
-        create_feature_importance_plot(config.EXISTING_MODEL_PATH, X_train)
-
-        # Step 4: Train model with top features only
         top_features_model_path = train_model_with_top_features(
             X_train, X_val, y_train, y_val, config.EXISTING_MODEL_PATH
         )
 
-        print("Training pipeline completed successfully")
-        print(f"Final model saved at: {top_features_model_path}")
+        # print("Training pipeline completed successfully")
+        # print(f"Final model saved at: {top_features_model_path}")
 
     except KeyboardInterrupt:
         print("Process interrupted by user")

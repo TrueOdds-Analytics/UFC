@@ -30,11 +30,11 @@ DEFAULT_CONFIG = {
 
 # Model files for use with the ensemble
 MODEL_FILES = [
-    'model_0.7009_auc_diff_0.0072.json',
-    'model_0.7025_auc_diff_0.0221.json',
-    'model_0.7009_auc_diff_0.0005.json',
-    'model_0.7057_auc_diff_0.0020.json',
-    'model_0.7080_auc_diff_0.0037.json'
+    'model_0.6609_auc_diff_0.0956.json',
+    'model_0.6609_auc_diff_0.0871.json',
+    'model_0.6609_auc_diff_0.0853.json',
+    'model_0.6601_auc_diff_0.0962.json',
+    'model_0.6601_auc_diff_0.0875.json'
 ]
 
 # Range-based calibration settings
@@ -45,7 +45,7 @@ DATA_PATHS = {
     'val_data': '../../../data/train_test/val_data.csv',
     'test_data': '../../../data/train_test/test_data.csv',
     'encoder_path': '../../../saved_models/encoders/category_encoder.pkl',
-    'model_base_path': '../../../saved_models/xgboost/jan2024-dec2025/dynamicmatchup sorted 425/'
+    'model_base_path': '../../../saved_models/xgboost/jan2024-dec2025/no odds/'
 }
 
 # Display columns in output

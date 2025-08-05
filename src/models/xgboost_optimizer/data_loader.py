@@ -4,6 +4,7 @@ Data loading and preprocessing functions.
 import pandas as pd
 from config import TRAIN_DATA_PATH, VAL_DATA_PATH, CATEGORY_COLUMNS
 
+
 def load_and_preprocess_data(odds_type='close_odds'):
     """
     Load and preprocess the training and validation data.

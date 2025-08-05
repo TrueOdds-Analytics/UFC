@@ -77,7 +77,7 @@ def objective(trial, X_train, X_val, y_train, y_val, params=None):
             print(f"New best model found! Accuracy: {accuracy:.4f}, AUC diff: {auc_diff:.4f}")
 
         # Save the model
-        save_model(model, config.MODEL_DIR_425, accuracy, auc_diff)
+        save_model(model, config.MODEL_DIR, accuracy, auc_diff)
 
         # Plot learning curves for models that meet criteria
         plot_learning_curves(train_losses, val_losses, train_auc, val_auc,

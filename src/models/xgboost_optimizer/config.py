@@ -7,12 +7,13 @@ import os
 DATA_DIR = '../../../data/train_test/'
 TRAIN_DATA_PATH = os.path.join(DATA_DIR, 'train_data.csv')
 VAL_DATA_PATH = os.path.join(DATA_DIR, 'val_data.csv')
-MODEL_DIR = '../../../saved_models/xgboost/jan2024-dec2025/dynamicmatchup sorted/'
-MODEL_DIR_425 = '../../saved_models/xgboost/jan2024-dec2025/dynamicmatchup sorted 425/'
+MODEL_DIR_BEST_MODEL = '../../../saved_models/xgboost/jan2024-dec2025/no odds/'
+MODEL_DIR = '../../../saved_models/xgboost/jan2024-dec2025/no odds 125/'
+# MODEL_DIR_425 = '../../../saved_models/xgboost/jan2024-dec2025/no odds 425/'
 
 # Ensure directories exist
 os.makedirs(MODEL_DIR, exist_ok=True)
-os.makedirs(MODEL_DIR_425, exist_ok=True)
+# os.makedirs(MODEL_DIR_425, exist_ok=True)
 
 # Default XGBoost parameters
 DEFAULT_XGB_PARAMS = {
@@ -32,11 +33,11 @@ N_TRIALS = 10000
 OPTUNA_DIRECTION = 'maximize'
 
 # Feature selection
-TOP_FEATURES_COUNT = 425
-EXISTING_MODEL_PATH = os.path.join(MODEL_DIR, 'model_0.7017_auc_diff_0.0111.json')
+TOP_FEATURES_COUNT = 125
+EXISTING_MODEL_PATH = os.path.join(MODEL_DIR_BEST_MODEL, 'model_0.6578_auc_diff_0.0952.json')
 
 # Model saving criteria
-MIN_ACCURACY_THRESHOLD = 0.70
+MIN_ACCURACY_THRESHOLD = 0.65
 MAX_AUC_DIFF_THRESHOLD = 0.1
 
 # Global state variables - initialized here but can be modified at runtime
