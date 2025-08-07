@@ -21,7 +21,7 @@ def user_input_thread():
             print("Quitting...")
             config.should_pause = True
             break
-        time.sleep(0.1)  # Small sleep to prevent high CPU usage
+        time.sleep(0.1)  # Small sleep to prevent high CPU usage[
 
 
 def start_user_input_thread():

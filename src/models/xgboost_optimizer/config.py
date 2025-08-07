@@ -8,7 +8,7 @@ DATA_DIR = '../../../data/train_test/'
 TRAIN_DATA_PATH = os.path.join(DATA_DIR, 'train_data.csv')
 VAL_DATA_PATH = os.path.join(DATA_DIR, 'val_data.csv')
 MODEL_DIR_BEST_MODEL = '../../../saved_models/xgboost/jan2024-dec2025/no odds/'
-MODEL_DIR = '../../../saved_models/xgboost/jan2024-dec2025/no odds 125/'
+MODEL_DIR = '../../../saved_models/xgboost/jan2024-dec2025/no odds 125 new/'
 # MODEL_DIR_425 = '../../../saved_models/xgboost/jan2024-dec2025/no odds 425/'
 
 # Ensure directories exist
@@ -37,7 +37,7 @@ TOP_FEATURES_COUNT = 125
 EXISTING_MODEL_PATH = os.path.join(MODEL_DIR_BEST_MODEL, 'model_0.6578_auc_diff_0.0952.json')
 
 # Model saving criteria
-MIN_ACCURACY_THRESHOLD = 0.65
+MIN_ACCURACY_THRESHOLD = 0.655
 MAX_AUC_DIFF_THRESHOLD = 0.1
 
 # Global state variables - initialized here but can be modified at runtime

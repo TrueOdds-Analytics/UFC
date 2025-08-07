@@ -33,7 +33,7 @@ class BettingConfig:
     val_data_path: str = '../../../data/train_test/val_data.csv'
     test_data_path: str = '../../../data/train_test/test_data.csv'
     encoder_path: str = '../../../saved_models/encoders/category_encoder.pkl'
-    model_base_path: str = '../../../saved_models/xgboost/jan2024-dec2025/no odds/'
+    model_base_path: str = '../../../saved_models/xgboost/jan2024-dec2025/no odds 125 new/'
     output_dir: str = '../../outputs/calibration_plots'
 
     # Betting parameters

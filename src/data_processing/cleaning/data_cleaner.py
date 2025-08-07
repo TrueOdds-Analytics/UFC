@@ -783,7 +783,7 @@ def main():
     matchup_processor.create_matchup_data('processed/combined_sorted_fighter_stats.csv', 3, True)
     matchup_processor.split_train_val_test(
         'matchup data/matchup_data_3_avg_name.csv',
-        '2024-01-01',
+        '2025-01-01',
         '2025-12-31',
         10
     )
