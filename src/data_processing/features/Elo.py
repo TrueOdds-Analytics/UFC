@@ -24,7 +24,7 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
 
     # Convert date column
     df['fight_date'] = pd.to_datetime(df['fight_date'])
-    df = df.sort_values(by=['fight_date', 'id'])
+    df = df.sort_values(by=['fight_date', 'id']).reset_index(drop=True)
 
     # Weight class factors (unchanged)
     weight_class_factors = {
@@ -42,7 +42,7 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
         'UFC Superfight Championship': {'ko': 1.0, 'submission': 1.0, 'decision': 1.0}
     }
 
-    # Helper functions (mostly unchanged)
+    # Helper functions (unchanged)
     def get_weight_class_factor(weight_class, result):
         for key, factors in weight_class_factors.items():
             if re.search(key, weight_class, re.IGNORECASE):
@@ -100,74 +100,126 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
         df['elo_difference'] = 0.0
 
     print("Starting Elo rating calculations...")
-    # First pass: Calculate Elo ratings
-    for index, fighter in df.iterrows():
-        # Find the opponent
-        opponents = df[(df['id'] == fighter['id']) & (df['fighter'] != fighter['fighter'])]
-        if len(opponents) == 0:
-            print(f"Warning: No opponent found for fighter {fighter['fighter']} in fight ID {fighter['id']}")
+
+    # Get unique fight IDs sorted by date
+    unique_fights = df.groupby('id')['fight_date'].first().sort_values()
+    processed_fights = 0
+
+    # Process fights in pairs
+    for fight_id, fight_date in unique_fights.items():
+        fight_rows = df[df['id'] == fight_id]
+
+        if len(fight_rows) != 2:
+            print(f"Warning: Fight {fight_id} has {len(fight_rows)} rows, skipping...")
             continue
 
-        opponent = opponents.iloc[0]
+        # Get both fighter rows
+        fighter1_row = fight_rows.iloc[0]
+        fighter2_row = fight_rows.iloc[1]
 
-        fighter_rating = elo_ratings.get(fighter['fighter'], initial_rating)
-        opponent_rating = elo_ratings.get(opponent['fighter'], initial_rating)
+        fighter1_idx = fighter1_row.name
+        fighter2_idx = fighter2_row.name
 
-        fighter_fights = fight_counts.get(fighter['fighter'], 0)
-        opponent_fights = fight_counts.get(opponent['fighter'], 0)
+        fighter1_name = fighter1_row['fighter']
+        fighter2_name = fighter2_row['fighter']
 
-        # Store pre-fight Elo
-        df.at[index, 'pre_fight_elo'] = fighter_rating
+        # Get CURRENT ratings for both fighters BEFORE any updates
+        fighter1_rating = elo_ratings.get(fighter1_name, initial_rating)
+        fighter2_rating = elo_ratings.get(fighter2_name, initial_rating)
 
-        # Calculate Elo change factors
-        weight_class_factor = get_weight_class_factor(fighter['weight_class'], fighter['result'])
-        title_multiplier = 1.5 if is_title_fight(fighter['weight_class']) else 1.0
-        margin_factor = get_margin_factor(fighter['result'])
-        age_factor = get_age_factor(fighter['age'])
-        additional_factor = get_additional_factors(
-            fighter['win_streak'], fighter['loss_streak'],
-            fighter['years_of_experience'], fighter['days_since_last_fight']
+        # Get fight counts
+        fighter1_fights = fight_counts.get(fighter1_name, 0)
+        fighter2_fights = fight_counts.get(fighter2_name, 0)
+
+        # Store pre-fight ELOs for both fighters
+        df.at[fighter1_idx, 'pre_fight_elo'] = fighter1_rating
+        df.at[fighter2_idx, 'pre_fight_elo'] = fighter2_rating
+
+        # Store ELO differences
+        df.at[fighter1_idx, 'elo_difference'] = fighter1_rating - fighter2_rating
+        df.at[fighter2_idx, 'elo_difference'] = fighter2_rating - fighter1_rating
+
+        # Calculate factors for fighter 1
+        weight_class_factor1 = get_weight_class_factor(fighter1_row['weight_class'], fighter1_row['result'])
+        title_multiplier1 = 1.5 if is_title_fight(fighter1_row['weight_class']) else 1.0
+        margin_factor1 = get_margin_factor(fighter1_row['result'])
+        age_factor1 = get_age_factor(fighter1_row['age'])
+        additional_factor1 = get_additional_factors(
+            fighter1_row['win_streak'], fighter1_row['loss_streak'],
+            fighter1_row['years_of_experience'], fighter1_row['days_since_last_fight']
         )
+        k1 = get_dynamic_k_factor(fighter1_fights, fighter1_rating)
 
-        # Calculate dynamic K-factor
-        k = get_dynamic_k_factor(fighter_fights, fighter_rating)
+        # Calculate factors for fighter 2
+        weight_class_factor2 = get_weight_class_factor(fighter2_row['weight_class'], fighter2_row['result'])
+        title_multiplier2 = 1.5 if is_title_fight(fighter2_row['weight_class']) else 1.0
+        margin_factor2 = get_margin_factor(fighter2_row['result'])
+        age_factor2 = get_age_factor(fighter2_row['age'])
+        additional_factor2 = get_additional_factors(
+            fighter2_row['win_streak'], fighter2_row['loss_streak'],
+            fighter2_row['years_of_experience'], fighter2_row['days_since_last_fight']
+        )
+        k2 = get_dynamic_k_factor(fighter2_fights, fighter2_rating)
 
-        # Calculate Elo change
-        expected_score = 1 / (1 + 10 ** ((opponent_rating - fighter_rating) / 400))
-        actual_score = 1 if fighter['winner'] == 1 else 0
-        elo_change = k * margin_factor * weight_class_factor * age_factor * additional_factor * title_multiplier * (
-                actual_score - expected_score)
+        # Calculate expected scores using PRE-FIGHT ratings
+        expected_score1 = 1 / (1 + 10 ** ((fighter2_rating - fighter1_rating) / 400))
+        expected_score2 = 1 / (1 + 10 ** ((fighter1_rating - fighter2_rating) / 400))
 
-        # Update Elo rating for the fighter
-        new_rating = fighter_rating + elo_change
-        elo_ratings[fighter['fighter']] = new_rating
+        # Get actual scores
+        actual_score1 = 1 if fighter1_row['winner'] == 1 else 0
+        actual_score2 = 1 if fighter2_row['winner'] == 1 else 0
+
+        # Calculate ELO changes
+        elo_change1 = k1 * margin_factor1 * weight_class_factor1 * age_factor1 * additional_factor1 * title_multiplier1 * (
+                    actual_score1 - expected_score1)
+        elo_change2 = k2 * margin_factor2 * weight_class_factor2 * age_factor2 * additional_factor2 * title_multiplier2 * (
+                    actual_score2 - expected_score2)
+
+        # Calculate new ratings
+        new_rating1 = fighter1_rating + elo_change1
+        new_rating2 = fighter2_rating + elo_change2
+
+        # Update post-fight ELOs in dataframe
+        df.at[fighter1_idx, 'fight_outcome_elo'] = new_rating1
+        df.at[fighter2_idx, 'fight_outcome_elo'] = new_rating2
+
+        # NOW update the ELO ratings dictionary for future fights
+        elo_ratings[fighter1_name] = new_rating1
+        elo_ratings[fighter2_name] = new_rating2
 
         # Update fight counts
-        fight_counts[fighter['fighter']] = fighter_fights + 1
-        fight_counts[opponent['fighter']] = opponent_fights + 1
+        fight_counts[fighter1_name] = fighter1_fights + 1
+        fight_counts[fighter2_name] = fighter2_fights + 1
 
-        # Update DataFrame column for post-fight Elo
-        df.at[index, 'fight_outcome_elo'] = new_rating
+        processed_fights += 1
+        if processed_fights % 1000 == 0:
+            print(f"Processed {processed_fights} fights...")
 
-    print("Completed Elo calculation, now calculating predictions...")
-    # Second pass: Calculate accuracy (unchanged)
-    correct_predictions = total_predictions = total_fights = fights_with_elo_difference = 0
+    print(f"Completed ELO calculation for {processed_fights} fights")
+    print("Calculating prediction accuracy...")
+
+    # Calculate accuracy
+    correct_predictions = 0
+    total_predictions = 0
+    total_fights = 0
+    fights_with_elo_difference = 0
     threshold = -1
 
-    for index, fighter in df.iterrows():
-        opponents = df[(df['id'] == fighter['id']) & (df['fighter'] != fighter['fighter'])]
-        if len(opponents) == 0:
+    for fight_id in df['id'].unique():
+        fight_rows = df[df['id'] == fight_id]
+        if len(fight_rows) != 2:
             continue
 
-        opponent = opponents.iloc[0]
+        fighter1_row = fight_rows.iloc[0]
+        fighter2_row = fight_rows.iloc[1]
 
-        elo_difference = fighter['pre_fight_elo'] - opponent['pre_fight_elo']
-        df.at[index, 'elo_difference'] = elo_difference
+        elo_difference = fighter1_row['pre_fight_elo'] - fighter2_row['pre_fight_elo']
 
         if abs(elo_difference) > threshold:
             fights_with_elo_difference += 1
             predicted_winner = 1 if elo_difference > 0 else 0
-            actual_winner = fighter['winner']
+            actual_winner = fighter1_row['winner']
+
             if predicted_winner == actual_winner:
                 correct_predictions += 1
             total_predictions += 1
@@ -188,7 +240,7 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
     top_fighters = pd.Series(elo_ratings).sort_values(ascending=False).head(50)
     print(top_fighters)
 
-    # Use a safer save approach
+    # Save the data
     try:
         # Save using a temporary file first
         temp_file = file_path + '.tmp'
@@ -218,23 +270,12 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
     print(f"\nVerifying Elo data was added to {file_path}...")
     try:
         verification_df = pd.read_csv(file_path)
-        if 'pre_fight_elo' in verification_df.columns:
-            print(
-                f"Verification: pre_fight_elo column exists with {verification_df['pre_fight_elo'].notna().sum()} non-null values")
-        else:
-            print("ERROR: pre_fight_elo column not found in saved file")
-
-        if 'fight_outcome_elo' in verification_df.columns:
-            print(
-                f"Verification: fight_outcome_elo column exists with {verification_df['fight_outcome_elo'].notna().sum()} non-null values")
-        else:
-            print("ERROR: fight_outcome_elo column not found in saved file")
-
-        if 'elo_difference' in verification_df.columns:
-            print(
-                f"Verification: elo_difference column exists with {verification_df['elo_difference'].notna().sum()} non-null values")
-        else:
-            print("ERROR: elo_difference column not found in saved file")
+        for col in ['pre_fight_elo', 'fight_outcome_elo', 'elo_difference']:
+            if col in verification_df.columns:
+                non_null = verification_df[col].notna().sum()
+                print(f"Verification: {col} column exists with {non_null} non-null values")
+            else:
+                print(f"ERROR: {col} column not found in saved file")
     except Exception as e:
         print(f"Verification failed: {str(e)}")
 
@@ -244,7 +285,7 @@ def calculate_elo_ratings(file_path, initial_rating=1500):
 if __name__ == "__main__":
     # When run directly, use the project root relative path
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.abspath(os.path.join(script_dir, "../../.."))  # Go up three levels to project root
+    project_root = os.path.abspath(os.path.join(script_dir, "../../.."))
     file_path = os.path.join(project_root, "data/processed/combined_rounds.csv")
 
     print(f"Running Elo calculation on {file_path}")
