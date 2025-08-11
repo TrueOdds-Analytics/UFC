@@ -46,9 +46,9 @@ class Config:
     odds_type: str = 'close'  # Options: 'open', 'close', 'average'
 
     # Model settings
-    use_ensemble: bool = True  # Whether to use ensemble of models
+    use_ensemble: bool = False  # Whether to use ensemble of models
     model_files: List[str] = field(default_factory=lambda: [
-        'model_0.6578_auc_diff_0.0253.json',
+        'model_nested_cv_acc_0.6208_auc_0.6658.json',
         'model_0.6570_auc_diff_0.0235.json',
         'model_0.6570_auc_diff_0.0256.json',
         'model_0.6570_auc_diff_0.0244.json',
@@ -60,7 +60,7 @@ class Config:
     # test_data_path: str = '../../../data/train_test/test_data.csv'
     test_data_path: str = '../../../data/matchup data/all_matchups.csv'
     encoder_path: str = '../../../saved_models/encoders/category_encoder.pkl'
-    model_base_path: str = '../../../saved_models/xgboost/jan2024-dec2025/no odds 125 new/'
+    model_base_path: str = '../../../saved_models/xgboost/jan2024-dec2025/robust_training/'
 
     # Display settings
     display_columns: List[str] = field(default_factory=lambda: ['current_fight_date', 'fighter_a', 'fighter_b'])

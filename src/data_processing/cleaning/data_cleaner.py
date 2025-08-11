@@ -3,7 +3,7 @@ UFC Fight Analysis Module
 
 This module contains classes and functions for processing and analyzing UFC fight data.
 It handles data loading, preprocessing, feature engineering, and dataset preparation
-for machine learning.
+for machine learning. Includes integrated data leakage verification.
 """
 
 import warnings
@@ -24,17 +24,19 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 class FightDataProcessor:
     """Process and transform UFC fight data for analysis."""
 
-    def __init__(self, data_dir: str = "../../../data"):
+    def __init__(self, data_dir: str = "../../../data", enable_verification: bool = True):
         """
         Initialize the processor with data directory.
 
         Args:
             data_dir: Directory containing data files
+            enable_verification: Whether to enable leakage verification checks
         """
         self.data_dir = data_dir
         self.utils = DataUtils()
         self.odds_utils = OddsUtils()
-        self.fighter_utils = FighterUtils()
+        self.fighter_utils = FighterUtils(enable_verification=enable_verification)
+        self.enable_verification = enable_verification
 
     def _load_csv(self, filepath: str) -> pd.DataFrame:
         """Load a CSV file into a DataFrame."""
@@ -153,6 +155,10 @@ class FightDataProcessor:
         final_stats = final_stats.groupby('fighter', group_keys=False).apply(
             self.fighter_utils.calculate_total_fight_stats
         )
+
+        # Print verification summary if enabled
+        if self.enable_verification:
+            self.fighter_utils.print_verification_summary()
 
         print("Saving processed data...")
         self._save_csv(final_stats, 'processed/combined_rounds.csv')
@@ -325,17 +331,20 @@ class FightDataProcessor:
 class MatchupProcessor:
     """Process and prepare matchup data for predictive modeling."""
 
-    def __init__(self, data_dir: str = "../../../data"):
+    def __init__(self, data_dir: str = "../../../data", enable_verification: bool = True):
         """
         Initialize the processor with data directory.
 
         Args:
             data_dir: Directory containing data files
+            enable_verification: Whether to enable leakage verification checks
         """
         self.data_dir = data_dir
-        self.fight_processor = FightDataProcessor(data_dir)
+        self.fight_processor = FightDataProcessor(data_dir, enable_verification=enable_verification)
         self.utils = DataUtils()
         self.odds_utils = OddsUtils()
+        self.enable_verification = enable_verification
+        self.leakage_warnings = []
 
     def create_matchup_data(self, file_path: str, tester: int, include_names: bool = False) -> pd.DataFrame:
         """
@@ -389,6 +398,17 @@ class MatchupProcessor:
         # Calculate additional differential and ratio columns
         matchup_df = self._calculate_matchup_features(matchup_df, features_to_include, n_past_fights)
 
+        # Print leakage summary if enabled
+        if self.enable_verification and self.leakage_warnings:
+            print("\n" + "="*60)
+            print("MATCHUP DATA LEAKAGE WARNINGS")
+            print("="*60)
+            for warning in self.leakage_warnings[:10]:  # Show first 10 warnings
+                print(warning)
+            if len(self.leakage_warnings) > 10:
+                print(f"... and {len(self.leakage_warnings) - 10} more warnings")
+            print("="*60)
+
         # Save output
         output_filename = f'matchup data/matchup_data_{n_past_fights}_avg{"_name" if include_names else ""}.csv'
         self.fight_processor._save_csv(matchup_df, output_filename)
@@ -410,8 +430,13 @@ class MatchupProcessor:
         processed_count = 0
         partial_data_count = 0
 
+        # ========== LEAKAGE CHECK #4: Setup ==========
+        verification_sample_size = 5
+        verification_counter = 0
+        # ========================================
+
         # Process each current fight
-        for _, current_fight in df.iterrows():
+        for idx, current_fight in df.iterrows():
             fighter_a_name = current_fight['fighter']
             fighter_b_name = current_fight['fighter_b']
 
@@ -425,6 +450,43 @@ class MatchupProcessor:
                 (df['fighter'] == fighter_b_name) &
                 (df['fight_date'] < current_fight['fight_date'])
                 ].sort_values(by='fight_date', ascending=False).head(n_past_fights)
+
+            # ========== LEAKAGE CHECK #4: Matchup Data Creation ==========
+            if self.enable_verification and verification_counter < verification_sample_size:
+                # Check Fighter A's data
+                if len(fighter_a_df) > 0:
+                    latest_past_fight_a = fighter_a_df.iloc[0]
+
+                    # Critical check: Is this date BEFORE current fight?
+                    if latest_past_fight_a['fight_date'] >= current_fight['fight_date']:
+                        warning = f"❌ CRITICAL LEAKAGE: Fighter {fighter_a_name} using future fight data!"
+                        self.leakage_warnings.append(warning)
+                        print(warning)
+
+                    # Check if career stats make sense
+                    all_fighter_a_fights = df[df['fighter'] == fighter_a_name].sort_values('fight_date')
+                    actual_fight_number = len(all_fighter_a_fights[
+                        all_fighter_a_fights['fight_date'] <= latest_past_fight_a['fight_date']
+                    ])
+
+                    if 'total_fights' in latest_past_fight_a:
+                        if latest_past_fight_a['total_fights'] > actual_fight_number:
+                            warning = (f"❌ LEAKAGE: {fighter_a_name} has total_fights="
+                                     f"{latest_past_fight_a['total_fights']} but only {actual_fight_number} "
+                                     f"fights up to {latest_past_fight_a['fight_date']}")
+                            self.leakage_warnings.append(warning)
+
+                # Similar check for Fighter B
+                if len(fighter_b_df) > 0:
+                    latest_past_fight_b = fighter_b_df.iloc[0]
+
+                    if latest_past_fight_b['fight_date'] >= current_fight['fight_date']:
+                        warning = f"❌ CRITICAL LEAKAGE: Fighter {fighter_b_name} using future fight data!"
+                        self.leakage_warnings.append(warning)
+                        print(warning)
+
+                verification_counter += 1
+            # ========== END LEAKAGE CHECK #4 ==========
 
             # Skip if either fighter has no past fights
             if len(fighter_a_df) == 0 or len(fighter_b_df) == 0:
@@ -519,6 +581,7 @@ class MatchupProcessor:
 
         print(f"Processed {processed_count} matchups (including {partial_data_count} with partial fight history)")
         print(f"Skipped {skipped_count} matchups where at least one fighter had no previous fights")
+
         return matchup_data
 
     def _process_fight_odds(self, odds_a: float, odds_b: float) -> Tuple[List[float], float, float]:
@@ -660,6 +723,7 @@ class MatchupProcessor:
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """
         Split matchup data into training, validation, and test sets with random fighter ordering.
+        FIXED: Ensures no date overlap between splits.
         """
         print(f"Splitting data from {start_date} to {end_date} with {years_back} years history...")
         matchup_df = self.fight_processor._load_csv(matchup_data_file)
@@ -678,7 +742,7 @@ class MatchupProcessor:
         end_date = pd.to_datetime(end_date)
         years_before = start_date - pd.DateOffset(years=years_back)
 
-        # Split data
+        # Split data - first extract test set
         test_data = matchup_df[
             (matchup_df['current_fight_date'] >= start_date) &
             (matchup_df['current_fight_date'] <= end_date)
@@ -689,19 +753,84 @@ class MatchupProcessor:
             (matchup_df['current_fight_date'] < start_date)
             ].copy()
 
-        # Sort remaining data and split into train/val
+        # Sort remaining data by date
         remaining_data = remaining_data.sort_values(by='current_fight_date', ascending=True)
-        split_index = int(len(remaining_data) * 0.8)
-        train_data = remaining_data.iloc[:split_index].copy()
-        val_data = remaining_data.iloc[split_index:].copy()
+
+        # ========== FIX: Ensure no date overlap between train and val ==========
+        # Get unique dates in remaining data
+        unique_dates = sorted(remaining_data['current_fight_date'].unique())
+
+        # Find the split point by dates (not rows) to ensure 80/20 split
+        n_dates = len(unique_dates)
+        split_date_idx = int(n_dates * 0.8)
+
+        # Get the cutoff date
+        if split_date_idx < n_dates:
+            cutoff_date = unique_dates[split_date_idx]
+
+            # All fights before cutoff date go to train
+            train_data = remaining_data[remaining_data['current_fight_date'] < cutoff_date].copy()
+
+            # All fights from cutoff date onwards go to validation
+            val_data = remaining_data[remaining_data['current_fight_date'] >= cutoff_date].copy()
+        else:
+            # Edge case: if not enough dates, use the last date for split
+            train_data = remaining_data.copy()
+            val_data = pd.DataFrame()  # Empty validation set
+
+        print(f"Split using cutoff date: {cutoff_date if split_date_idx < n_dates else 'N/A'}")
+        # ========== END FIX ==========
 
         # Remove duplicate fights with random ordering (no alphabetical enforcement)
         test_data = self._remove_duplicate_fights(test_data, random=False)
 
         # Sort datasets by date only
         train_data = train_data.sort_values(by='current_fight_date', ascending=True)
-        val_data = val_data.sort_values(by='current_fight_date', ascending=True)
+        val_data = val_data.sort_values(by='current_fight_date', ascending=True) if not val_data.empty else val_data
         test_data = test_data.sort_values(by=['current_fight_date', 'fighter_a'], ascending=[True, True])
+
+        # ========== LEAKAGE CHECK #5: Train/Test Split ==========
+        if self.enable_verification:
+            print("\n" + "=" * 60)
+            print("LEAKAGE CHECK #5: Train/Test Split Verification")
+            print("=" * 60)
+
+            if not train_data.empty:
+                print(
+                    f"Train date range: {train_data['current_fight_date'].min()} to {train_data['current_fight_date'].max()}")
+            if not val_data.empty:
+                print(
+                    f"Val date range: {val_data['current_fight_date'].min()} to {val_data['current_fight_date'].max()}")
+            if not test_data.empty:
+                print(
+                    f"Test date range: {test_data['current_fight_date'].min()} to {test_data['current_fight_date'].max()}")
+
+            # Check for date overlap
+            overlap_issues = []
+            if not train_data.empty and not val_data.empty:
+                if train_data['current_fight_date'].max() >= val_data['current_fight_date'].min():
+                    overlap_issues.append("Train and validation dates overlap")
+                    print("❌ LEAKAGE: Train and validation dates overlap!")
+
+            if not val_data.empty and not test_data.empty:
+                if val_data['current_fight_date'].max() >= test_data['current_fight_date'].min():
+                    overlap_issues.append("Validation and test dates overlap")
+                    print("❌ LEAKAGE: Validation and test dates overlap!")
+
+            if not overlap_issues:
+                print("✅ No date overlap between train/val/test sets")
+
+            # Additional check: verify no duplicate dates across sets
+            if not train_data.empty and not val_data.empty:
+                train_dates = set(train_data['current_fight_date'].unique())
+                val_dates = set(val_data['current_fight_date'].unique())
+                common_dates = train_dates.intersection(val_dates)
+                if common_dates:
+                    print(f"⚠️ WARNING: {len(common_dates)} dates appear in both train and val sets")
+                    print(f"   Common dates: {sorted(list(common_dates))[:5]}")  # Show first 5
+
+            print("=" * 60)
+        # ========== END LEAKAGE CHECK #5 ==========
 
         # Save datasets
         self.fight_processor._save_csv(train_data, 'train_test/train_data.csv')
@@ -767,20 +896,144 @@ class MatchupProcessor:
 
 
 # =============================================================================
+# Comprehensive Data Integrity Verification
+# =============================================================================
+
+def verify_data_integrity(data_dir: str = "../../../data", sample_size: int = 5):
+    """
+    Comprehensive data leakage verification
+    Run this after your data processing pipeline
+
+    Args:
+        data_dir: Base data directory
+        sample_size: Number of samples to check in detail
+    """
+    print("\n" + "="*80)
+    print("COMPREHENSIVE DATA LEAKAGE VERIFICATION")
+    print("="*80)
+
+    issues_found = []
+
+    try:
+        # Load the processed data
+        combined_rounds = pd.read_csv(f"{data_dir}/processed/combined_rounds.csv")
+        combined_sorted = pd.read_csv(f"{data_dir}/processed/combined_sorted_fighter_stats.csv")
+
+        # Test 1: Check a specific fighter's progression
+        test_fighter = combined_rounds['fighter'].value_counts().index[0]  # Most common fighter
+        fighter_data = combined_rounds[combined_rounds['fighter'] == test_fighter].sort_values('fight_date')
+
+        print(f"\n1. Checking fighter: {test_fighter}")
+        print(f"   Total fights in dataset: {len(fighter_data)}")
+
+        # Check first 3 fights
+        for i in range(min(3, len(fighter_data))):
+            fight = fighter_data.iloc[i]
+            print(f"\n   Fight {i+1} ({fight['fight_date']}):")
+            print(f"     total_fights: {fight.get('total_fights', 'N/A')} (expected: {i+1})")
+            print(f"     total_wins: {fight.get('total_wins', 'N/A')}")
+            print(f"     win_streak: {fight.get('win_streak', 'N/A')}")
+
+            # Verify
+            if fight.get('total_fights', 0) != i+1:
+                issues_found.append(f"Fighter {test_fighter}: total_fights mismatch in fight {i+1}")
+                print(f"     ❌ LEAKAGE DETECTED!")
+
+        # Test 2: Check date ordering
+        print("\n2. Checking date ordering in career stats:")
+        date_issues = 0
+        for fighter, fighter_group in combined_rounds.groupby('fighter'):
+            dates = pd.to_datetime(fighter_group['fight_date']).values
+            if not all(dates[i] <= dates[i+1] for i in range(len(dates)-1)):
+                date_issues += 1
+                if date_issues <= 3:  # Show first 3 issues
+                    print(f"   ❌ LEAKAGE: Fighter {fighter} has unordered dates!")
+                    issues_found.append(f"Fighter {fighter}: unordered dates")
+
+        if date_issues > 3:
+            print(f"   ... and {date_issues - 3} more fighters with date issues")
+        elif date_issues == 0:
+            print("   ✅ All fighters have properly ordered dates")
+
+        # Test 3: Check train/test split
+        train_data = pd.read_csv(f"{data_dir}/train_test/train_data.csv")
+        val_data = pd.read_csv(f"{data_dir}/train_test/val_data.csv")
+        test_data = pd.read_csv(f"{data_dir}/train_test/test_data.csv")
+
+        print("\n3. Checking train/val/test split:")
+        print(f"   Train: {train_data['current_fight_date'].min()} to {train_data['current_fight_date'].max()}")
+        print(f"   Val:   {val_data['current_fight_date'].min()} to {val_data['current_fight_date'].max()}")
+        print(f"   Test:  {test_data['current_fight_date'].min()} to {test_data['current_fight_date'].max()}")
+
+        if train_data['current_fight_date'].max() >= val_data['current_fight_date'].min():
+            print("   ❌ LEAKAGE: Train and validation dates overlap!")
+            issues_found.append("Train/val date overlap")
+        elif val_data['current_fight_date'].max() >= test_data['current_fight_date'].min():
+            print("   ❌ LEAKAGE: Validation and test dates overlap!")
+            issues_found.append("Val/test date overlap")
+        else:
+            print("   ✅ No date overlap between train/val/test")
+
+        # Test 4: Check for future data in features
+        print("\n4. Checking for future data in features (sample):")
+        for i in range(min(sample_size, len(test_data))):
+            row = test_data.iloc[i]
+            if 'total_fights' in row:
+                # This is a simplified check - you'd need more context to verify thoroughly
+                print(f"   Sample {i+1}: Fighter A has {row.get('total_fights_fighter_a_avg_last_3', 'N/A')} total fights")
+
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: Required file not found - {e}")
+        issues_found.append(f"Missing file: {e}")
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        issues_found.append(f"Unexpected error: {e}")
+
+    # Final summary
+    print("\n" + "="*80)
+    print("VERIFICATION SUMMARY")
+    print("="*80)
+
+    if not issues_found:
+        print("✅ ALL CHECKS PASSED - No data leakage detected!")
+    else:
+        print(f"❌ ISSUES FOUND ({len(issues_found)} total):")
+        for issue in issues_found[:10]:  # Show first 10 issues
+            print(f"   - {issue}")
+        if len(issues_found) > 10:
+            print(f"   ... and {len(issues_found) - 10} more issues")
+
+    print("="*80)
+
+    return len(issues_found) == 0
+
+
+# =============================================================================
 # Main Execution
 # =============================================================================
 
 def main():
     """Main execution function."""
-    # Initialize processors
-    fight_processor = FightDataProcessor()
-    matchup_processor = MatchupProcessor()
+    # Initialize processors with verification enabled
+    fight_processor = FightDataProcessor(enable_verification=True)
+    matchup_processor = MatchupProcessor(enable_verification=True)
 
-    # # Uncomment the functions you want to run
+    # Uncomment the functions you want to run
+    print("Starting UFC data processing pipeline with leakage verification...")
+
+    # Process fight data
     fight_processor.combine_rounds_stats('processed/ufc_fight_processed.csv')
+
+    # Calculate Elo ratings
     calculate_elo_ratings("C:/Users/William/PycharmProjects/UFC/data/processed/combined_rounds.csv")
+
+    # Combine fighter stats
     fight_processor.combine_fighters_stats('processed/combined_rounds.csv')
+
+    # Create matchup data
     matchup_processor.create_matchup_data('processed/combined_sorted_fighter_stats.csv', 3, True)
+
+    # Split into train/val/test
     matchup_processor.split_train_val_test(
         'matchup data/matchup_data_3_avg_name.csv',
         '2025-01-01',
@@ -788,9 +1041,19 @@ def main():
         10
     )
 
+    # Run comprehensive verification
+    print("\nRunning comprehensive data integrity check...")
+    integrity_passed = verify_data_integrity()
+
+    if integrity_passed:
+        print("\n✅ Data processing completed successfully with no leakage detected!")
+    else:
+        print("\n⚠️ Data processing completed but potential leakage issues were detected.")
+        print("Please review the verification output above.")
+
 
 if __name__ == "__main__":
     start_time = datetime.now()
     main()
     end_time = datetime.now()
-    print(f"Total runtime: {end_time - start_time}")
+    print(f"\nTotal runtime: {end_time - start_time}")

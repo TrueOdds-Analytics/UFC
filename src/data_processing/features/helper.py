@@ -2,6 +2,7 @@
 UFC Data Analysis Utilities
 
 This module contains utility classes and functions for processing UFC fight data.
+Includes integrated data leakage verification checks.
 """
 
 import numpy as np
@@ -297,9 +298,11 @@ class OddsUtils:
 class FighterUtils:
     """Utilities for processing fighter statistics."""
 
-    def __init__(self):
+    def __init__(self, enable_verification: bool = True):
         """Initialize with DataUtils instance."""
         self.utils = DataUtils()
+        self.enable_verification = enable_verification
+        self.verification_results = []
 
     def aggregate_fighter_stats(self, group: pd.DataFrame, numeric_columns: List[str]) -> pd.DataFrame:
         """
@@ -321,18 +324,42 @@ class FighterUtils:
             group[f"{col}_career"] = cumulative_stats[col]
             group[f"{col}_career_avg"] = self.utils.safe_divide(cumulative_stats[col], fight_count)
 
+        # ========== LEAKAGE CHECK #1: Career Statistics ==========
+        if self.enable_verification and len(group) > 0:
+            fighter_name = group['fighter'].iloc[0]
+            verification_passed = True
+
+            # Check first 3 fights
+            for i in range(min(3, len(group))):
+                fight = group.iloc[i]
+
+                # Manual calculation check for knockdowns
+                if 'knockdowns' in numeric_columns and 'knockdowns_career' in group.columns:
+                    expected_knockdowns = group['knockdowns'].iloc[:i+1].sum()
+                    actual_knockdowns = fight.get('knockdowns_career', 0)
+
+                    if abs(expected_knockdowns - actual_knockdowns) > 0.01:
+                        verification_passed = False
+                        print(f"❌ LEAKAGE CHECK #1: Career stats for {fighter_name}, fight {i+1}")
+                        print(f"   Expected knockdowns_career: {expected_knockdowns}, got {actual_knockdowns}")
+                        break
+
+            if verification_passed and self.enable_verification:
+                self.verification_results.append(('career_stats', fighter_name, True))
+        # ========== END LEAKAGE CHECK #1 ==========
+
         # Calculate career rate stats
         group['significant_strikes_rate_career'] = self.utils.safe_divide(
-            cumulative_stats['significant_strikes_landed'],
-            cumulative_stats['significant_strikes_attempted']
+            cumulative_stats.get('significant_strikes_landed', 0),
+            cumulative_stats.get('significant_strikes_attempted', 1)
         )
         group['takedown_rate_career'] = self.utils.safe_divide(
-            cumulative_stats['takedown_successful'],
-            cumulative_stats['takedown_attempted']
+            cumulative_stats.get('takedown_successful', 0),
+            cumulative_stats.get('takedown_attempted', 1)
         )
         group['total_strikes_rate_career'] = self.utils.safe_divide(
-            cumulative_stats['total_strikes_landed'],
-            cumulative_stats['total_strikes_attempted']
+            cumulative_stats.get('total_strikes_landed', 0),
+            cumulative_stats.get('total_strikes_attempted', 1)
         )
         group["combined_success_rate_career"] = (group["takedown_rate_career"] + group["total_strikes_rate_career"]) / 2
 
@@ -372,8 +399,6 @@ class FighterUtils:
         group_copy['win_streak'] = 0
         group_copy['loss_streak'] = 0
 
-        # For the first fight, no update needed
-
         # Calculate streaks for subsequent fights
         for i in range(1, len(group_copy)):
             if group_copy.iloc[i-1]['winner'] == 1:  # Win
@@ -382,6 +407,40 @@ class FighterUtils:
             else:  # Loss
                 group_copy.iloc[i, group_copy.columns.get_loc('win_streak')] = 0
                 group_copy.iloc[i, group_copy.columns.get_loc('loss_streak')] = group_copy.iloc[i-1]['loss_streak'] + 1
+
+        # ========== LEAKAGE CHECK #2: Win/Loss Streaks ==========
+        if self.enable_verification and len(group_copy) > 0:
+            fighter_name = group_copy['fighter'].iloc[0]
+            first_fight = group_copy.iloc[0]
+
+            # First fight should have 0 streaks
+            if first_fight['win_streak'] != 0 or first_fight['loss_streak'] != 0:
+                print(f"❌ LEAKAGE CHECK #2: Streaks for {fighter_name}")
+                print(f"   First fight has non-zero streaks: win={first_fight['win_streak']}, loss={first_fight['loss_streak']}")
+                self.verification_results.append(('streaks', fighter_name, False))
+            else:
+                # Check streak continuity for first few fights
+                streak_valid = True
+                for i in range(1, min(3, len(group_copy))):
+                    prev_fight = group_copy.iloc[i-1]
+                    curr_fight = group_copy.iloc[i]
+
+                    if prev_fight['winner'] == 1:  # Previous was a win
+                        expected_win = prev_fight['win_streak'] + 1
+                        if curr_fight['win_streak'] != expected_win or curr_fight['loss_streak'] != 0:
+                            streak_valid = False
+                            print(f"❌ LEAKAGE CHECK #2: Streak continuity error for {fighter_name}, fight {i+1}")
+                            break
+                    else:  # Previous was a loss
+                        expected_loss = prev_fight['loss_streak'] + 1
+                        if curr_fight['loss_streak'] != expected_loss or curr_fight['win_streak'] != 0:
+                            streak_valid = False
+                            print(f"❌ LEAKAGE CHECK #2: Streak continuity error for {fighter_name}, fight {i+1}")
+                            break
+
+                if streak_valid:
+                    self.verification_results.append(('streaks', fighter_name, True))
+        # ========== END LEAKAGE CHECK #2 ==========
 
         return group_copy
 
@@ -427,6 +486,31 @@ class FighterUtils:
         group['total_wins'] = group['winner'].cumsum()
         group['total_losses'] = group['total_fights'] - group['total_wins']
 
+        # ========== LEAKAGE CHECK #3: Total Fight Stats ==========
+        if self.enable_verification and len(group) > 0:
+            fighter_name = group['fighter'].iloc[0]
+            verification_passed = True
+
+            # Check first fight
+            first_fight = group.iloc[0]
+            if first_fight['total_fights'] != 1:
+                print(f"❌ LEAKAGE CHECK #3: Total fights for {fighter_name}")
+                print(f"   First fight has total_fights={first_fight['total_fights']} (should be 1)")
+                verification_passed = False
+
+            # Check progression
+            for i in range(min(3, len(group))):
+                fight = group.iloc[i]
+                if fight['total_fights'] != i + 1:
+                    print(f"❌ LEAKAGE CHECK #3: Total fights progression for {fighter_name}")
+                    print(f"   Fight {i+1} has total_fights={fight['total_fights']} (should be {i+1})")
+                    verification_passed = False
+                    break
+
+            if verification_passed:
+                self.verification_results.append(('total_fights', fighter_name, True))
+        # ========== END LEAKAGE CHECK #3 ==========
+
         # Create outcome type masks
         ko_mask = group['result'].isin([0, 3])
         submission_mask = group['result'] == 1
@@ -455,6 +539,25 @@ class FighterUtils:
             )
 
         return group
+
+    def print_verification_summary(self):
+        """Print summary of verification results"""
+        if self.verification_results:
+            print("\n" + "="*60)
+            print("LEAKAGE VERIFICATION SUMMARY")
+            print("="*60)
+
+            passed = sum(1 for _, _, result in self.verification_results if result)
+            total = len(self.verification_results)
+
+            print(f"Checks passed: {passed}/{total}")
+
+            if passed == total:
+                print("✅ All verification checks passed - No leakage detected")
+            else:
+                print("❌ Some verification checks failed - Review the output above")
+
+            print("="*60)
 
 
 class DateUtils:
