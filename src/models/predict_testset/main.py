@@ -48,7 +48,7 @@ class Config:
     # Model settings
     use_ensemble: bool = False  # Whether to use ensemble of models
     model_files: List[str] = field(default_factory=lambda: [
-        'model_nested_cv_acc_0.6208_auc_0.6658.json',
+        'model_nested_cv_acc_0.6099_auc_0.6546.json',
         'model_0.6570_auc_diff_0.0235.json',
         'model_0.6570_auc_diff_0.0256.json',
         'model_0.6570_auc_diff_0.0244.json',
@@ -57,8 +57,8 @@ class Config:
 
     # Data paths
     val_data_path: str = '../../../data/train_test/val_data.csv'
-    # test_data_path: str = '../../../data/train_test/test_data.csv'
-    test_data_path: str = '../../../data/matchup data/all_matchups.csv'
+    test_data_path: str = '../../../data/train_test/test_data.csv'
+    # test_data_path: str = '../../../data/matchup data/all_matchups.csv'
     encoder_path: str = '../../../saved_models/encoders/category_encoder.pkl'
     model_base_path: str = '../../../saved_models/xgboost/jan2024-dec2025/robust_training/'
 
