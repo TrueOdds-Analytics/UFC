@@ -48,7 +48,7 @@ class Config:
     # Model settings
     use_ensemble: bool = False  # Whether to use ensemble of models
     model_files: List[str] = field(default_factory=lambda: [
-        'model_nested_cv_acc_0.6099_auc_0.6546.json',
+        'model_top_500_features_acc_0.6302_auc_0.6785.json',
         'model_0.6570_auc_diff_0.0235.json',
         'model_0.6570_auc_diff_0.0256.json',
         'model_0.6570_auc_diff_0.0244.json',
