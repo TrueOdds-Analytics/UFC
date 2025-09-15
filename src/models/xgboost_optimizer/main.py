@@ -17,28 +17,38 @@ warnings.filterwarnings('ignore')
 
 def load_data(train_path='../../../data/train_test/train_data.csv',
               val_path='../../../data/train_test/val_data.csv'):
-    """Load train/val data, drop non-features, one-hot encode categoricals."""
+    """Load train/val and cast string columns to pandas 'category' (aligned)."""
+    import pandas as pd
+    from pandas.api.types import CategoricalDtype
 
     train_df = pd.read_csv(train_path)
-    val_df = pd.read_csv(val_path)
+    val_df   = pd.read_csv(val_path)
 
     # Drop non-features
     drop_cols = ['winner', 'fighter_a', 'fighter_b', 'date', 'current_fight_date']
     feature_cols = [c for c in train_df.columns if c not in drop_cols]
 
-    X_train = train_df[feature_cols]
-    y_train = train_df['winner']
-    X_val = val_df[feature_cols]
-    y_val = val_df['winner']
+    X_train = train_df[feature_cols].copy()
+    y_train = train_df['winner'].copy()
+    X_val   = val_df[feature_cols].copy()
+    y_val   = val_df['winner'].copy()
 
-    # One-hot encode object columns (safe for XGBoost, no enable_categorical needed)
-    X_train = pd.get_dummies(X_train, dummy_na=True)
-    X_val = pd.get_dummies(X_val, dummy_na=True)
+    # Cast all object columns to categorical with shared category sets
+    obj_cols = list(X_train.select_dtypes(include='object').columns)
+    for c in obj_cols:
+        cats = sorted(set(X_train[c].astype('string').fillna('<NA>')) |
+                      set(X_val[c].astype('string').fillna('<NA>')))
+        cat_dtype = CategoricalDtype(categories=cats, ordered=False)
+        X_train[c] = X_train[c].astype('string').fillna('<NA>').astype(cat_dtype)
+        X_val[c]   = X_val[c].astype('string').fillna('<NA>').astype(cat_dtype)
 
-    # Align columns so train/val match
-    X_train, X_val = X_train.align(X_val, join='left', axis=1, fill_value=0)
+    # Sanity: no leftover object dtype
+    assert not list(X_train.select_dtypes(include='object').columns), "object dtype remains in X_train"
+    assert not list(X_val.select_dtypes(include='object').columns),   "object dtype remains in X_val"
 
     print(f"Data loaded: Train {X_train.shape}, Val {X_val.shape}")
+    if obj_cols:
+        print(f"Categorical cols: {obj_cols}")
     return X_train, X_val, y_train, y_val
 
 
