@@ -1,711 +1,694 @@
-"""
-UFC Fight Analysis Module
+"""End-to-end preprocessing pipeline for UFC fight data."""
 
-This module contains classes and functions for processing and analyzing UFC fight data.
-It handles data loading, preprocessing, feature engineering, and dataset preparation
-for machine learning. Includes integrated data leakage verification.
-"""
+from __future__ import annotations
 
-import warnings
-import pandas as pd
-import numpy as np
-from typing import List, Tuple, Dict, Optional, Union
-import os
+import logging
 from datetime import datetime
-# Calculate Elo ratings (imported from Elo module)
-from src.data_processing.features.Elo import calculate_elo_ratings
-from src.data_processing.features.helper import DataUtils, OddsUtils, FighterUtils, DateUtils
+from pathlib import Path
+from typing import List, Sequence, Tuple
 
-# Suppress warnings
-warnings.filterwarnings("ignore", category=FutureWarning)
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+import numpy as np
+import pandas as pd
+
+from src.data_processing.features import (
+    DataUtils,
+    FighterUtils,
+    OddsUtils,
+    resolve_data_directory,
+)
+from src.data_processing.features.Elo import calculate_elo_ratings
+
+
+logger = logging.getLogger(__name__)
+
+
+PathLike = Path | str
 
 
 class FightDataProcessor:
-    """Process and transform UFC fight data for analysis."""
+    """Load, clean and enrich fighter round statistics."""
 
-    def __init__(self, data_dir: str = "../../../data", enable_verification: bool = True):
-        """
-        Initialize the processor with data directory.
-
-        Args:
-            data_dir: Directory containing data files
-            enable_verification: Whether to enable leakage verification checks
-        """
-        self.data_dir = data_dir
+    def __init__(self, data_dir: PathLike | None = "../../../data", *, enable_verification: bool = True) -> None:
+        module_path = Path(__file__).resolve()
+        self.data_dir = resolve_data_directory(data_dir, module_path, default_subdir="data")
         self.utils = DataUtils()
-        self.odds_utils = OddsUtils()
+        self.odds_utils = OddsUtils(data_dir=self.data_dir)
         self.fighter_utils = FighterUtils(enable_verification=enable_verification)
         self.enable_verification = enable_verification
 
-    def _load_csv(self, filepath: str) -> pd.DataFrame:
-        """Load a CSV file into a DataFrame."""
-        # Handle forward/backward slashes
-        filepath = filepath.replace('/', os.sep)
+    # ------------------------------------------------------------------
+    # CSV helpers
+    # ------------------------------------------------------------------
 
-        # Create full path
-        full_path = os.path.join(self.data_dir, filepath) if not os.path.isabs(filepath) else filepath
+    def _resolve_path(self, relative_path: PathLike) -> Path:
+        path = Path(relative_path)
+        if not path.is_absolute():
+            path = (self.data_dir / path).resolve()
+        return path
 
-        # Check if file exists
-        if not os.path.exists(full_path):
-            print(f"Warning: File not found at {full_path}")
+    def _load_csv(self, relative_path: PathLike) -> pd.DataFrame:
+        path = self._resolve_path(relative_path)
+        if not path.exists():
+            raise FileNotFoundError(f"CSV file not found at {path}")
+        return pd.read_csv(path)
 
-        return pd.read_csv(full_path)
+    def _save_csv(self, df: pd.DataFrame, relative_path: PathLike) -> Path:
+        path = self._resolve_path(relative_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(path, index=False)
+        logger.info("Saved %s", path)
+        return path
 
-    def _save_csv(self, df: pd.DataFrame, filepath: str) -> None:
-        """Save DataFrame to CSV file."""
-        # Handle forward/backward slashes
-        filepath = filepath.replace('/', os.sep)
+    # ------------------------------------------------------------------
+    # Round aggregation pipeline
+    # ------------------------------------------------------------------
 
-        # Create full path
-        full_path = os.path.join(self.data_dir, filepath) if not os.path.isabs(filepath) else filepath
+    def combine_rounds_stats(self, file_path: PathLike) -> pd.DataFrame:
+        logger.info("Loading and preprocessing round statistics from %s", file_path)
+        rounds = self._load_csv(file_path)
+        fighter_stats = self._load_csv("raw/ufc_fighter_tott.csv")
+        rounds = self.utils.preprocess_data(rounds, fighter_stats)
 
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        numeric_columns = self._get_numeric_columns(rounds)
+        aggregated = self._aggregate_round_statistics(rounds, numeric_columns)
+        metadata = self._build_round_metadata(rounds)
 
-        # Save the file
-        df.to_csv(full_path, index=False)
-        print(f"Saved to {full_path}")
+        combined = aggregated.merge(metadata, on=["id", "fighter"], how="left")
+        combined = self._finalise_fighter_careers(combined, numeric_columns)
+        combined = self.odds_utils.process_odds_data(combined)
+        combined = self._drop_duplicate_columns(combined)
 
-    def combine_rounds_stats(self, file_path: str) -> pd.DataFrame:
-        """
-        Process round-level fight data into fighter career statistics.
-
-        Args:
-            file_path: Path to the UFC stats CSV file
-
-        Returns:
-            DataFrame with processed fighter statistics
-        """
-        print("Loading and preprocessing data...")
-        ufc_stats = self._load_csv(file_path)
-        fighter_stats = self._load_csv('raw/ufc_fighter_tott.csv')
-        ufc_stats = self.utils.preprocess_data(ufc_stats, fighter_stats)
-
-        # Get numeric columns for aggregation
-        numeric_columns = self._get_numeric_columns(ufc_stats)
-
-        print("Aggregating stats...")
-        # Get maximum round information
-        max_round_data = ufc_stats.groupby('id').agg({
-            'last_round': 'max',
-            'time': 'max'
-        }).reset_index()
-
-        # Aggregate numeric stats by fighter and fight
-        aggregated_stats = ufc_stats.groupby(['id', 'fighter'])[numeric_columns].sum().reset_index()
-
-        # Calculate basic rates
-        aggregated_stats = self._calculate_basic_rates(aggregated_stats)
-
-        # Get non-numeric data
-        non_numeric_data = self._extract_non_numeric_data(ufc_stats)
-
-        print("Merging aggregated stats with non-numeric data...")
-        # Merge all components
-        merged_stats = pd.merge(aggregated_stats, non_numeric_data, on=['id', 'fighter'], how='left')
-        merged_stats = pd.merge(merged_stats, max_round_data, on='id', how='left')
-
-        print("Calculating career stats...")
-        # Calculate career-level statistics
-        final_stats = merged_stats.groupby('fighter', group_keys=False).apply(
-            lambda x: self.fighter_utils.aggregate_fighter_stats(x, numeric_columns)
-        )
-
-        # Calculate per-minute stats
-        final_stats = self._calculate_per_minute_stats(final_stats)
-
-        # Calculate additional rates
-        final_stats = self._calculate_additional_rates(final_stats)
-
-        # Filter and process data
-        final_stats = self._filter_unwanted_results(final_stats)
-        final_stats = self._factorize_categorical_columns(final_stats)
-
-        # Process odds data
-        final_stats = self.odds_utils.process_odds_data(final_stats)
-
-        # Clean up columns
-        columns_to_drop = ['new_Open', 'new_Closing Range Start', 'new_Closing Range End', 'new_Movement', 'dob']
-        final_stats = final_stats.drop(columns=columns_to_drop, errors='ignore')
-
-        # Remove duplicate columns
-        duplicate_columns = final_stats.columns[final_stats.columns.duplicated()]
-        final_stats = final_stats.loc[:, ~final_stats.columns.duplicated()]
-        if len(duplicate_columns) > 0:
-            print(f"Dropped duplicate columns: {list(duplicate_columns)}")
-
-        print("Calculating additional stats...")
-        # Sort by fighter and date
-        final_stats = final_stats.sort_values(['fighter', 'fight_date'])
-
-        # Calculate experience, streaks, and time-based stats
-        final_stats = final_stats.groupby('fighter', group_keys=False).apply(
+        combined = combined.sort_values(["fighter", "fight_date"])
+        combined = combined.groupby("fighter", group_keys=False).apply(
             self.fighter_utils.calculate_experience_and_days
         )
-        final_stats = final_stats.groupby('fighter', group_keys=False).apply(
+        combined = combined.groupby("fighter", group_keys=False).apply(
             self.fighter_utils.update_streaks
         )
-        final_stats['days_since_last_fight'] = final_stats['days_since_last_fight'].fillna(0)
-
-        print("Calculating takedowns and knockdowns per 15 minutes...")
-        final_stats = self.fighter_utils.calculate_time_based_stats(final_stats)
-
-        print("Calculating total fights, wins, and losses...")
-        final_stats = final_stats.groupby('fighter', group_keys=False).apply(
+        combined["days_since_last_fight"] = combined["days_since_last_fight"].fillna(0)
+        combined = self.fighter_utils.calculate_time_based_stats(combined)
+        combined = combined.groupby("fighter", group_keys=False).apply(
             self.fighter_utils.calculate_total_fight_stats
         )
 
-        # Print verification summary if enabled
         if self.enable_verification:
             self.fighter_utils.print_verification_summary()
 
-        print("Saving processed data...")
-        self._save_csv(final_stats, 'processed/combined_rounds.csv')
+        self._save_csv(combined, "processed/combined_rounds.csv")
+        return combined
 
-        return final_stats
+    def _aggregate_round_statistics(
+        self, rounds: pd.DataFrame, numeric_columns: Sequence[str]
+    ) -> pd.DataFrame:
+        aggregated = (
+            rounds.groupby(["id", "fighter"], as_index=False)[list(numeric_columns)].sum()
+        )
+        return self._calculate_basic_rates(aggregated)
+
+    def _build_round_metadata(self, rounds: pd.DataFrame) -> pd.DataFrame:
+        max_round_data = (
+            rounds.groupby("id")[["last_round", "time"]].max().reset_index()
+        )
+
+        non_numeric_columns = (
+            rounds.select_dtypes(exclude=[np.number]).columns.difference(["id", "fighter"])
+        )
+        metadata = (
+            rounds.drop_duplicates(subset=["id", "fighter"])[
+                ["id", "fighter", "age", *list(non_numeric_columns)]
+            ]
+        )
+
+        return metadata.merge(max_round_data, on="id", how="left")
+
+    def _finalise_fighter_careers(
+        self, combined: pd.DataFrame, numeric_columns: Sequence[str]
+    ) -> pd.DataFrame:
+        combined = combined.groupby("fighter", group_keys=False).apply(
+            self.fighter_utils.aggregate_fighter_stats, numeric_columns=list(numeric_columns)
+        )
+        combined = self._calculate_per_minute_stats(combined)
+        combined = self._calculate_additional_rates(combined)
+        combined = self._filter_unwanted_results(combined)
+        combined = self._factorize_categorical_columns(combined)
+        return combined
+
+    def _drop_duplicate_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        duplicate_columns = df.columns[df.columns.duplicated()]
+        if len(duplicate_columns) > 0:
+            logger.info("Dropped duplicate columns: %s", sorted(set(duplicate_columns)))
+        return df.loc[:, ~df.columns.duplicated()]
 
     def _get_numeric_columns(self, df: pd.DataFrame) -> List[str]:
-        """Extract relevant numeric columns for aggregation."""
-        numeric_columns = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
-        numeric_columns = [col for col in numeric_columns if col not in ['id', 'last_round', 'age']]
-        if 'time' not in numeric_columns:
-            numeric_columns.append('time')
+        numeric_columns = df.select_dtypes(include=[np.number]).columns.tolist()
+        numeric_columns = [col for col in numeric_columns if col not in {"id", "last_round", "age"}]
+        if "time" not in numeric_columns:
+            numeric_columns.append("time")
         return numeric_columns
 
     def _calculate_basic_rates(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate basic strike and takedown rates."""
-        df['significant_strikes_rate'] = self.utils.safe_divide(
-            df['significant_strikes_landed'],
-            df['significant_strikes_attempted']
+        df["significant_strikes_rate"] = self.utils.safe_divide(
+            df["significant_strikes_landed"], df["significant_strikes_attempted"]
         )
-        df['takedown_rate'] = self.utils.safe_divide(
-            df['takedown_successful'],
-            df['takedown_attempted']
+        df["takedown_rate"] = self.utils.safe_divide(
+            df["takedown_successful"], df["takedown_attempted"]
         )
         return df
 
-    def _extract_non_numeric_data(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Extract non-numeric columns from the DataFrame."""
-        non_numeric_columns = df.select_dtypes(exclude=['int64', 'float64']).columns.difference(
-            ['id', 'fighter']
-        )
-        return df.drop_duplicates(subset=['id', 'fighter'])[
-            ['id', 'fighter', 'age'] + list(non_numeric_columns)
-            ]
-
     def _calculate_per_minute_stats(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate per-minute statistics."""
-        df['fight_duration_minutes'] = df['time'] / 60
-        for col in ['significant_strikes_landed', 'significant_strikes_attempted',
-                    'total_strikes_landed', 'total_strikes_attempted']:
-            df[f'{col}_per_min'] = self.utils.safe_divide(df[col], df['fight_duration_minutes'])
+        df["fight_duration_minutes"] = self.utils.safe_divide(df["time"], 60)
+        per_minute_columns = [
+            "significant_strikes_landed",
+            "significant_strikes_attempted",
+            "total_strikes_landed",
+            "total_strikes_attempted",
+        ]
+        for column in per_minute_columns:
+            df[f"{column}_per_min"] = self.utils.safe_divide(
+                df[column], df["fight_duration_minutes"]
+            )
         return df
 
     def _calculate_additional_rates(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate additional rate statistics."""
         df["total_strikes_rate"] = self.utils.safe_divide(
-            df["total_strikes_landed"],
-            df["total_strikes_attempted"]
+            df["total_strikes_landed"], df["total_strikes_attempted"]
         )
-        df["combined_success_rate"] = (df["takedown_rate"] + df["total_strikes_rate"]) / 2
+        df["combined_success_rate"] = (
+            df["takedown_rate"] + df["total_strikes_rate"]
+        ) / 2
         return df
 
-    def _filter_unwanted_results(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Filter out unwanted fight results."""
-        df = df[~df['winner'].isin(['NC/NC', 'D/D'])]
-        df = df[~df['result'].isin(['DQ', 'DQ ', 'Could Not Continue ', 'Overturned ', 'Other '])]
+    @staticmethod
+    def _filter_unwanted_results(df: pd.DataFrame) -> pd.DataFrame:
+        df = df[~df["winner"].isin(["NC/NC", "D/D"])].copy()
+        df = df[~df["result"].isin(["DQ", "DQ ", "Could Not Continue ", "Overturned ", "Other "])].copy()
         return df
 
     def _factorize_categorical_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Convert categorical columns to numeric codes and print the mapping."""
-        for column in ['result', 'winner', 'scheduled_rounds']:
+        for column in ["result", "winner", "scheduled_rounds"]:
             df[column], unique = pd.factorize(df[column])
             mapping = {index: label for index, label in enumerate(unique)}
-            print(f"Mapping for {column}: {mapping}")
+            logger.debug("Mapping for %s: %s", column, mapping)
         return df
 
-    def combine_fighters_stats(self, file_path: str) -> pd.DataFrame:
-        """
-        Create pairwise fighter statistics for all fights.
+    # ------------------------------------------------------------------
+    # Fighter pairing
+    # ------------------------------------------------------------------
 
-        Args:
-            file_path: Path to the combined rounds CSV file
-
-        Returns:
-            DataFrame with paired fighter statistics
-        """
+    def combine_fighters_stats(self, file_path: PathLike) -> pd.DataFrame:
         df = self._load_csv(file_path)
+        df = df.drop(columns=[col for col in df.columns if "event" in col.lower()])
+        df = df.sort_values(by=["id", "fighter"])
 
-        # Remove event columns and sort
-        df = df.drop(columns=[col for col in df.columns if 'event' in col.lower()])
-        df = df.sort_values(by=['id', 'fighter'])
+        paired_rows: list[pd.Series] = []
+        skipped = 0
+        for _, group in df.groupby("id", sort=False):
+            if len(group) != 2:
+                skipped += 1
+                continue
+            paired_rows.extend(self._create_fight_pair_rows(group))
 
-        # Create mirrored fight pairs
-        fights_dict = {}
-        for _, row in df.iterrows():
-            fight_id = row['id']
-            fights_dict.setdefault(fight_id, []).append(row)
+        if skipped:
+            logger.warning("Skipped %s fights with missing fighter data", skipped)
 
-        # Combine original and mirrored rows
-        combined_fights = []
-        skipped_fights = 0
-
-        for fight_id, fighters in fights_dict.items():
-            if len(fighters) == 2:
-                fighter_1, fighter_2 = fighters
-                # Original pairing (fighter 1 vs fighter 2)
-                original = pd.concat([pd.Series(fighter_1), pd.Series(fighter_2).add_suffix('_b')])
-                # Mirrored pairing (fighter 2 vs fighter 1)
-                mirrored = pd.concat([pd.Series(fighter_2), pd.Series(fighter_1).add_suffix('_b')])
-                combined_fights.extend([original, mirrored])
-            else:
-                skipped_fights += 1
-
-        if skipped_fights > 0:
-            print(f"Skipped {skipped_fights} fights with missing fighter data")
-
-        # Create and process combined DataFrame
-        final_combined_df = pd.DataFrame(combined_fights).reset_index(drop=True)
-
-        # Define columns for processing
+        final_combined_df = pd.DataFrame(paired_rows).reset_index(drop=True)
         final_combined_df = self._calculate_differential_and_ratio_features(final_combined_df)
+        final_combined_df = final_combined_df[~final_combined_df["winner"].isin(["NC", "D"])]
+        final_combined_df["fight_date"] = pd.to_datetime(final_combined_df["fight_date"])
+        final_combined_df = final_combined_df.sort_values(by=["fighter", "fight_date"], ascending=True)
 
-        # Filter and sort
-        final_combined_df = final_combined_df[~final_combined_df['winner'].isin(['NC', 'D'])]
-        final_combined_df['fight_date'] = pd.to_datetime(final_combined_df['fight_date'])
-        final_combined_df = final_combined_df.sort_values(
-            by=['fighter', 'fight_date'],
-            ascending=[True, True]
-        )
-
-        # Save the result
-        self._save_csv(final_combined_df, 'processed/combined_sorted_fighter_stats.csv')
-
+        self._save_csv(final_combined_df, "processed/combined_sorted_fighter_stats.csv")
         return final_combined_df
 
+    def _create_fight_pair_rows(self, group: pd.DataFrame) -> List[pd.Series]:
+        fighters = group.sort_values("fighter").reset_index(drop=True)
+        fighter_a = fighters.iloc[0]
+        fighter_b = fighters.iloc[1]
+        original = pd.concat([fighter_a, fighter_b.add_suffix("_b")])
+        mirrored = pd.concat([fighter_b, fighter_a.add_suffix("_b")])
+        return [original, mirrored]
+
     def _calculate_differential_and_ratio_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Calculate differential and ratio features between fighter pairs."""
-        # Define columns to process
         base_columns = [
-            'knockdowns', 'significant_strikes_landed', 'significant_strikes_attempted',
-            'significant_strikes_rate', 'total_strikes_landed', 'total_strikes_attempted',
-            'takedown_successful', 'takedown_attempted', 'takedown_rate', 'submission_attempt',
-            'reversals', 'head_landed', 'head_attempted', 'body_landed', 'body_attempted',
-            'leg_landed', 'leg_attempted', 'distance_landed', 'distance_attempted',
-            'clinch_landed', 'clinch_attempted', 'ground_landed', 'ground_attempted'
+            "knockdowns",
+            "significant_strikes_landed",
+            "significant_strikes_attempted",
+            "significant_strikes_rate",
+            "total_strikes_landed",
+            "total_strikes_attempted",
+            "takedown_successful",
+            "takedown_attempted",
+            "takedown_rate",
+            "submission_attempt",
+            "reversals",
+            "head_landed",
+            "head_attempted",
+            "body_landed",
+            "body_attempted",
+            "leg_landed",
+            "leg_attempted",
+            "distance_landed",
+            "distance_attempted",
+            "clinch_landed",
+            "clinch_attempted",
+            "ground_landed",
+            "ground_attempted",
         ]
         other_columns = [
-            'open_odds', 'closing_range_start', 'closing_range_end', 'pre_fight_elo',
-            'years_of_experience', 'win_streak', 'loss_streak', 'days_since_last_fight',
-            'significant_strikes_landed_per_min', 'significant_strikes_attempted_per_min',
-            'total_strikes_landed_per_min', 'total_strikes_attempted_per_min', 'takedowns_per_15min',
-            'knockdowns_per_15min', 'total_fights', 'total_wins', 'total_losses',
-            'wins_by_ko', 'losses_by_ko', 'wins_by_submission', 'losses_by_submission', 'wins_by_decision',
-            'losses_by_decision', 'win_rate_by_ko', 'loss_rate_by_ko', 'win_rate_by_submission',
-            'loss_rate_by_submission', 'win_rate_by_decision', 'loss_rate_by_decision'
+            "open_odds",
+            "closing_range_start",
+            "closing_range_end",
+            "pre_fight_elo",
+            "years_of_experience",
+            "win_streak",
+            "loss_streak",
+            "days_since_last_fight",
+            "significant_strikes_landed_per_min",
+            "significant_strikes_attempted_per_min",
+            "total_strikes_landed_per_min",
+            "total_strikes_attempted_per_min",
+            "takedowns_per_15min",
+            "knockdowns_per_15min",
+            "total_fights",
+            "total_wins",
+            "total_losses",
+            "wins_by_ko",
+            "losses_by_ko",
+            "wins_by_submission",
+            "losses_by_submission",
+            "wins_by_decision",
+            "losses_by_decision",
+            "win_rate_by_ko",
+            "loss_rate_by_ko",
+            "win_rate_by_submission",
+            "loss_rate_by_submission",
+            "win_rate_by_decision",
+            "loss_rate_by_decision",
         ]
+
         columns_to_process = (
-                base_columns +
-                [f"{col}_career" for col in base_columns] +
-                [f"{col}_career_avg" for col in base_columns] +
-                other_columns
+            base_columns
+            + [f"{col}_career" for col in base_columns]
+            + [f"{col}_career_avg" for col in base_columns]
+            + other_columns
         )
 
-        # Calculate differential features
         diff_features = {}
-        for col in columns_to_process:
-            if col in df.columns and f"{col}_b" in df.columns:
-                diff_features[f"{col}_diff"] = df[col] - df[f"{col}_b"]
-
-        # Calculate ratio features
         ratio_features = {}
-        for col in columns_to_process:
-            if col in df.columns and f"{col}_b" in df.columns:
-                ratio_features[f"{col}_ratio"] = self.utils.safe_divide(df[col], df[f"{col}_b"])
 
-        # Combine all features
+        for column in columns_to_process:
+            column_b = f"{column}_b"
+            if column in df.columns and column_b in df.columns:
+                diff_features[f"{column}_diff"] = df[column] - df[column_b]
+                ratio_features[f"{column}_ratio"] = self.utils.safe_divide(df[column], df[column_b])
+
         return pd.concat([df, pd.DataFrame(diff_features), pd.DataFrame(ratio_features)], axis=1)
 
-
 class MatchupProcessor:
-    """Process and prepare matchup data for predictive modeling."""
+    """Generate matchup-level features for modelling."""
 
-    def __init__(self, data_dir: str = "../../../data", enable_verification: bool = True):
-        """
-        Initialize the processor with data directory.
-
-        Args:
-            data_dir: Directory containing data files
-            enable_verification: Whether to enable leakage verification checks
-        """
-        self.data_dir = data_dir
-        self.fight_processor = FightDataProcessor(data_dir, enable_verification=enable_verification)
+    def __init__(self, data_dir: PathLike | None = "../../../data", *, enable_verification: bool = True) -> None:
+        self.fight_processor = FightDataProcessor(data_dir=data_dir, enable_verification=enable_verification)
+        self.data_dir = self.fight_processor.data_dir
         self.utils = DataUtils()
-        self.odds_utils = OddsUtils()
+        self.odds_utils = OddsUtils(data_dir=self.data_dir)
         self.enable_verification = enable_verification
-        self.leakage_warnings = []
+        self.leakage_warnings: list[str] = []
 
-    def create_matchup_data(self, file_path: str, tester: int, include_names: bool = False) -> pd.DataFrame:
-        """
-        Create matchup data for predictive modeling.
+    # ------------------------------------------------------------------
+    # Matchup creation
+    # ------------------------------------------------------------------
 
-        Args:
-            file_path: Path to the fighter stats CSV
-            tester: Determines the number of most recent fights to use
-            include_names: Whether to include fighter names in output
-
-        Returns:
-            DataFrame with matchup features
-        """
-        print(f"Creating matchup data with {tester} recent fights...")
+    def create_matchup_data(
+        self,
+        file_path: PathLike,
+        tester: int,
+        include_names: bool = False,
+    ) -> pd.DataFrame:
+        logger.info("Creating matchup data from %s", file_path)
         df = self.fight_processor._load_csv(file_path)
+        df["fight_date"] = pd.to_datetime(df["fight_date"])
+        df = df.sort_values("fight_date")
+
         n_past_fights = 6 - tester
-
-        # Define columns to exclude from features
-        columns_to_exclude = [
-            'fighter', 'id', 'fighter_b', 'fight_date', 'fight_date_b',
-            'result', 'winner', 'weight_class', 'scheduled_rounds',
-            'result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b'
-        ]
-
-        # Define features to include
+        columns_to_exclude = {
+            "fighter",
+            "id",
+            "fighter_b",
+            "fight_date",
+            "fight_date_b",
+            "result",
+            "winner",
+            "weight_class",
+            "scheduled_rounds",
+            "result_b",
+            "winner_b",
+            "weight_class_b",
+            "scheduled_rounds_b",
+        }
         features_to_include = [
-            col for col in df.columns if col not in columns_to_exclude and
-                                         col != 'age' and not col.endswith('_age')
+            column
+            for column in df.columns
+            if column not in columns_to_exclude and column != "age" and not column.endswith("_age")
         ]
+        method_columns = ["winner"]
 
-        # Method columns (target variables)
-        method_columns = ['winner']
-
-        # Process matchups
-        matchup_data = self._process_matchups(
-            df, features_to_include, method_columns, n_past_fights, tester, include_names
+        matchup_rows = self._process_matchups(
+            df,
+            features_to_include,
+            method_columns,
+            n_past_fights,
+            tester,
+            include_names,
         )
 
-        # Create DataFrame
         column_names = self._generate_column_names(
-            features_to_include, method_columns, n_past_fights, tester, include_names
+            features_to_include,
+            method_columns,
+            n_past_fights,
+            tester,
+            include_names,
         )
-        matchup_df = pd.DataFrame(matchup_data, columns=column_names)
-
-        # Drop fight_date column if present
-        matchup_df = matchup_df.drop(columns=['fight_date'], errors='ignore')
-
-        # Standardize column names
-        matchup_df.columns = [self.utils.rename_columns_general(col) for col in matchup_df.columns]
-
-        # Calculate additional differential and ratio columns
+        matchup_df = pd.DataFrame(matchup_rows, columns=column_names)
+        matchup_df = matchup_df.drop(columns=["fight_date"], errors="ignore")
+        matchup_df.columns = [self.utils.rename_columns_general(column) for column in matchup_df.columns]
         matchup_df = self._calculate_matchup_features(matchup_df, features_to_include, n_past_fights)
 
-        # Print leakage summary if enabled
         if self.enable_verification and self.leakage_warnings:
-            print("\n" + "="*60)
-            print("MATCHUP DATA LEAKAGE WARNINGS")
-            print("="*60)
-            for warning in self.leakage_warnings[:10]:  # Show first 10 warnings
-                print(warning)
+            logger.warning("MATCHUP DATA LEAKAGE WARNINGS:")
+            for warning in self.leakage_warnings[:10]:
+                logger.warning("%s", warning)
             if len(self.leakage_warnings) > 10:
-                print(f"... and {len(self.leakage_warnings) - 10} more warnings")
-            print("="*60)
+                logger.warning("... and %s more warnings", len(self.leakage_warnings) - 10)
 
-        # Save output
-        output_filename = f'matchup data/matchup_data_{n_past_fights}_avg{"_name" if include_names else ""}.csv'
+        suffix = "_name" if include_names else ""
+        output_filename = f"matchup data/matchup_data_{n_past_fights}_avg{suffix}.csv"
         self.fight_processor._save_csv(matchup_df, output_filename)
-
         return matchup_df
 
     def _process_matchups(
-            self,
-            df: pd.DataFrame,
-            features_to_include: List[str],
-            method_columns: List[str],
-            n_past_fights: int,
-            tester: int,
-            include_names: bool
+        self,
+        df: pd.DataFrame,
+        features_to_include: Sequence[str],
+        method_columns: Sequence[str],
+        n_past_fights: int,
+        tester: int,
+        include_names: bool,
     ) -> List[List]:
-        """Process each fight to create matchup feature vectors with support for fighters with fewer fights."""
-        matchup_data = []
-        skipped_count = 0
-        processed_count = 0
-        partial_data_count = 0
+        fighter_histories = {
+            fighter: group.sort_values("fight_date")
+            for fighter, group in df.groupby("fighter")
+        }
 
-        # ========== LEAKAGE CHECK #4: Setup ==========
+        matchup_rows: List[List] = []
+        skipped = 0
+        partial = 0
         verification_sample_size = 5
-        verification_counter = 0
-        # ========================================
 
-        # Process each current fight
         for idx, current_fight in df.iterrows():
-            fighter_a_name = current_fight['fighter']
-            fighter_b_name = current_fight['fighter_b']
+            fighter_a = current_fight["fighter"]
+            fighter_b = current_fight["fighter_b"]
 
-            # Get past fights for each fighter
-            fighter_a_df = df[
-                (df['fighter'] == fighter_a_name) &
-                (df['fight_date'] < current_fight['fight_date'])
-                ].sort_values(by='fight_date', ascending=False).head(n_past_fights)
+            history_a = self._recent_fights(
+                fighter_histories.get(fighter_a, pd.DataFrame()),
+                current_fight["fight_date"],
+                n_past_fights,
+            )
+            history_b = self._recent_fights(
+                fighter_histories.get(fighter_b, pd.DataFrame()),
+                current_fight["fight_date"],
+                n_past_fights,
+            )
 
-            fighter_b_df = df[
-                (df['fighter'] == fighter_b_name) &
-                (df['fight_date'] < current_fight['fight_date'])
-                ].sort_values(by='fight_date', ascending=False).head(n_past_fights)
+            if self.enable_verification and idx < verification_sample_size:
+                self._verify_recent_fights(fighter_a, fighter_b, history_a, history_b, current_fight)
 
-            # ========== LEAKAGE CHECK #4: Matchup Data Creation ==========
-            if self.enable_verification and verification_counter < verification_sample_size:
-                # Check Fighter A's data
-                if len(fighter_a_df) > 0:
-                    latest_past_fight_a = fighter_a_df.iloc[0]
-
-                    # Critical check: Is this date BEFORE current fight?
-                    if latest_past_fight_a['fight_date'] >= current_fight['fight_date']:
-                        warning = f"❌ CRITICAL LEAKAGE: Fighter {fighter_a_name} using future fight data!"
-                        self.leakage_warnings.append(warning)
-                        print(warning)
-
-                    # Check if career stats make sense
-                    all_fighter_a_fights = df[df['fighter'] == fighter_a_name].sort_values('fight_date')
-                    actual_fight_number = len(all_fighter_a_fights[
-                        all_fighter_a_fights['fight_date'] <= latest_past_fight_a['fight_date']
-                    ])
-
-                    if 'total_fights' in latest_past_fight_a:
-                        if latest_past_fight_a['total_fights'] > actual_fight_number:
-                            warning = (f"❌ LEAKAGE: {fighter_a_name} has total_fights="
-                                     f"{latest_past_fight_a['total_fights']} but only {actual_fight_number} "
-                                     f"fights up to {latest_past_fight_a['fight_date']}")
-                            self.leakage_warnings.append(warning)
-
-                # Similar check for Fighter B
-                if len(fighter_b_df) > 0:
-                    latest_past_fight_b = fighter_b_df.iloc[0]
-
-                    if latest_past_fight_b['fight_date'] >= current_fight['fight_date']:
-                        warning = f"❌ CRITICAL LEAKAGE: Fighter {fighter_b_name} using future fight data!"
-                        self.leakage_warnings.append(warning)
-                        print(warning)
-
-                verification_counter += 1
-            # ========== END LEAKAGE CHECK #4 ==========
-
-            # Skip if either fighter has no past fights
-            if len(fighter_a_df) == 0 or len(fighter_b_df) == 0:
-                skipped_count += 1
+            if history_a.empty or history_b.empty:
+                skipped += 1
                 continue
 
-            # Flag if we have partial data (at least one fighter with fewer than n_past_fights)
-            has_partial_data = len(fighter_a_df) < n_past_fights or len(fighter_b_df) < n_past_fights
-            if has_partial_data:
-                partial_data_count += 1
+            if len(history_a) < n_past_fights or len(history_b) < n_past_fights:
+                partial += 1
 
-            # Extract features from available past fights
-            fighter_a_features = fighter_a_df[features_to_include].mean().values
-            fighter_b_features = fighter_b_df[features_to_include].mean().values
-
-            # Extract recent fight results
-            # Only extract the available fight results, up to tester number
-            num_a_results = min(len(fighter_a_df), tester)
-            num_b_results = min(len(fighter_b_df), tester)
-
-            results_fighter_a = fighter_a_df[['result', 'winner', 'weight_class', 'scheduled_rounds']].head(
-                num_a_results).values.flatten() if num_a_results > 0 else np.array([])
-
-            results_fighter_b = fighter_b_df[['result_b', 'winner_b', 'weight_class_b', 'scheduled_rounds_b']].head(
-                num_b_results).values.flatten() if num_b_results > 0 else np.array([])
-
-            # Pad results with None values to ensure consistent length
-            results_fighter_a = np.pad(
-                results_fighter_a,
-                (0, tester * 4 - len(results_fighter_a)),
-                'constant',
-                constant_values=np.nan
-            )
-            results_fighter_b = np.pad(
-                results_fighter_b,
-                (0, tester * 4 - len(results_fighter_b)),
-                'constant',
-                constant_values=np.nan
+            matchup_row = self._build_matchup_row(
+                current_fight,
+                history_a,
+                history_b,
+                features_to_include,
+                method_columns,
+                tester,
             )
 
-            # Get target labels
-            labels = current_fight[method_columns].values
+            most_recent_date = max(history_a["fight_date"].max(), history_b["fight_date"].max())
+            current_fight_date = current_fight["fight_date"]
 
-            # Process odds and age data
-            current_fight_odds, current_fight_odds_diff, current_fight_odds_ratio = self._process_fight_odds(
-                current_fight['open_odds'], current_fight['open_odds_b']
-            )
-
-            current_fight_closing_odds, current_fight_closing_odds_diff, current_fight_closing_odds_ratio = self._process_fight_odds(
-                current_fight['closing_range_end'], current_fight['closing_range_end_b']
-            )
-
-            # Calculate the difference between closing and opening odds for each fighter
-            current_fight_closing_open_diff_a = current_fight['closing_range_end'] - current_fight['open_odds']
-            current_fight_closing_open_diff_b = current_fight['closing_range_end_b'] - current_fight['open_odds_b']
-
-            current_fight_ages = [current_fight['age'], current_fight['age_b']]
-            current_fight_age_diff = current_fight['age'] - current_fight['age_b']
-            current_fight_age_ratio = self.utils.safe_divide(current_fight['age'], current_fight['age_b'])
-
-            # Process Elo and other stats
-            elo_stats, elo_ratio = self._process_elo_stats(current_fight)
-            other_stats = self._process_other_stats(current_fight)
-
-            # Combine all features
-            combined_features = np.concatenate([
-                fighter_a_features, fighter_b_features, results_fighter_a, results_fighter_b,
-                current_fight_odds, [current_fight_odds_diff, current_fight_odds_ratio],
-                current_fight_closing_odds, [current_fight_closing_odds_diff, current_fight_closing_odds_ratio,
-                                             current_fight_closing_open_diff_a, current_fight_closing_open_diff_b],
-                current_fight_ages, [current_fight_age_diff, current_fight_age_ratio],
-                elo_stats, [elo_ratio], other_stats
-            ])
-            combined_row = np.concatenate([combined_features, labels])
-
-            # Get most recent date and current fight date
-            most_recent_date_a = fighter_a_df['fight_date'].max() if len(fighter_a_df) > 0 else None
-            most_recent_date_b = fighter_b_df['fight_date'].max() if len(fighter_b_df) > 0 else None
-            most_recent_date = max(most_recent_date_a,
-                                   most_recent_date_b) if most_recent_date_a and most_recent_date_b else most_recent_date_a or most_recent_date_b
-            current_fight_date = current_fight['fight_date']
-
-            # Add to matchup data
-            if not include_names:
-                matchup_data.append([most_recent_date] + combined_row.tolist() + [current_fight_date])
+            if include_names:
+                prefix = [fighter_a, fighter_b, most_recent_date]
             else:
-                matchup_data.append(
-                    [fighter_a_name, fighter_b_name, most_recent_date] + combined_row.tolist() + [current_fight_date]
+                prefix = [most_recent_date]
+
+            matchup_rows.append(prefix + matchup_row + [current_fight_date])
+
+        logger.info(
+            "Processed %s matchups (including %s with partial fight history); skipped %s with no history",
+            len(matchup_rows),
+            partial,
+            skipped,
+        )
+        return matchup_rows
+
+    def _recent_fights(
+        self, history: pd.DataFrame, fight_date: pd.Timestamp, limit: int
+    ) -> pd.DataFrame:
+        if history.empty:
+            return history
+        prior_fights = history[history["fight_date"] < fight_date]
+        if prior_fights.empty:
+            return prior_fights
+        return prior_fights.sort_values("fight_date", ascending=False).head(limit)
+
+    def _verify_recent_fights(
+        self,
+        fighter_a: str,
+        fighter_b: str,
+        history_a: pd.DataFrame,
+        history_b: pd.DataFrame,
+        current_fight: pd.Series,
+    ) -> None:
+        for fighter_name, history in ((fighter_a, history_a), (fighter_b, history_b)):
+            if history.empty:
+                warning = f"❌ CRITICAL LEAKAGE: Fighter {fighter_name} has no past fights before {current_fight['fight_date']}"
+                self.leakage_warnings.append(warning)
+                continue
+            latest_past_fight = history.iloc[0]
+            if latest_past_fight["fight_date"] >= current_fight["fight_date"]:
+                warning = (
+                    f"❌ CRITICAL LEAKAGE: Fighter {fighter_name} uses future fight data"
                 )
+                self.leakage_warnings.append(warning)
 
-            processed_count += 1
+    def _build_matchup_row(
+        self,
+        current_fight: pd.Series,
+        history_a: pd.DataFrame,
+        history_b: pd.DataFrame,
+        features_to_include: Sequence[str],
+        method_columns: Sequence[str],
+        tester: int,
+    ) -> List:
+        fighter_a_features = history_a[features_to_include].mean(numeric_only=True).to_numpy()
+        fighter_b_features = history_b[features_to_include].mean(numeric_only=True).to_numpy()
 
-        print(f"Processed {processed_count} matchups (including {partial_data_count} with partial fight history)")
-        print(f"Skipped {skipped_count} matchups where at least one fighter had no previous fights")
+        results_a = self._extract_recent_results(
+            history_a[["result", "winner", "weight_class", "scheduled_rounds"]],
+            tester,
+        )
+        results_b = self._extract_recent_results(
+            history_b[["result_b", "winner_b", "weight_class_b", "scheduled_rounds_b"]],
+            tester,
+        )
 
-        return matchup_data
+        open_odds, open_diff, open_ratio = self._process_fight_odds(
+            current_fight["open_odds"], current_fight["open_odds_b"]
+        )
+        closing_odds, closing_diff, closing_ratio = self._process_fight_odds(
+            current_fight["closing_range_end"], current_fight["closing_range_end_b"]
+        )
+        closing_open_diff = [
+            current_fight["closing_range_end"] - current_fight["open_odds"],
+            current_fight["closing_range_end_b"] - current_fight["open_odds_b"],
+        ]
+
+        ages = [current_fight["age"], current_fight["age_b"]]
+        age_diff = current_fight["age"] - current_fight["age_b"]
+        age_ratio = self.utils.safe_divide(current_fight["age"], current_fight["age_b"])
+
+        elo_stats, elo_ratio = self._process_elo_stats(current_fight)
+        other_stats = self._process_other_stats(current_fight)
+        labels = current_fight[list(method_columns)].to_list()
+
+        return (
+            list(fighter_a_features)
+            + list(fighter_b_features)
+            + list(results_a)
+            + list(results_b)
+            + list(open_odds)
+            + [open_diff, open_ratio]
+            + list(closing_odds)
+            + [closing_diff, closing_ratio, *closing_open_diff]
+            + ages
+            + [age_diff, age_ratio]
+            + list(elo_stats)
+            + [elo_ratio]
+            + other_stats
+            + labels
+        )
+
+    def _extract_recent_results(self, results: pd.DataFrame, tester: int) -> np.ndarray:
+        available = results.head(min(len(results), tester)).values.flatten()
+        pad_length = tester * results.shape[1] - len(available)
+        if pad_length <= 0:
+            return available
+        return np.pad(available, (0, pad_length), constant_values=np.nan)
 
     def _process_fight_odds(self, odds_a: float, odds_b: float) -> Tuple[List[float], float, float]:
-        """Process betting odds for a fight."""
         return self.odds_utils.process_odds_pair(odds_a, odds_b)
 
     def _process_elo_stats(self, current_fight: pd.Series) -> Tuple[List[float], float]:
-        """Process Elo rating statistics."""
-        elo_a = current_fight['pre_fight_elo']
-        elo_b = current_fight['pre_fight_elo_b']
-        elo_diff = current_fight['pre_fight_elo_diff']
+        elo_a = current_fight["pre_fight_elo"]
+        elo_b = current_fight["pre_fight_elo_b"]
+        elo_diff = current_fight["pre_fight_elo_diff"]
 
-        # Calculate win probabilities based on Elo
         a_win_prob = 1 / (1 + 10 ** ((elo_b - elo_a) / 400))
         b_win_prob = 1 / (1 + 10 ** ((elo_a - elo_b) / 400))
 
         elo_stats = [elo_a, elo_b, elo_diff, a_win_prob, b_win_prob]
         elo_ratio = self.utils.safe_divide(elo_a, elo_b)
-
         return elo_stats, elo_ratio
 
     def _process_other_stats(self, current_fight: pd.Series) -> List[float]:
-        """Process other fighter statistics."""
-        # Win/loss streak stats
-        win_streak_a = current_fight['win_streak']
-        win_streak_b = current_fight['win_streak_b']
-        win_streak_diff = win_streak_a - win_streak_b
-        win_streak_ratio = self.utils.safe_divide(win_streak_a, win_streak_b)
+        win_streak_a = current_fight["win_streak"]
+        win_streak_b = current_fight["win_streak_b"]
+        loss_streak_a = current_fight["loss_streak"]
+        loss_streak_b = current_fight["loss_streak_b"]
 
-        loss_streak_a = current_fight['loss_streak']
-        loss_streak_b = current_fight['loss_streak_b']
-        loss_streak_diff = loss_streak_a - loss_streak_b
-        loss_streak_ratio = self.utils.safe_divide(loss_streak_a, loss_streak_b)
+        exp_a = current_fight["years_of_experience"]
+        exp_b = current_fight["years_of_experience_b"]
 
-        # Experience stats
-        exp_a = current_fight['years_of_experience']
-        exp_b = current_fight['years_of_experience_b']
-        exp_diff = exp_a - exp_b
-        exp_ratio = self.utils.safe_divide(exp_a, exp_b)
-
-        # Last fight stats
-        days_since_a = current_fight['days_since_last_fight']
-        days_since_b = current_fight['days_since_last_fight_b']
-        days_since_diff = days_since_a - days_since_b
-        days_since_ratio = self.utils.safe_divide(days_since_a, days_since_b)
+        days_since_a = current_fight["days_since_last_fight"]
+        days_since_b = current_fight["days_since_last_fight_b"]
 
         return [
-            win_streak_a, win_streak_b, win_streak_diff, win_streak_ratio,
-            loss_streak_a, loss_streak_b, loss_streak_diff, loss_streak_ratio,
-            exp_a, exp_b, exp_diff, exp_ratio,
-            days_since_a, days_since_b, days_since_diff, days_since_ratio
+            win_streak_a,
+            win_streak_b,
+            win_streak_a - win_streak_b,
+            self.utils.safe_divide(win_streak_a, win_streak_b),
+            loss_streak_a,
+            loss_streak_b,
+            loss_streak_a - loss_streak_b,
+            self.utils.safe_divide(loss_streak_a, loss_streak_b),
+            exp_a,
+            exp_b,
+            exp_a - exp_b,
+            self.utils.safe_divide(exp_a, exp_b),
+            days_since_a,
+            days_since_b,
+            days_since_a - days_since_b,
+            self.utils.safe_divide(days_since_a, days_since_b),
         ]
 
     def _generate_column_names(
-            self,
-            features_to_include: List[str],
-            method_columns: List[str],
-            n_past_fights: int,
-            tester: int,
-            include_names: bool
+        self,
+        features_to_include: Sequence[str],
+        method_columns: Sequence[str],
+        n_past_fights: int,
+        tester: int,
+        include_names: bool,
     ) -> List[str]:
-        """Generate column names for the matchup DataFrame."""
-        # Results columns
         results_columns = []
         for i in range(1, tester + 1):
-            results_columns += [
-                f"result_fight_{i}", f"winner_fight_{i}", f"weight_class_fight_{i}", f"scheduled_rounds_fight_{i}",
-                f"result_b_fight_{i}", f"winner_b_fight_{i}", f"weight_class_b_fight_{i}",
-                f"scheduled_rounds_b_fight_{i}"
-            ]
+            results_columns.extend(
+                [
+                    f"result_fight_{i}",
+                    f"winner_fight_{i}",
+                    f"weight_class_fight_{i}",
+                    f"scheduled_rounds_fight_{i}",
+                    f"result_b_fight_{i}",
+                    f"winner_b_fight_{i}",
+                    f"weight_class_b_fight_{i}",
+                    f"scheduled_rounds_b_fight_{i}",
+                ]
+            )
 
-        # New feature columns
         new_columns = [
-            'current_fight_pre_fight_elo_a', 'current_fight_pre_fight_elo_b', 'current_fight_pre_fight_elo_diff',
-            'current_fight_pre_fight_elo_a_win_chance', 'current_fight_pre_fight_elo_b_win_chance',
-            'current_fight_pre_fight_elo_ratio', 'current_fight_win_streak_a', 'current_fight_win_streak_b',
-            'current_fight_win_streak_diff', 'current_fight_win_streak_ratio', 'current_fight_loss_streak_a',
-            'current_fight_loss_streak_b', 'current_fight_loss_streak_diff', 'current_fight_loss_streak_ratio',
-            'current_fight_years_experience_a', 'current_fight_years_experience_b',
-            'current_fight_years_experience_diff',
-            'current_fight_years_experience_ratio', 'current_fight_days_since_last_a',
-            'current_fight_days_since_last_b', 'current_fight_days_since_last_diff',
-            'current_fight_days_since_last_ratio'
+            "current_fight_pre_fight_elo_a",
+            "current_fight_pre_fight_elo_b",
+            "current_fight_pre_fight_elo_diff",
+            "current_fight_pre_fight_elo_a_win_chance",
+            "current_fight_pre_fight_elo_b_win_chance",
+            "current_fight_pre_fight_elo_ratio",
+            "current_fight_win_streak_a",
+            "current_fight_win_streak_b",
+            "current_fight_win_streak_diff",
+            "current_fight_win_streak_ratio",
+            "current_fight_loss_streak_a",
+            "current_fight_loss_streak_b",
+            "current_fight_loss_streak_diff",
+            "current_fight_loss_streak_ratio",
+            "current_fight_years_experience_a",
+            "current_fight_years_experience_b",
+            "current_fight_years_experience_diff",
+            "current_fight_years_experience_ratio",
+            "current_fight_days_since_last_a",
+            "current_fight_days_since_last_b",
+            "current_fight_days_since_last_diff",
+            "current_fight_days_since_last_ratio",
         ]
 
-        # Base columns
-        base_columns = ['fight_date'] if not include_names else ['fighter_a', 'fighter_b', 'fight_date']
-
-        # Feature columns
-        feature_columns = (
-                [f"{feature}_fighter_avg_last_{n_past_fights}" for feature in features_to_include] +
-                [f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include]
-        )
-
-        # Odds and age columns
+        base_columns = ["fight_date"] if not include_names else ["fighter_a", "fighter_b", "fight_date"]
+        feature_columns = [
+            *(f"{feature}_fighter_avg_last_{n_past_fights}" for feature in features_to_include),
+            *(f"{feature}_fighter_b_avg_last_{n_past_fights}" for feature in features_to_include),
+        ]
         odds_age_columns = [
-            'current_fight_open_odds', 'current_fight_open_odds_b', 'current_fight_open_odds_diff',
-            'current_fight_open_odds_ratio',
-            'current_fight_closing_odds', 'current_fight_closing_odds_b', 'current_fight_closing_odds_diff',
-            'current_fight_closing_odds_ratio', 'current_fight_closing_open_diff_a',
-            'current_fight_closing_open_diff_b',
-            'current_fight_age', 'current_fight_age_b', 'current_fight_age_diff', 'current_fight_age_ratio'
+            "current_fight_open_odds",
+            "current_fight_open_odds_b",
+            "current_fight_open_odds_diff",
+            "current_fight_open_odds_ratio",
+            "current_fight_closing_odds",
+            "current_fight_closing_odds_b",
+            "current_fight_closing_odds_diff",
+            "current_fight_closing_odds_ratio",
+            "current_fight_closing_open_diff_a",
+            "current_fight_closing_open_diff_b",
+            "current_fight_age",
+            "current_fight_age_b",
+            "current_fight_age_diff",
+            "current_fight_age_ratio",
         ]
 
-        # Combine all column names
         return (
-                base_columns + feature_columns + results_columns + odds_age_columns + new_columns +
-                [f"{method}" for method in method_columns] + ['current_fight_date']
+            base_columns
+            + feature_columns
+            + results_columns
+            + odds_age_columns
+            + new_columns
+            + [str(method) for method in method_columns]
+            + ["current_fight_date"]
         )
 
     def _calculate_matchup_features(
-            self,
-            df: pd.DataFrame,
-            features_to_include: List[str],
-            n_past_fights: int
+        self,
+        df: pd.DataFrame,
+        features_to_include: Sequence[str],
+        n_past_fights: int,
     ) -> pd.DataFrame:
-        """Calculate additional differential and ratio features."""
         diff_columns = {}
         ratio_columns = {}
 
         for feature in features_to_include:
             col_a = f"{feature}_fighter_a_avg_last_{n_past_fights}"
             col_b = f"{feature}_fighter_b_avg_last_{n_past_fights}"
-
             if col_a in df.columns and col_b in df.columns:
                 diff_columns[f"matchup_{feature}_diff_avg_last_{n_past_fights}"] = df[col_a] - df[col_b]
                 ratio_columns[f"matchup_{feature}_ratio_avg_last_{n_past_fights}"] = self.utils.safe_divide(
@@ -714,346 +697,270 @@ class MatchupProcessor:
 
         return pd.concat([df, pd.DataFrame(diff_columns), pd.DataFrame(ratio_columns)], axis=1)
 
+    # ------------------------------------------------------------------
+    # Temporal splits
+    # ------------------------------------------------------------------
+
     def split_train_val_test(
-            self,
-            matchup_data_file: str,
-            start_date: str,
-            end_date: str,
-            years_back: int
+        self,
+        matchup_data_file: PathLike,
+        start_date: str,
+        end_date: str,
+        years_back: int,
     ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-        """
-        Split matchup data into training, validation, and test sets with random fighter ordering.
-        FIXED: Ensures no date overlap between splits.
-        """
-        print(f"Splitting data from {start_date} to {end_date} with {years_back} years history...")
-        matchup_df = self.fight_processor._load_csv(matchup_data_file)
-
-        # Remove highly correlated features
-        matchup_df, removed_features = self.utils.remove_correlated_features(
-            matchup_df,
-            correlation_threshold=0.95,
-            protected_columns=['current_fight_open_odds_diff', 'current_fight_closing_range_end_b',
-                               'current_fight_closing_odds_diff']
+        logger.info(
+            "Splitting matchup data from %s to %s with %s years lookback",
+            start_date,
+            end_date,
+            years_back,
         )
+        matchup_df = self.fight_processor._load_csv(matchup_data_file)
+        matchup_df["current_fight_date"] = pd.to_datetime(matchup_df["current_fight_date"])
 
-        # Convert dates
-        matchup_df['current_fight_date'] = pd.to_datetime(matchup_df['current_fight_date'])
-        start_date = pd.to_datetime(start_date)
-        end_date = pd.to_datetime(end_date)
-        years_before = start_date - pd.DateOffset(years=years_back)
+        start_dt = pd.to_datetime(start_date)
+        end_dt = pd.to_datetime(end_date)
+        history_start = start_dt - pd.DateOffset(years=years_back)
 
-        # Split data - first extract test set
         test_data = matchup_df[
-            (matchup_df['current_fight_date'] >= start_date) &
-            (matchup_df['current_fight_date'] <= end_date)
-            ].copy()
+            (matchup_df["current_fight_date"] >= start_dt)
+            & (matchup_df["current_fight_date"] <= end_dt)
+        ].copy()
 
-        remaining_data = matchup_df[
-            (matchup_df['current_fight_date'] >= years_before) &
-            (matchup_df['current_fight_date'] < start_date)
-            ].copy()
+        remaining = matchup_df[
+            (matchup_df["current_fight_date"] >= history_start)
+            & (matchup_df["current_fight_date"] < start_dt)
+        ].copy()
 
-        # Sort remaining data by date
-        remaining_data = remaining_data.sort_values(by='current_fight_date', ascending=True)
+        remaining = remaining.sort_values("current_fight_date")
+        unique_dates = sorted(remaining["current_fight_date"].unique())
+        split_index = int(len(unique_dates) * 0.8)
 
-        # ========== FIX: Ensure no date overlap between train and val ==========
-        # Get unique dates in remaining data
-        unique_dates = sorted(remaining_data['current_fight_date'].unique())
-
-        # Find the split point by dates (not rows) to ensure 80/20 split
-        n_dates = len(unique_dates)
-        split_date_idx = int(n_dates * 0.8)
-
-        # Get the cutoff date
-        if split_date_idx < n_dates:
-            cutoff_date = unique_dates[split_date_idx]
-
-            # All fights before cutoff date go to train
-            train_data = remaining_data[remaining_data['current_fight_date'] < cutoff_date].copy()
-
-            # All fights from cutoff date onwards go to validation
-            val_data = remaining_data[remaining_data['current_fight_date'] >= cutoff_date].copy()
+        if split_index < len(unique_dates):
+            cutoff = unique_dates[split_index]
+            train_data = remaining[remaining["current_fight_date"] < cutoff].copy()
+            val_data = remaining[remaining["current_fight_date"] >= cutoff].copy()
+            logger.info("Temporal split cutoff date: %s", cutoff)
         else:
-            # Edge case: if not enough dates, use the last date for split
-            train_data = remaining_data.copy()
-            val_data = pd.DataFrame()  # Empty validation set
+            train_data = remaining.copy()
+            val_data = pd.DataFrame()
+            logger.info("Not enough unique dates for validation split; validation set left empty")
 
-        print(f"Split using cutoff date: {cutoff_date if split_date_idx < n_dates else 'N/A'}")
-        # ========== END FIX ==========
-
-        # Remove duplicate fights with random ordering (no alphabetical enforcement)
         test_data = self._remove_duplicate_fights(test_data, random=False)
+        train_data = train_data.sort_values("current_fight_date")
+        if not val_data.empty:
+            val_data = val_data.sort_values("current_fight_date")
+        test_data = test_data.sort_values(["current_fight_date", "fighter_a"], ascending=[True, True])
 
-        # Sort datasets by date only
-        train_data = train_data.sort_values(by='current_fight_date', ascending=True)
-        val_data = val_data.sort_values(by='current_fight_date', ascending=True) if not val_data.empty else val_data
-        test_data = test_data.sort_values(by=['current_fight_date', 'fighter_a'], ascending=[True, True])
+        removed_features: List[str] = []
+        if not train_data.empty:
+            train_data, removed_features = self.utils.remove_correlated_features(
+                train_data,
+                correlation_threshold=0.95,
+                protected_columns=[
+                    "winner",
+                    "current_fight_open_odds_diff",
+                    "current_fight_closing_range_end_b",
+                    "current_fight_closing_odds_diff",
+                ],
+            )
+            if removed_features:
+                val_data = val_data.drop(columns=removed_features, errors="ignore")
+                test_data = test_data.drop(columns=removed_features, errors="ignore")
+                logger.info("Removed %s correlated features", len(removed_features))
 
-        # ========== LEAKAGE CHECK #5: Train/Test Split ==========
         if self.enable_verification:
-            print("\n" + "=" * 60)
-            print("LEAKAGE CHECK #5: Train/Test Split Verification")
-            print("=" * 60)
+            self._verify_split(train_data, val_data, test_data)
 
-            if not train_data.empty:
-                print(
-                    f"Train date range: {train_data['current_fight_date'].min()} to {train_data['current_fight_date'].max()}")
-            if not val_data.empty:
-                print(
-                    f"Val date range: {val_data['current_fight_date'].min()} to {val_data['current_fight_date'].max()}")
-            if not test_data.empty:
-                print(
-                    f"Test date range: {test_data['current_fight_date'].min()} to {test_data['current_fight_date'].max()}")
+        self.fight_processor._save_csv(train_data, "train_test/train_data.csv")
+        self.fight_processor._save_csv(val_data, "train_test/val_data.csv")
+        self.fight_processor._save_csv(test_data, "train_test/test_data.csv")
 
-            # Check for date overlap
-            overlap_issues = []
-            if not train_data.empty and not val_data.empty:
-                if train_data['current_fight_date'].max() >= val_data['current_fight_date'].min():
-                    overlap_issues.append("Train and validation dates overlap")
-                    print("❌ LEAKAGE: Train and validation dates overlap!")
+        removed_path = self.data_dir / "train_test" / "removed_features.txt"
+        removed_path.parent.mkdir(parents=True, exist_ok=True)
+        removed_path.write_text(",".join(removed_features))
 
-            if not val_data.empty and not test_data.empty:
-                if val_data['current_fight_date'].max() >= test_data['current_fight_date'].min():
-                    overlap_issues.append("Validation and test dates overlap")
-                    print("❌ LEAKAGE: Validation and test dates overlap!")
-
-            if not overlap_issues:
-                print("✅ No date overlap between train/val/test sets")
-
-            # Additional check: verify no duplicate dates across sets
-            if not train_data.empty and not val_data.empty:
-                train_dates = set(train_data['current_fight_date'].unique())
-                val_dates = set(val_data['current_fight_date'].unique())
-                common_dates = train_dates.intersection(val_dates)
-                if common_dates:
-                    print(f"⚠️ WARNING: {len(common_dates)} dates appear in both train and val sets")
-                    print(f"   Common dates: {sorted(list(common_dates))[:5]}")  # Show first 5
-
-            print("=" * 60)
-        # ========== END LEAKAGE CHECK #5 ==========
-
-        # Save datasets
-        self.fight_processor._save_csv(train_data, 'train_test/train_data.csv')
-        self.fight_processor._save_csv(val_data, 'train_test/val_data.csv')
-        self.fight_processor._save_csv(test_data, 'train_test/test_data.csv')
-
-        # Save removed features
-        with open(os.path.join(self.fight_processor.data_dir, 'train_test/removed_features.txt'), 'w') as file:
-            file.write(','.join(removed_features))
-
-        print(
-            f"Train set size: {len(train_data)}, Validation set size: {len(val_data)}, Test set size: {len(test_data)}")
-        print(f"Removed {len(removed_features)} correlated features")
-
+        logger.info(
+            "Train size: %s, Validation size: %s, Test size: %s",
+            len(train_data),
+            len(val_data),
+            len(test_data),
+        )
         return train_data, val_data, test_data
 
-    def _remove_duplicate_fights(self, df: pd.DataFrame, random=True) -> pd.DataFrame:
-        """
-        Remove duplicate fights, with option to enforce alphabetical ordering or keep random duplicates.
+    def _verify_split(
+        self,
+        train_data: pd.DataFrame,
+        val_data: pd.DataFrame,
+        test_data: pd.DataFrame,
+    ) -> None:
+        logger.info("LEAKAGE CHECK #5: Train/Val/Test date ranges")
+        if not train_data.empty:
+            logger.info(
+                "Train date range: %s – %s",
+                train_data["current_fight_date"].min(),
+                train_data["current_fight_date"].max(),
+            )
+        if not val_data.empty:
+            logger.info(
+                "Validation date range: %s – %s",
+                val_data["current_fight_date"].min(),
+                val_data["current_fight_date"].max(),
+            )
+        if not test_data.empty:
+            logger.info(
+                "Test date range: %s – %s",
+                test_data["current_fight_date"].min(),
+                test_data["current_fight_date"].max(),
+            )
 
-        Args:
-            df: DataFrame with fighter data
-            random: If True, keep random duplicates. If False, enforce alphabetical ordering.
+        if not train_data.empty and not val_data.empty:
+            if train_data["current_fight_date"].max() >= val_data["current_fight_date"].min():
+                logger.error("❌ LEAKAGE: Train and validation dates overlap")
+        if not val_data.empty and not test_data.empty:
+            if val_data["current_fight_date"].max() >= test_data["current_fight_date"].min():
+                logger.error("❌ LEAKAGE: Validation and test dates overlap")
 
-        Returns:
-            DataFrame with duplicates removed
-        """
+        if not train_data.empty and not val_data.empty:
+            train_dates = set(train_data["current_fight_date"].unique())
+            val_dates = set(val_data["current_fight_date"].unique())
+            common_dates = sorted(train_dates & val_dates)
+            if common_dates:
+                logger.warning(
+                    "⚠️ %s dates appear in both train and validation sets (e.g. %s)",
+                    len(common_dates),
+                    common_dates[:5],
+                )
+
+    # ------------------------------------------------------------------
+    # Fight de-duplication
+    # ------------------------------------------------------------------
+
+    def _remove_duplicate_fights(self, df: pd.DataFrame, random: bool = True) -> pd.DataFrame:
         df = df.copy()
-
-        # Create a temporary fight_pair column based on sorted fighter names
-        df['fight_pair'] = df.apply(lambda row: tuple(sorted([row['fighter_a'], row['fighter_b']])), axis=1)
+        df["fight_pair"] = df.apply(
+            lambda row: tuple(sorted([row["fighter_a"], row["fighter_b"]])), axis=1
+        )
 
         if random:
-            # Shuffle the data to randomize which duplicate is kept
-            df = df.sample(frac=1, random_state=42)  # Set random_state for reproducibility
-
-            # Drop duplicates based on the fight_pair column
-            df = df.drop_duplicates(subset=['fight_pair'], keep='first')
+            df = df.sample(frac=1, random_state=42)
+            df = df.drop_duplicates(subset=["fight_pair"], keep="first")
         else:
-
-            result_rows = []
-
-            # Process each unique fight pair
-            for pair, group in df.groupby('fight_pair'):
-                # Check if any row has fighter_a alphabetically before fighter_b
-                alpha_rows = group[group['fighter_a'] <= group['fighter_b']]
-
-                if len(alpha_rows) > 0:
-                    # Add the first alphabetically ordered row
-                    result_rows.append(alpha_rows.iloc[0])
+            selected_rows = []
+            for _, group in df.groupby("fight_pair"):
+                alpha_rows = group[group["fighter_a"] <= group["fighter_b"]]
+                if not alpha_rows.empty:
+                    selected_rows.append(alpha_rows.iloc[0])
                 else:
-                    # No alphabetically ordered row exists, take the first row
-                    result_rows.append(group.iloc[0])
+                    selected_rows.append(group.iloc[0])
+            df = pd.DataFrame(selected_rows)
+            df = df.sort_values(by=["current_fight_date", "fighter_a"], ascending=[True, True])
 
-            # Create a new DataFrame from the selected rows
-            df = pd.DataFrame(result_rows)
-
-            # Sort by date and then alphabetically by fighter_a
-            df = df.sort_values(by=['current_fight_date', 'fighter_a'], ascending=[True, True])
-
-        # Drop the temporary fight_pair column and reset the index
-        return df.drop(columns=['fight_pair']).reset_index(drop=True)
+        return df.drop(columns=["fight_pair"]).reset_index(drop=True)
 
 
 # =============================================================================
 # Comprehensive Data Integrity Verification
 # =============================================================================
 
-def verify_data_integrity(data_dir: str = "../../../data", sample_size: int = 5):
-    """
-    Comprehensive data leakage verification
-    Run this after your data processing pipeline
+def verify_data_integrity(data_dir: PathLike = "../../../data", sample_size: int = 5) -> bool:
+    logger.info("Running comprehensive data leakage verification")
+    data_dir_path = resolve_data_directory(data_dir, Path(__file__).resolve(), default_subdir="data")
 
-    Args:
-        data_dir: Base data directory
-        sample_size: Number of samples to check in detail
-    """
-    print("\n" + "="*80)
-    print("COMPREHENSIVE DATA LEAKAGE VERIFICATION")
-    print("="*80)
-
-    issues_found = []
-
+    issues_found: List[str] = []
     try:
-        # Load the processed data
-        combined_rounds = pd.read_csv(f"{data_dir}/processed/combined_rounds.csv")
-        combined_sorted = pd.read_csv(f"{data_dir}/processed/combined_sorted_fighter_stats.csv")
+        combined_rounds = pd.read_csv(data_dir_path / "processed/combined_rounds.csv")
 
-        # Test 1: Check a specific fighter's progression
-        test_fighter = combined_rounds['fighter'].value_counts().index[0]  # Most common fighter
-        fighter_data = combined_rounds[combined_rounds['fighter'] == test_fighter].sort_values('fight_date')
+        test_fighter = combined_rounds["fighter"].value_counts().index[0]
+        fighter_data = combined_rounds[combined_rounds["fighter"] == test_fighter].sort_values("fight_date")
+        logger.info("Fighter %s has %s fights", test_fighter, len(fighter_data))
 
-        print(f"\n1. Checking fighter: {test_fighter}")
-        print(f"   Total fights in dataset: {len(fighter_data)}")
+        for idx in range(min(3, len(fighter_data))):
+            fight = fighter_data.iloc[idx]
+            expected_total = idx + 1
+            if fight.get("total_fights", expected_total) != expected_total:
+                issues_found.append(f"Fighter {test_fighter}: total_fights mismatch in fight {idx + 1}")
 
-        # Check first 3 fights
-        for i in range(min(3, len(fighter_data))):
-            fight = fighter_data.iloc[i]
-            print(f"\n   Fight {i+1} ({fight['fight_date']}):")
-            print(f"     total_fights: {fight.get('total_fights', 'N/A')} (expected: {i+1})")
-            print(f"     total_wins: {fight.get('total_wins', 'N/A')}")
-            print(f"     win_streak: {fight.get('win_streak', 'N/A')}")
-
-            # Verify
-            if fight.get('total_fights', 0) != i+1:
-                issues_found.append(f"Fighter {test_fighter}: total_fights mismatch in fight {i+1}")
-                print(f"     ❌ LEAKAGE DETECTED!")
-
-        # Test 2: Check date ordering
-        print("\n2. Checking date ordering in career stats:")
         date_issues = 0
-        for fighter, fighter_group in combined_rounds.groupby('fighter'):
-            dates = pd.to_datetime(fighter_group['fight_date']).values
-            if not all(dates[i] <= dates[i+1] for i in range(len(dates)-1)):
+        for fighter, group in combined_rounds.groupby("fighter"):
+            dates = pd.to_datetime(group["fight_date"]).sort_values()
+            if not dates.is_monotonic_increasing:
                 date_issues += 1
-                if date_issues <= 3:  # Show first 3 issues
-                    print(f"   ❌ LEAKAGE: Fighter {fighter} has unordered dates!")
+                if date_issues <= 3:
                     issues_found.append(f"Fighter {fighter}: unordered dates")
+        if date_issues:
+            logger.warning("Detected %s fighters with unordered dates", date_issues)
 
-        if date_issues > 3:
-            print(f"   ... and {date_issues - 3} more fighters with date issues")
-        elif date_issues == 0:
-            print("   ✅ All fighters have properly ordered dates")
+        train_data = pd.read_csv(data_dir_path / "train_test/train_data.csv")
+        val_data = pd.read_csv(data_dir_path / "train_test/val_data.csv")
+        test_data = pd.read_csv(data_dir_path / "train_test/test_data.csv")
 
-        # Test 3: Check train/test split
-        train_data = pd.read_csv(f"{data_dir}/train_test/train_data.csv")
-        val_data = pd.read_csv(f"{data_dir}/train_test/val_data.csv")
-        test_data = pd.read_csv(f"{data_dir}/train_test/test_data.csv")
+        train_end = train_data["current_fight_date"].max()
+        val_start = val_data["current_fight_date"].min()
+        val_end = val_data["current_fight_date"].max()
+        test_start = test_data["current_fight_date"].min()
 
-        print("\n3. Checking train/val/test split:")
-        print(f"   Train: {train_data['current_fight_date'].min()} to {train_data['current_fight_date'].max()}")
-        print(f"   Val:   {val_data['current_fight_date'].min()} to {val_data['current_fight_date'].max()}")
-        print(f"   Test:  {test_data['current_fight_date'].min()} to {test_data['current_fight_date'].max()}")
+        if pd.to_datetime(train_end) >= pd.to_datetime(val_start):
+            issues_found.append("Train/validation date overlap")
+        if pd.to_datetime(val_end) >= pd.to_datetime(test_start):
+            issues_found.append("Validation/test date overlap")
 
-        if train_data['current_fight_date'].max() >= val_data['current_fight_date'].min():
-            print("   ❌ LEAKAGE: Train and validation dates overlap!")
-            issues_found.append("Train/val date overlap")
-        elif val_data['current_fight_date'].max() >= test_data['current_fight_date'].min():
-            print("   ❌ LEAKAGE: Validation and test dates overlap!")
-            issues_found.append("Val/test date overlap")
-        else:
-            print("   ✅ No date overlap between train/val/test")
+        for idx in range(min(sample_size, len(test_data))):
+            row = test_data.iloc[idx]
+            if "total_fights" in row and pd.isna(row.get("total_fights")):
+                issues_found.append(f"Sample {idx + 1}: missing total_fights")
 
-        # Test 4: Check for future data in features
-        print("\n4. Checking for future data in features (sample):")
-        for i in range(min(sample_size, len(test_data))):
-            row = test_data.iloc[i]
-            if 'total_fights' in row:
-                # This is a simplified check - you'd need more context to verify thoroughly
-                print(f"   Sample {i+1}: Fighter A has {row.get('total_fights_fighter_a_avg_last_3', 'N/A')} total fights")
-
-    except FileNotFoundError as e:
-        print(f"\n❌ Error: Required file not found - {e}")
-        issues_found.append(f"Missing file: {e}")
-    except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
-        issues_found.append(f"Unexpected error: {e}")
-
-    # Final summary
-    print("\n" + "="*80)
-    print("VERIFICATION SUMMARY")
-    print("="*80)
+    except FileNotFoundError as exc:
+        issues_found.append(f"Missing file: {exc}")
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception("Unexpected error during verification")
+        issues_found.append(f"Unexpected error: {exc}")
 
     if not issues_found:
-        print("✅ ALL CHECKS PASSED - No data leakage detected!")
+        logger.info("✅ Data integrity checks passed")
     else:
-        print(f"❌ ISSUES FOUND ({len(issues_found)} total):")
-        for issue in issues_found[:10]:  # Show first 10 issues
-            print(f"   - {issue}")
+        logger.error("❌ Data integrity issues detected (%s)", len(issues_found))
+        for issue in issues_found[:10]:
+            logger.error(" - %s", issue)
         if len(issues_found) > 10:
-            print(f"   ... and {len(issues_found) - 10} more issues")
+            logger.error("   ... and %s more issues", len(issues_found) - 10)
 
-    print("="*80)
-
-    return len(issues_found) == 0
+    return not issues_found
 
 
 # =============================================================================
 # Main Execution
 # =============================================================================
 
-def main():
-    """Main execution function."""
-    # Initialize processors with verification enabled
+def main() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+
     fight_processor = FightDataProcessor(enable_verification=True)
-    matchup_processor = MatchupProcessor(enable_verification=True)
+    matchup_processor = MatchupProcessor(data_dir=str(fight_processor.data_dir), enable_verification=True)
 
-    # Uncomment the functions you want to run
-    print("Starting UFC data processing pipeline with leakage verification...")
+    logger.info("Starting UFC data processing pipeline with leakage verification")
 
-    # Process fight data
-    fight_processor.combine_rounds_stats('processed/ufc_fight_processed.csv')
+    fight_processor.combine_rounds_stats("processed/ufc_fight_processed.csv")
+    combined_rounds_path = fight_processor.data_dir / "processed" / "combined_rounds.csv"
+    calculate_elo_ratings(str(combined_rounds_path))
+    fight_processor.combine_fighters_stats("processed/combined_rounds.csv")
 
-    # Calculate Elo ratings
-    calculate_elo_ratings("C:/Users/William/PycharmProjects/UFC/data/processed/combined_rounds.csv")
-
-    # Combine fighter stats
-    fight_processor.combine_fighters_stats('processed/combined_rounds.csv')
-
-    # Create matchup data
-    matchup_processor.create_matchup_data('processed/combined_sorted_fighter_stats.csv', 3, True)
-
-    # Split into train/val/test
+    matchup_processor.create_matchup_data("processed/combined_sorted_fighter_stats.csv", tester=3, include_names=True)
     matchup_processor.split_train_val_test(
-        'matchup data/matchup_data_3_avg_name.csv',
-        '2025-01-01',
-        '2025-12-31',
-        10
+        "matchup data/matchup_data_3_avg_name.csv",
+        "2025-01-01",
+        "2025-12-31",
+        10,
     )
 
-    # Run comprehensive verification
-    print("\nRunning comprehensive data integrity check...")
-    integrity_passed = verify_data_integrity()
-
+    integrity_passed = verify_data_integrity(fight_processor.data_dir)
     if integrity_passed:
-        print("\n✅ Data processing completed successfully with no leakage detected!")
+        logger.info("✅ Data processing completed successfully with no leakage detected")
     else:
-        print("\n⚠️ Data processing completed but potential leakage issues were detected.")
-        print("Please review the verification output above.")
+        logger.warning("⚠️ Potential leakage issues detected – review the log output")
 
 
 if __name__ == "__main__":
     start_time = datetime.now()
     main()
     end_time = datetime.now()
-    print(f"\nTotal runtime: {end_time - start_time}")
+    logger.info("Total runtime: %s", end_time - start_time)
