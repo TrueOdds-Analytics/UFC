@@ -7,6 +7,7 @@ for machine learning. Includes integrated data leakage verification.
 """
 
 import warnings
+from pathlib import Path
 import pandas as pd
 import numpy as np
 from typing import List, Tuple, Dict, Optional, Union
@@ -32,40 +33,53 @@ class FightDataProcessor:
             data_dir: Directory containing data files
             enable_verification: Whether to enable leakage verification checks
         """
-        self.data_dir = data_dir
+        module_dir = Path(__file__).resolve().parent
+        repo_root = module_dir.parents[2]
+
+        candidate_dir = Path(data_dir).expanduser()
+        if not candidate_dir.is_absolute():
+            module_relative = (module_dir / candidate_dir).resolve(strict=False)
+            repo_relative = (repo_root / candidate_dir).resolve(strict=False)
+            if module_relative.exists():
+                candidate_dir = module_relative
+            elif repo_relative.exists():
+                candidate_dir = repo_relative
+            else:
+                candidate_dir = module_relative
+
+        self.data_dir = candidate_dir
         self.utils = DataUtils()
-        self.odds_utils = OddsUtils()
+        self.odds_utils = OddsUtils(data_dir=self.data_dir)
         self.fighter_utils = FighterUtils(enable_verification=enable_verification)
         self.enable_verification = enable_verification
 
     def _load_csv(self, filepath: str) -> pd.DataFrame:
         """Load a CSV file into a DataFrame."""
         # Handle forward/backward slashes
-        filepath = filepath.replace('/', os.sep)
+        filepath = Path(filepath.replace('/', os.sep))
 
-        # Create full path
-        full_path = os.path.join(self.data_dir, filepath) if not os.path.isabs(filepath) else filepath
+        if not filepath.is_absolute():
+            filepath = self.data_dir / filepath
 
-        # Check if file exists
-        if not os.path.exists(full_path):
-            print(f"Warning: File not found at {full_path}")
+        filepath = filepath.expanduser()
+        if not filepath.exists():
+            raise FileNotFoundError(f"CSV file not found at {filepath}")
 
-        return pd.read_csv(full_path)
+        return pd.read_csv(filepath)
 
     def _save_csv(self, df: pd.DataFrame, filepath: str) -> None:
         """Save DataFrame to CSV file."""
         # Handle forward/backward slashes
-        filepath = filepath.replace('/', os.sep)
+        filepath = Path(filepath.replace('/', os.sep))
 
-        # Create full path
-        full_path = os.path.join(self.data_dir, filepath) if not os.path.isabs(filepath) else filepath
+        if not filepath.is_absolute():
+            filepath = self.data_dir / filepath
 
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        filepath = filepath.expanduser()
+        filepath.parent.mkdir(parents=True, exist_ok=True)
 
-        # Save the file
-        df.to_csv(full_path, index=False)
-        print(f"Saved to {full_path}")
+        df.to_csv(filepath, index=False)
+        print(f"Saved to {filepath}")
 
     def combine_rounds_stats(self, file_path: str) -> pd.DataFrame:
         """
@@ -339,10 +353,10 @@ class MatchupProcessor:
             data_dir: Directory containing data files
             enable_verification: Whether to enable leakage verification checks
         """
-        self.data_dir = data_dir
         self.fight_processor = FightDataProcessor(data_dir, enable_verification=enable_verification)
+        self.data_dir = self.fight_processor.data_dir
         self.utils = DataUtils()
-        self.odds_utils = OddsUtils()
+        self.odds_utils = OddsUtils(data_dir=self.data_dir)
         self.enable_verification = enable_verification
         self.leakage_warnings = []
 
@@ -1016,7 +1030,7 @@ def main():
     """Main execution function."""
     # Initialize processors with verification enabled
     fight_processor = FightDataProcessor(enable_verification=True)
-    matchup_processor = MatchupProcessor(enable_verification=True)
+    matchup_processor = MatchupProcessor(data_dir=str(fight_processor.data_dir), enable_verification=True)
 
     # Uncomment the functions you want to run
     print("Starting UFC data processing pipeline with leakage verification...")
@@ -1025,7 +1039,8 @@ def main():
     fight_processor.combine_rounds_stats('processed/ufc_fight_processed.csv')
 
     # Calculate Elo ratings
-    calculate_elo_ratings("C:/Users/William/PycharmProjects/UFC/data/processed/combined_rounds.csv")
+    combined_rounds_path = fight_processor.data_dir / 'processed' / 'combined_rounds.csv'
+    calculate_elo_ratings(str(combined_rounds_path))
 
     # Combine fighter stats
     fight_processor.combine_fighters_stats('processed/combined_rounds.csv')
