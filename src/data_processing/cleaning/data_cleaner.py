@@ -742,14 +742,6 @@ class MatchupProcessor:
         print(f"Splitting data from {start_date} to {end_date} with {years_back} years history...")
         matchup_df = self.fight_processor._load_csv(matchup_data_file)
 
-        # Remove highly correlated features
-        matchup_df, removed_features = self.utils.remove_correlated_features(
-            matchup_df,
-            correlation_threshold=0.95,
-            protected_columns=['current_fight_open_odds_diff', 'current_fight_closing_range_end_b',
-                               'current_fight_closing_odds_diff']
-        )
-
         # Convert dates
         matchup_df['current_fight_date'] = pd.to_datetime(matchup_df['current_fight_date'])
         start_date = pd.to_datetime(start_date)
@@ -802,6 +794,24 @@ class MatchupProcessor:
         train_data = train_data.sort_values(by='current_fight_date', ascending=True)
         val_data = val_data.sort_values(by='current_fight_date', ascending=True) if not val_data.empty else val_data
         test_data = test_data.sort_values(by=['current_fight_date', 'fighter_a'], ascending=[True, True])
+
+        # Remove highly correlated features **after** the temporal split to avoid leakage
+        removed_features: List[str] = []
+        if not train_data.empty:
+            train_data, removed_features = self.utils.remove_correlated_features(
+                train_data,
+                correlation_threshold=0.95,
+                protected_columns=[
+                    'winner',
+                    'current_fight_open_odds_diff',
+                    'current_fight_closing_range_end_b',
+                    'current_fight_closing_odds_diff'
+                ]
+            )
+
+            if removed_features:
+                val_data = val_data.drop(columns=removed_features, errors='ignore')
+                test_data = test_data.drop(columns=removed_features, errors='ignore')
 
         # ========== LEAKAGE CHECK #5: Train/Test Split ==========
         if self.enable_verification:
