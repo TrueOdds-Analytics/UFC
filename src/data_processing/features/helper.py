@@ -7,6 +7,7 @@ Includes integrated data leakage verification checks.
 
 import numpy as np
 import pandas as pd
+from pathlib import Path
 from typing import List, Tuple, Dict, Optional, Union, Any
 
 
@@ -166,6 +167,52 @@ class DataUtils:
 class OddsUtils:
     """Utilities for processing betting odds."""
 
+    def __init__(
+        self,
+        data_dir: Optional[Union[str, Path]] = None,
+        odds_filename: Union[str, Path] = "processed/cleaned_fight_odds.csv"
+    ) -> None:
+        """Initialise the utility with an optional data directory and odds filename."""
+        module_dir = Path(__file__).resolve().parent
+        repo_root = module_dir.parents[2]
+
+        if data_dir is None:
+            base_dir = repo_root / "data"
+        else:
+            base_dir = Path(data_dir).expanduser()
+            if not base_dir.is_absolute():
+                module_relative = (module_dir / base_dir).resolve(strict=False)
+                repo_relative = (repo_root / base_dir).resolve(strict=False)
+                if module_relative.exists():
+                    base_dir = module_relative
+                elif repo_relative.exists():
+                    base_dir = repo_relative
+                else:
+                    base_dir = module_relative
+
+        self._data_dir = base_dir
+        self._odds_filename = Path(odds_filename)
+
+    def _resolve_odds_path(
+        self, odds_filepath: Optional[Union[str, Path]] = None
+    ) -> Path:
+        """Resolve the odds data path to an absolute location and validate it exists."""
+        if odds_filepath is not None:
+            candidate = Path(odds_filepath).expanduser()
+            if not candidate.is_absolute():
+                candidate = self._data_dir / candidate
+        else:
+            candidate = self._data_dir / self._odds_filename
+
+        candidate = candidate.expanduser()
+        if not candidate.exists():
+            raise FileNotFoundError(
+                f"Odds data file not found at {candidate}. "
+                "Provide a valid path or ensure the data directory is correct."
+            )
+
+        return candidate
+
     @staticmethod
     def round_to_nearest_1(x: float) -> int:
         """Round to nearest integer."""
@@ -236,12 +283,17 @@ class OddsUtils:
 
         return odds_list, odds_diff, odds_ratio
 
-    def process_odds_data(self, final_stats: pd.DataFrame) -> pd.DataFrame:
+    def process_odds_data(
+        self,
+        final_stats: pd.DataFrame,
+        odds_filepath: Optional[Union[str, Path]] = None
+    ) -> pd.DataFrame:
         """
         Process and merge betting odds data with fight statistics.
 
         Args:
             final_stats: DataFrame containing fight statistics
+            odds_filepath: Optional explicit path to the odds CSV file
 
         Returns:
             DataFrame with merged odds data
@@ -250,7 +302,11 @@ class OddsUtils:
         final_stats = final_stats.copy().loc[:, ~final_stats.columns.duplicated()]
 
         # Read odds data
-        odds_df = pd.read_csv("C:/Users/William/PycharmProjects/UFC/data/processed/cleaned_fight_odds.csv")
+        odds_path = self._resolve_odds_path(odds_filepath)
+        try:
+            odds_df = pd.read_csv(odds_path)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load odds data from {odds_path}") from exc
 
         # Standardize fighter names
         final_stats['fighter'] = final_stats['fighter'].str.lower().str.strip()
