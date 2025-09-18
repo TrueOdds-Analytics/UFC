@@ -26,8 +26,8 @@ warnings.filterwarnings('ignore')
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = PROJECT_ROOT / 'data' / 'train_test'
 SAVE_DIR = PROJECT_ROOT / 'saved_models' / 'xgboost' / 'trials'
-VAL_ACC_SAVE_THRESHOLD = 0.60  # save models at/above this validation accuracy
-LOSS_GAP_THRESHOLD = 0.05      # only save when |train_loss - val_loss| <= threshold
+ACC_THRESHOLD = 0.60     # validation accuracy threshold for saving
+LOSS_GAP_THRESHOLD = 0.05  # train_loss - val_loss must be <= this value
 
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 TRIAL_PLOTS_DIR = SAVE_DIR / 'trial_plots'
@@ -110,10 +110,12 @@ def plot_trial_metrics(train_logloss_curves, val_logloss_curves,
 
     for idx, curve in enumerate(train_logloss_curves):
         rounds = range(1, len(curve) + 1)
-        axes[0].plot(rounds, curve, color='tab:blue', alpha=0.4, label='Train Logloss' if idx == 0 else None)
+        axes[0].plot(rounds, curve, color='tab:blue', alpha=0.4,
+                     label='Train Logloss' if idx == 0 else None)
     for idx, curve in enumerate(val_logloss_curves):
         rounds = range(1, len(curve) + 1)
-        axes[0].plot(rounds, curve, color='tab:orange', alpha=0.7, label='Validation Logloss' if idx == 0 else None)
+        axes[0].plot(rounds, curve, color='tab:orange', alpha=0.7,
+                     label='Validation Logloss' if idx == 0 else None)
     axes[0].set_xlabel('Boosting Rounds')
     axes[0].set_ylabel('Log Loss')
     axes[0].set_title('Loss Curves')
@@ -122,11 +124,13 @@ def plot_trial_metrics(train_logloss_curves, val_logloss_curves,
     for idx, curve in enumerate(train_error_curves):
         rounds = range(1, len(curve) + 1)
         train_acc = [1.0 - value for value in curve]
-        axes[1].plot(rounds, train_acc, color='tab:green', alpha=0.4, label='Train Accuracy' if idx == 0 else None)
+        axes[1].plot(rounds, train_acc, color='tab:green', alpha=0.4,
+                     label='Train Accuracy' if idx == 0 else None)
     for idx, curve in enumerate(val_error_curves):
         rounds = range(1, len(curve) + 1)
         val_acc = [1.0 - value for value in curve]
-        axes[1].plot(rounds, val_acc, color='tab:red', alpha=0.7, label='Validation Accuracy' if idx == 0 else None)
+        axes[1].plot(rounds, val_acc, color='tab:red', alpha=0.7,
+                     label='Validation Accuracy' if idx == 0 else None)
     axes[1].set_xlabel('Boosting Rounds')
     axes[1].set_ylabel('Accuracy')
     axes[1].set_title('Accuracy Curves')
@@ -269,16 +273,10 @@ def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save
         loss_gap = train_loss_at_best - val_loss_at_best
 
         # refit on full outer-train with best n_estimators (no early stopping)
-        best_n_trees = (
-            int(best_iteration) + 1
-            if best_iteration is not None
-            else final_model.get_params().get('n_estimators', 800)
-        )
-        best_n_per_fold.append(int(best_n_trees))
+        best_n = metric_index + 1 if best_iteration is not None else final_model.get_params().get('n_estimators', 800)
+        best_n_per_fold.append(int(best_n))
 
-        final_model = xgb.XGBClassifier(
-            **{**final_params, 'n_estimators': int(best_n_trees), 'early_stopping_rounds': None}
-        )
+        final_model = xgb.XGBClassifier(**{**final_params, 'n_estimators': int(best_n), 'early_stopping_rounds': None})
         final_model.fit(X_tr, y_tr, verbose=False)
 
         # evaluate on outer test
@@ -300,7 +298,7 @@ def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save
         # optionally save good outer-fold models
         if (
             save_models
-            and val_acc_at_best >= VAL_ACC_SAVE_THRESHOLD
+            and val_acc_at_best >= ACC_THRESHOLD
             and loss_gap <= LOSS_GAP_THRESHOLD
         ):
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -309,7 +307,7 @@ def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save
             metadata_path = SAVE_DIR / f"nested_fold{fold_idx}_metadata_{timestamp}.json"
             with metadata_path.open('w') as f:
                 json.dump({
-                    'params': {**final_params, 'n_estimators': int(best_n_trees), 'early_stopping_rounds': None},
+                    'params': {**final_params, 'n_estimators': int(best_n), 'early_stopping_rounds': None},
                     'metrics': {
                         'train_holdout_acc': float(train_acc_at_best),
                         'train_holdout_loss': float(train_loss_at_best),
