@@ -12,20 +12,35 @@ import json
 from datetime import datetime
 import warnings
 import os
+from pathlib import Path
+
+import matplotlib
+
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 
 warnings.filterwarnings('ignore')
 
-ACC_THRESHOLD = 0.60  # save models at/above this outer-fold accuracy
-SAVE_DIR = '../../../saved_models/xgboost/trials/'
-os.makedirs(SAVE_DIR, exist_ok=True)
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATA_DIR = PROJECT_ROOT / 'data' / 'train_test'
+SAVE_DIR = PROJECT_ROOT / 'saved_models' / 'xgboost' / 'trials'
+VAL_ACC_SAVE_THRESHOLD = 0.60  # save models at/above this validation accuracy
+LOSS_GAP_THRESHOLD = 0.05      # only save when |train_loss - val_loss| <= threshold
+
+SAVE_DIR.mkdir(parents=True, exist_ok=True)
+TRIAL_PLOTS_DIR = SAVE_DIR / 'trial_plots'
+TRIAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def load_data(train_path='../../../data/train_test/train_data.csv',
-              val_path='../../../data/train_test/val_data.csv'):
+def load_data(train_path: str | os.PathLike | None = None,
+              val_path: str | os.PathLike | None = None):
     """Load train/val and cast string columns to pandas 'category' (aligned)."""
     from pandas.api.types import CategoricalDtype
+
+    train_path = Path(train_path) if train_path is not None else DATA_DIR / 'train_data.csv'
+    val_path = Path(val_path) if val_path is not None else DATA_DIR / 'val_data.csv'
 
     train_df = pd.read_csv(train_path)
     val_df   = pd.read_csv(val_path)
@@ -52,10 +67,13 @@ def load_data(train_path='../../../data/train_test/train_data.csv',
     return X_train, X_val, y_train, y_val
 
 
-def load_data_for_cv(train_path='../../../data/train_test/train_data.csv',
-                     val_path='../../../data/train_test/val_data.csv'):
+def load_data_for_cv(train_path: str | os.PathLike | None = None,
+                     val_path: str | os.PathLike | None = None):
     """Combine train+val for nested CV and cast strings to pandas 'category'."""
     from pandas.api.types import CategoricalDtype
+
+    train_path = Path(train_path) if train_path is not None else DATA_DIR / 'train_data.csv'
+    val_path = Path(val_path) if val_path is not None else DATA_DIR / 'val_data.csv'
 
     train_df = pd.read_csv(train_path)
     val_df   = pd.read_csv(val_path)
@@ -77,6 +95,54 @@ def load_data_for_cv(train_path='../../../data/train_test/train_data.csv',
     if obj_cols:
         print(f"Categorical cols: {obj_cols}")
     return X, y
+
+
+def plot_trial_metrics(train_logloss_curves, val_logloss_curves,
+                       train_error_curves, val_error_curves,
+                       plot_path, trial_number, outer_fold):
+    """Average across inner folds and save train/validation accuracy & loss plots."""
+
+    if not train_logloss_curves or not val_logloss_curves:
+        return
+
+    max_len = max(len(curve) for curve in train_logloss_curves + val_logloss_curves)
+
+    def _mean_curve(curves, transform=None):
+        arr = np.full((len(curves), max_len), np.nan, dtype=float)
+        for idx, curve in enumerate(curves):
+            values = np.asarray(curve, dtype=float)
+            if transform is not None:
+                values = transform(values)
+            arr[idx, :len(values)] = values
+        return np.nanmean(arr, axis=0)
+
+    mean_train_loss = _mean_curve(train_logloss_curves)
+    mean_val_loss = _mean_curve(val_logloss_curves)
+    mean_train_acc = _mean_curve(train_error_curves, transform=lambda x: 1.0 - x)
+    mean_val_acc = _mean_curve(val_error_curves, transform=lambda x: 1.0 - x)
+
+    iterations = np.arange(1, max_len + 1)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle(f"Optuna Trial {trial_number} - Outer Fold {outer_fold}")
+
+    axes[0].plot(iterations, mean_train_loss, label='Train Logloss')
+    axes[0].plot(iterations, mean_val_loss, label='Validation Logloss')
+    axes[0].set_xlabel('Boosting Rounds')
+    axes[0].set_ylabel('Log Loss')
+    axes[0].set_title('Loss Curves')
+    axes[0].legend()
+
+    axes[1].plot(iterations, mean_train_acc, label='Train Accuracy')
+    axes[1].plot(iterations, mean_val_acc, label='Validation Accuracy')
+    axes[1].set_xlabel('Boosting Rounds')
+    axes[1].set_ylabel('Accuracy')
+    axes[1].set_title('Accuracy Curves')
+    axes[1].legend()
+
+    fig.tight_layout(rect=[0, 0.03, 1, 0.95])
+    fig.savefig(plot_path, dpi=150)
+    plt.close(fig)
 
 
 def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save_models=True):
@@ -105,6 +171,8 @@ def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save
         y_tr, y_te = y.iloc[tr_idx], y.iloc[te_idx]
 
         inner_skf = StratifiedKFold(n_splits=inner_cv, shuffle=True, random_state=42)
+        fold_plot_dir = TRIAL_PLOTS_DIR / f'outer_fold_{fold_idx:02d}'
+        fold_plot_dir.mkdir(parents=True, exist_ok=True)
 
         def inner_objective(trial):
             params = {
@@ -113,6 +181,7 @@ def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save
                 'device': 'cpu',
                 'enable_categorical': True,
                 'n_estimators': 400,
+                'eval_metric': ['logloss', 'error'],
                 'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.3, log=True),
                 'max_depth': trial.suggest_int('max_depth', 3, 10),
                 'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
@@ -125,14 +194,38 @@ def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save
             }
 
             fold_aucs = []
+            train_logloss_curves, val_logloss_curves = [], []
+            train_error_curves, val_error_curves = [], []
             for in_tr_idx, in_va_idx in inner_skf.split(X_tr, y_tr):
                 X_in_tr, X_in_va = X_tr.iloc[in_tr_idx], X_tr.iloc[in_va_idx]
                 y_in_tr, y_in_va = y_tr.iloc[in_tr_idx], y_tr.iloc[in_va_idx]
 
                 model = xgb.XGBClassifier(**params)
-                model.fit(X_in_tr, y_in_tr, eval_set=[(X_in_va, y_in_va)], verbose=False)
+                model.fit(
+                    X_in_tr,
+                    y_in_tr,
+                    eval_set=[(X_in_tr, y_in_tr), (X_in_va, y_in_va)],
+                    verbose=False
+                )
                 proba = model.predict_proba(X_in_va)[:, 1]
                 fold_aucs.append(roc_auc_score(y_in_va, proba))
+
+                evals_result = model.evals_result()
+                train_logloss_curves.append(evals_result['validation_0']['logloss'])
+                val_logloss_curves.append(evals_result['validation_1']['logloss'])
+                train_error_curves.append(evals_result['validation_0']['error'])
+                val_error_curves.append(evals_result['validation_1']['error'])
+
+            plot_path = fold_plot_dir / f"trial_{trial.number:03d}_metrics.png"
+            plot_trial_metrics(
+                train_logloss_curves,
+                val_logloss_curves,
+                train_error_curves,
+                val_error_curves,
+                plot_path,
+                trial.number,
+                fold_idx
+            )
 
             return float(np.mean(fold_aucs))
 
@@ -150,6 +243,7 @@ def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save
             'device': 'cpu',
             'enable_categorical': True,
             'n_estimators': 800,
+            'eval_metric': ['logloss', 'error'],
             'early_stopping_rounds': 40,
             **best_params
         }
@@ -161,15 +255,38 @@ def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save
         y_tr2, y_va2 = y_tr.iloc[tr2_idx], y_tr.iloc[va2_idx]
 
         final_model = xgb.XGBClassifier(**final_params)
-        final_model.fit(X_tr2, y_tr2, eval_set=[(X_va2, y_va2)], verbose=False)
+        final_model.fit(
+            X_tr2,
+            y_tr2,
+            eval_set=[(X_tr2, y_tr2), (X_va2, y_va2)],
+            verbose=False
+        )
+
+        evals_result = final_model.evals_result()
+        train_loss_curve = evals_result['validation_0']['logloss']
+        val_loss_curve = evals_result['validation_1']['logloss']
+        train_error_curve = evals_result['validation_0']['error']
+        val_error_curve = evals_result['validation_1']['error']
+
+        best_iteration = getattr(final_model, "best_iteration", None)
+        metric_index = int(best_iteration) if best_iteration is not None else len(val_loss_curve) - 1
+        train_loss_at_best = train_loss_curve[metric_index]
+        val_loss_at_best = val_loss_curve[metric_index]
+        train_acc_at_best = 1.0 - train_error_curve[metric_index]
+        val_acc_at_best = 1.0 - val_error_curve[metric_index]
+        loss_gap = abs(train_loss_at_best - val_loss_at_best)
 
         # refit on full outer-train with best n_estimators (no early stopping)
-        best_n = getattr(final_model, "best_iteration", None)
-        if best_n is None:
-            best_n = final_model.get_params().get('n_estimators', 800)
-        best_n_per_fold.append(int(best_n))
+        best_n_trees = (
+            int(best_iteration) + 1
+            if best_iteration is not None
+            else final_model.get_params().get('n_estimators', 800)
+        )
+        best_n_per_fold.append(int(best_n_trees))
 
-        final_model = xgb.XGBClassifier(**{**final_params, 'n_estimators': int(best_n), 'early_stopping_rounds': None})
+        final_model = xgb.XGBClassifier(
+            **{**final_params, 'n_estimators': int(best_n_trees), 'early_stopping_rounds': None}
+        )
         final_model.fit(X_tr, y_tr, verbose=False)
 
         # evaluate on outer test
@@ -186,23 +303,37 @@ def nested_cross_validation(X, y, outer_cv=5, inner_cv=3, optuna_trials=20, save
 
         print(f"  Outer test ACC: {te_acc:.4f} | AUC: {te_auc:.4f}")
         print(f"  Outer train ACC: {tr_acc:.4f} | AUC: {tr_auc:.4f}")
+        print(f"  Holdout val ACC: {val_acc_at_best:.4f} | Loss gap: {loss_gap:.4f}")
 
         # optionally save good outer-fold models
-        if save_models and te_acc >= ACC_THRESHOLD:
+        if (
+            save_models
+            and val_acc_at_best >= VAL_ACC_SAVE_THRESHOLD
+            and loss_gap <= LOSS_GAP_THRESHOLD
+        ):
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            model_path = f"{SAVE_DIR}/nested_fold{fold_idx}_acc{te_acc:.3f}_{timestamp}.json"
-            final_model.save_model(model_path)
-            with open(f"{SAVE_DIR}/nested_fold{fold_idx}_metadata_{timestamp}.json", 'w') as f:
+            model_path = SAVE_DIR / f"nested_fold{fold_idx}_acc{te_acc:.3f}_{timestamp}.json"
+            final_model.save_model(str(model_path))
+            metadata_path = SAVE_DIR / f"nested_fold{fold_idx}_metadata_{timestamp}.json"
+            with metadata_path.open('w') as f:
                 json.dump({
-                    'params': {**final_params, 'n_estimators': int(best_n), 'early_stopping_rounds': None},
+                    'params': {**final_params, 'n_estimators': int(best_n_trees), 'early_stopping_rounds': None},
                     'metrics': {
+                        'train_holdout_acc': float(train_acc_at_best),
+                        'train_holdout_loss': float(train_loss_at_best),
+                        'val_holdout_acc': float(val_acc_at_best),
+                        'val_holdout_loss': float(val_loss_at_best),
+                        'loss_gap_abs': float(loss_gap),
                         'train_acc': float(tr_acc),
                         'train_auc': float(tr_auc),
                         'test_acc': float(te_acc),
                         'test_auc': float(te_auc)
                     }
                 }, f, indent=2)
-            print(f"✓ Saved outer fold {fold_idx} | acc={te_acc:.3f}, auc={te_auc:.3f}")
+            print(
+                f"✓ Saved outer fold {fold_idx} | val_acc={val_acc_at_best:.3f}, "
+                f"loss_gap={loss_gap:.3f}"
+            )
 
     print("\n" + "=" * 50)
     print("Nested CV Results (Unbiased Estimate)")
@@ -232,7 +363,8 @@ def train_xgboost_nested(optuna_trials=20, outer_cv=5, inner_cv=3, save_models=T
                                       optuna_trials=optuna_trials, save_models=save_models)
     # Optionally write a summary file
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    with open(f"{SAVE_DIR}/nested_cv_summary_{timestamp}.json", 'w') as f:
+    summary_path = SAVE_DIR / f"nested_cv_summary_{timestamp}.json"
+    with summary_path.open('w') as f:
         json.dump({
             'mean_test_acc': float(np.mean(results['outer_accs'])),
             'std_test_acc': float(np.std(results['outer_accs'])),
