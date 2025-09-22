@@ -1,107 +1,108 @@
 # Fight Forecaster AI UFC
 
-This project aims to predict the outcomes of UFC fights using machine learning techniques, specifically XGBoost.
+Fight Forecaster AI is a tooling stack for preparing UFC fight data, training predictive models, and reviewing betting scenarios. It centralizes scraping, cleaning, feature engineering, model training, and evaluation so the full workflow can be run from one repository.
 
-## Overview
+## Project scope
 
-The system uses historical UFC fight data to train a model that can predict the winner of future fights. It employs advanced techniques such as:
+The repository focuses on practical fight forecasting tasks:
 
-- XGBoost classifier with GPU acceleration
-- Hyperparameter optimization using Optuna
-- SHAP (SHapley Additive exPlanations) for model interpretability
-- Dynamic feature selection
-- Web scraping for up-to-date fight odds
+- **Data acquisition** – Scrapers under `src/data_processing/scraping` collect fighter statistics, bout histories, and betting lines from public sources.
+- **Data preparation** – Cleaning and feature modules in `src/data_processing/cleaning` and `src/data_processing/features` merge raw tables, engineer Elo-style ratings, flag recent form, and attach betting context.
+- **Modeling** – Code in `src/models` builds and tunes XGBoost models with Optuna-based cross-validation, then serializes artifacts for reuse.
+- **Matchup scoring** – CLI utilities assemble head-to-head matchup files, score them with saved models, and generate bankroll projections.
+- **Reporting** – Evaluation scripts summarize calibration, bankroll growth, and other diagnostics for comparison across runs.
 
-## Features
+## Repository layout
 
-- Data preprocessing and cleaning
-- Web scraping of fight odds from BestFightOdds
-- Model training with XGBoost
-- Hyperparameter tuning with Optuna
-- Model evaluation using accuracy and AUC-ROC scores
-- Visualization of learning curves
-- SHAP analysis for feature importance
-- Ability to retrain the model with top N most important features
-- Interactive pausing and resuming of the training process
-- Prediction of fight outcomes for specific matchups
+```
+├── data/
+│   ├── raw/            # Raw scrapes directly from data sources
+│   ├── processed/      # Curated tables produced by the processors
+│   ├── train_test/     # Train/test splits ready for model training
+│   └── live_data/      # Latest cards and ad-hoc matchup files
+├── notebooks/          # Exploratory analyses and scraper prototypes
+├── outputs/            # Plots, calibration reports, bankroll summaries
+├── saved_models/       # Persisted encoders and trained model artifacts
+└── src/
+    ├── data_processing/
+    │   ├── scraping/   # Selenium and HTTP scrapers
+    │   ├── cleaning/   # FightDataProcessor and helpers
+    │   └── features/   # Feature engineering utilities
+    └── models/
+        ├── create_predictions/
+        ├── model_evaluation/
+        ├── predict_testset/
+        └── xgboost_optimizer/
+```
 
-## Requirements
+## Environment setup
 
-- Python 3.x
-- NumPy
-- Pandas
-- Optuna
-- XGBoost
-- Scikit-learn
-- Matplotlib
-- SHAP
-- Selenium (for web scraping)
+- Python 3.10 or newer is recommended.
+- Chrome or Chromium with a matching ChromeDriver binary must be installed for Selenium-based scrapers.
+- GPU hardware is optional but shortens Optuna searches for the XGBoost models.
 
-## Installation
+Create and populate a virtual environment:
 
-1. Clone this repository
-2. Install the required packages:
-   
-   pip install -r requirements.txt
-   
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+pip install numpy pandas scikit-learn xgboost optuna matplotlib seaborn rich tqdm rapidfuzz selenium selenium-stealth beautifulsoup4 requests
+```
 
-## Usage
+Install any optional visualization packages (for example `shap` or `plotly`) as needed.
 
-### Data Preparation
+Ensure the `data` directory includes the expected subfolders (`raw`, `processed`, `train_test`, `live_data`) before running the processors so intermediate files have a destination.
 
-1. Run the data preparation script:
-   
-   python data_cleaner.py
-   
-   This will process the raw UFC stats and create the necessary datasets.
+## Typical workflow
 
-2. To scrape fight odds:
-   
-   python odds_scraper.py
-   
+1. **Scrape source data**
+   - Run the modules in `src/data_processing/scraping` to capture fighter statistics, results, and odds.
+   - Selenium scrapers such as `BestfightoddsScraper.py` and `Tapology_scraping.py` require ChromeDriver.
+   - HTTP-only scripts such as `scrape_ufc_stats_library.py` rely on `requests` and `BeautifulSoup`.
 
-### Model Training
+2. **Clean and engineer features**
+   - Use `FightDataProcessor` in `src/data_processing/cleaning/data_cleaner.py` to merge raw tables, create fight-level aggregates, compute Elo ratings, and generate curated CSV outputs under `data/processed` and `data/train_test`.
 
-Run the main training script:
+3. **Create matchup files**
+   - Build head-to-head inputs for upcoming fights with:
 
-python main.py
+     ```bash
+     python src/models/create_predictions/main.py \
+         --fighters "Fighter A" "Fighter B" \
+         --odds 110 -120 100 -110 \
+         --date 2025-08-09
+     ```
 
-During execution, you can:
-- Press 'p' to pause/resume the optimization process
-- Press 'q' to quit the program
+   - The command looks up fighter histories, applies encoders, and writes a matchup file ready for scoring.
 
-### Making Predictions
+4. **Train models**
+   - Launch nested cross-validation and hyperparameter search with:
 
-To predict the outcome of a specific matchup:
+     ```bash
+     python src/models/xgboost_optimizer/main.py
+     ```
 
-1. Run the prediction script:
-   
-   python predict.py
-   
+   - Results, best models, and Optuna study details are saved under `saved_models/xgboost`.
 
-2. Enter the names of the two fighters when prompted.
+5. **Score and evaluate**
+   - Generate predictions with the console app:
 
-3. The script will output the predicted winner and the probability of winning.
+     ```bash
+     python src/models/predict_testset/main.py
+     ```
 
-## Structure
+   - Review bankroll simulations and calibration plots with:
 
-- data_cleaner.py: Contains functions for data preprocessing and feature engineering
-- odds_scraper.py: Web scraping script for collecting fight odds
-- main.py: Main script for model training and optimization
-- predict.py: Script for making predictions on specific matchups
+     ```bash
+     python src/models/model_evaluation/unified_evaluator.py
+     ```
 
-## Model Performance
+   - Outputs are written to the `outputs` directory for comparison across runs.
 
-The model's performance is evaluated using accuracy and AUC-ROC scores. Learning curves are plotted to visualize the training process.
+## Notebooks
 
-## Feature Importance
-
-SHAP values are used to determine the most influential features in predicting fight outcomes. This information can be used to refine the model and gain insights into what factors most affect fight results.
-
-## Future Improvements
-
-- Predict if fight will go the distance
-- Predict how will fight end
+Notebooks prefixed with `scrape_ufc_stats_` document exploratory scraping and feature checks. They complement the production modules by capturing prototypes and manual validations.
 
 ## Copyright and License
 
@@ -119,6 +120,5 @@ Unauthorized use, reproduction, or distribution of this Software, or any portion
 
 ## Contact
 
-William Qin Shen
-
-williambillqinshen@gmail.com
+William Qin Shen  
+[williambillqinshen@gmail.com](mailto:williambillqinshen@gmail.com)
