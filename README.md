@@ -104,19 +104,6 @@ Ensure the `data` directory includes the expected subfolders (`raw`, `processed`
 
 Notebooks prefixed with `scrape_ufc_stats_` document exploratory scraping and feature checks. They complement the production modules by capturing prototypes and manual validations.
 
-## Copyright and License
-
-Copyright (c) 2024 William Qin Shen. All rights reserved.
-
-This software and associated documentation files (Fight Forecaster AI) are the exclusive property of William Qin Shen. The Software is protected by copyright laws and international copyright treaties, as well as other intellectual property laws and treaties.
-
-No part of this Software may be reproduced, distributed, or transmitted in any form or by any means, including photocopying, recording, or other electronic or mechanical methods, without the prior written permission of the copyright owner, except in the case of brief quotations embodied in critical reviews and certain other noncommercial uses permitted by copyright law.
-
-For permission requests, please contact the copyright owner at:
-
-williambillqinshen@gmail.com
-
-Unauthorized use, reproduction, or distribution of this Software, or any portion of it, may result in severe civil and criminal penalties, and will be prosecuted to the maximum extent possible under law.
 
 ## Contact
 
