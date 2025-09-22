@@ -48,11 +48,11 @@ class Config:
     # Model settings
     use_ensemble: bool = False  # Whether to use ensemble of models
     model_files: List[str] = field(default_factory=lambda: [
-        'model_top_500_features_acc_0.6302_auc_0.6785.json',
-        'model_0.6570_auc_diff_0.0235.json',
-        'model_0.6570_auc_diff_0.0256.json',
-        'model_0.6570_auc_diff_0.0244.json',
-        'model_0.6586_auc_diff_0.0243.json'
+        'model_0.7080_auc_diff_0.0037.json',
+        'model_0.7057_auc_diff_0.0020.json',
+        'model_0.7009_auc_diff_0.0161.json',
+        'model_0.7009_auc_diff_0.0072.json',
+        'model_0.7009_auc_diff_0.0038.json'
     ])
 
     # Data paths
@@ -60,7 +60,7 @@ class Config:
     test_data_path: str = '../../../data/train_test/test_data.csv'
     # test_data_path: str = '../../../data/matchup data/all_matchups.csv'
     encoder_path: str = '../../../saved_models/encoders/category_encoder.pkl'
-    model_base_path: str = '../../../saved_models/xgboost/jan2024-dec2025/robust_training/'
+    model_base_path: str = '../../../saved_models/xgboost/jan2024-dec2025/dynamicmatchup sorted 425/'
 
     # Display settings
     display_columns: List[str] = field(default_factory=lambda: ['current_fight_date', 'fighter_a', 'fighter_b'])
