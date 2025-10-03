@@ -6,6 +6,7 @@ import json
 import warnings
 from datetime import datetime
 from pathlib import Path
+import random
 
 import matplotlib
 
@@ -24,6 +25,7 @@ warnings.filterwarnings("ignore")
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DATA_DIR = PROJECT_ROOT / "data" / "train_test"
 SAVE_DIR = PROJECT_ROOT / "saved_models" / "xgboost" / "trials"
+FINAL_MODEL_DIR = PROJECT_ROOT / "saved_models" / "xgboost" / "nested_val"
 TRIAL_PLOTS_DIR = SAVE_DIR / "trial_plots"
 
 ACC_THRESHOLD = 0.60
@@ -31,6 +33,7 @@ VAL_ACC_SAVE_THRESHOLD = 0.60
 LOSS_GAP_THRESHOLD = 0.05
 
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
+FINAL_MODEL_DIR.mkdir(parents=True, exist_ok=True)
 TRIAL_PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -166,14 +169,38 @@ def plot_trial_metrics(train_logloss_curves, val_logloss_curves,
     plt.close(fig)
 
 
+def aggregate_best_params(best_params_per_fold):
+    """Aggregate hyperparameters from all folds by taking median/mode."""
+    aggregated = {}
+
+    # Get all parameter names
+    param_names = set()
+    for params in best_params_per_fold:
+        param_names.update(params.keys())
+
+    for param_name in param_names:
+        values = [params[param_name] for params in best_params_per_fold]
+
+        # Use median for numeric parameters
+        if isinstance(values[0], (int, float)):
+            aggregated[param_name] = type(values[0])(np.median(values))
+        else:
+            # Use mode for categorical (though rare in this case)
+            from collections import Counter
+            aggregated[param_name] = Counter(values).most_common(1)[0][0]
+
+    return aggregated
+
+
 def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
-                            optuna_trials: int = 20, save_models: bool = True):
+                            optuna_trials: int = 20, save_models: bool = True,
+                            run_number: int = 1):
     """Run nested cross-validation and optionally persist strong outer-fold models."""
     print("\n" + "=" * 50)
-    print(f"Nested CV: outer={outer_cv} folds, inner={inner_cv} folds, trials={optuna_trials}")
+    print(f"RUN {run_number} | Nested CV: outer={outer_cv} folds, inner={inner_cv} folds, trials={optuna_trials}")
     print("=" * 50)
 
-    outer_skf = StratifiedKFold(n_splits=outer_cv, shuffle=True, random_state=42)
+    outer_skf = StratifiedKFold(n_splits=outer_cv, shuffle=False)
 
     outer_accs, outer_aucs = [], []
     train_accs, train_aucs = [], []
@@ -183,20 +210,22 @@ def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
     optuna.logging.set_verbosity(optuna.logging.WARNING)
 
     for fold_idx, (tr_idx, te_idx) in enumerate(outer_skf.split(X, y), start=1):
-        print(f"\n--- Outer Fold {fold_idx}/{outer_cv} ---")
+        print(f"\n{'='*60}")
+        print(f"  RUN {run_number} | OUTER FOLD {fold_idx}/{outer_cv}")
+        print(f"{'='*60}")
 
         X_tr, X_te = X.iloc[tr_idx], X.iloc[te_idx]
         y_tr, y_te = y.iloc[tr_idx], y.iloc[te_idx]
 
-        inner_skf = StratifiedKFold(n_splits=inner_cv, shuffle=True, random_state=42)
-        fold_plot_dir = TRIAL_PLOTS_DIR / f"outer_fold_{fold_idx:02d}"
+        inner_skf = StratifiedKFold(n_splits=inner_cv, shuffle=False)
+        fold_plot_dir = TRIAL_PLOTS_DIR / f"run{run_number}_outer_fold_{fold_idx:02d}"
         fold_plot_dir.mkdir(parents=True, exist_ok=True)
 
         def inner_objective(trial: optuna.Trial) -> float:
             params = {
                 "objective": "binary:logistic",
                 "tree_method": "hist",
-                "device": "cpu",
+                "device": "cuda",
                 "enable_categorical": True,
                 "n_estimators": 400,
                 "eval_metric": ["logloss", "error"],
@@ -206,8 +235,8 @@ def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
                 "subsample": trial.suggest_float("subsample", 0.6, 1.0),
                 "colsample_bytree": trial.suggest_float("colsample_bytree", 0.6, 1.0),
                 "gamma": trial.suggest_float("gamma", 0.01, 1.0, log=True),
-                "reg_alpha": trial.suggest_float("reg_alpha", 0.01, 10.0, log=True),
-                "reg_lambda": trial.suggest_float("reg_lambda", 0.01, 10.0, log=True),
+                "reg_alpha": trial.suggest_float("reg_alpha", 25, 30, log=True),
+                "reg_lambda": trial.suggest_float("reg_lambda", 25, 30, log=True),
                 "early_stopping_rounds": 30,
             }
 
@@ -249,12 +278,12 @@ def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
 
             return float(np.mean(fold_aucs))
 
-        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=42))
+        study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=random.randint(0, 100000)))
         study.optimize(inner_objective, n_trials=optuna_trials)
 
         best_params = dict(study.best_params)
         best_params_per_fold.append(best_params)
-        print(f"  Best inner AUC: {study.best_value:.4f}")
+        print(f"\n  Inner CV Best AUC: {study.best_value:.4f}")
 
         final_params = {
             "objective": "binary:logistic",
@@ -295,6 +324,7 @@ def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
         loss_gap = train_loss_at_best - val_loss_at_best
         loss_gap_abs = abs(loss_gap)
 
+        # best_iteration is 0-indexed, so add 1 to get n_estimators
         best_n_estimators = (
             int(best_iteration) + 1
             if best_iteration is not None
@@ -302,15 +332,18 @@ def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
         )
         best_n_per_fold.append(int(best_n_estimators))
 
+        # Retrain on full outer training set with optimal n_estimators (no early stopping)
         final_model = xgb.XGBClassifier(
             **{**final_params, "n_estimators": int(best_n_estimators), "early_stopping_rounds": None}
         )
         final_model.fit(X_tr, y_tr, verbose=False)
 
+        # Evaluate on outer test set
         te_proba = final_model.predict_proba(X_te)[:, 1]
         te_acc = accuracy_score(y_te, (te_proba > 0.5).astype(int))
         te_auc = roc_auc_score(y_te, te_proba)
 
+        # Evaluate on outer training set
         tr_proba = final_model.predict_proba(X_tr)[:, 1]
         tr_acc = accuracy_score(y_tr, (tr_proba > 0.5).astype(int))
         tr_auc = roc_auc_score(y_tr, tr_proba)
@@ -320,9 +353,19 @@ def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
         train_accs.append(tr_acc)
         train_aucs.append(tr_auc)
 
-        print(f"  Outer test ACC: {te_acc:.4f} | AUC: {te_auc:.4f}")
-        print(f"  Outer train ACC: {tr_acc:.4f} | AUC: {tr_auc:.4f}")
-        print(f"  Holdout val ACC: {val_acc_at_best:.4f} | Loss gap: {loss_gap_abs:.4f}")
+        # Print comprehensive fold statistics
+        print(f"\n  {'─'*56}")
+        print(f"  FOLD {fold_idx} RESULTS")
+        print(f"  {'─'*56}")
+        print(f"  Optimal n_estimators: {best_n_estimators}")
+        print(f"\n  Holdout Validation (from early stopping):")
+        print(f"    Train ACC:      {train_acc_at_best:.4f} | Loss: {train_loss_at_best:.4f}")
+        print(f"    Val ACC:        {val_acc_at_best:.4f} | Loss: {val_loss_at_best:.4f}")
+        print(f"    Loss Gap:       {loss_gap:+.4f} (abs: {loss_gap_abs:.4f})")
+        print(f"\n  Outer Split Performance:")
+        print(f"    Train ACC:      {tr_acc:.4f} | AUC: {tr_auc:.4f}")
+        print(f"    Test ACC:       {te_acc:.4f} | AUC: {te_auc:.4f}")
+        print(f"  {'─'*56}")
 
         if (
             save_models
@@ -331,11 +374,12 @@ def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
             and loss_gap_abs <= LOSS_GAP_THRESHOLD
         ):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            model_path = SAVE_DIR / f"nested_fold{fold_idx}_acc{te_acc:.3f}_{timestamp}.json"
+            model_path = SAVE_DIR / f"run{run_number}_nested_fold{fold_idx}_acc{te_acc:.3f}_{timestamp}.json"
             final_model.save_model(str(model_path))
 
-            metadata_path = SAVE_DIR / f"nested_fold{fold_idx}_metadata_{timestamp}.json"
+            metadata_path = SAVE_DIR / f"run{run_number}_nested_fold{fold_idx}_metadata_{timestamp}.json"
             metadata = {
+                "run_number": run_number,
                 "params": {**final_params, "n_estimators": int(best_n_estimators), "early_stopping_rounds": None},
                 "metrics": {
                     "train_holdout_acc": float(train_acc_at_best),
@@ -352,17 +396,18 @@ def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
             }
             metadata_path.write_text(json.dumps(metadata, indent=2))
             print(
-                f"✓ Saved outer fold {fold_idx} | val_acc={val_acc_at_best:.3f}, "
+                f"\n  ✓ Saved fold model | val_acc={val_acc_at_best:.3f}, "
                 f"loss_gap={loss_gap_abs:.3f}"
             )
 
-    print("\n" + "=" * 50)
-    print("Nested CV Results (Unbiased Estimate)")
-    print("=" * 50)
-    print(f"Test Accuracy:  {np.mean(outer_accs):.4f} ± {np.std(outer_accs):.4f}")
-    print(f"Test AUC:       {np.mean(outer_aucs):.4f} ± {np.std(outer_aucs):.4f}")
-    print(f"Train Accuracy: {np.mean(train_accs):.4f} ± {np.std(train_accs):.4f}")
-    print(f"Train AUC:      {np.mean(train_aucs):.4f} ± {np.std(train_aucs):.4f}")
+    print("\n" + "=" * 60)
+    print(f"  RUN {run_number} | NESTED CV RESULTS (Unbiased Performance Estimate)")
+    print("=" * 60)
+    print(f"  Test Accuracy:  {np.mean(outer_accs):.4f} ± {np.std(outer_accs):.4f}")
+    print(f"  Test AUC:       {np.mean(outer_aucs):.4f} ± {np.std(outer_aucs):.4f}")
+    print(f"  Train Accuracy: {np.mean(train_accs):.4f} ± {np.std(train_accs):.4f}")
+    print(f"  Train AUC:      {np.mean(train_aucs):.4f} ± {np.std(train_aucs):.4f}")
+    print("=" * 60)
 
     return {
         "outer_accs": outer_accs,
@@ -374,13 +419,55 @@ def nested_cross_validation(X, y, outer_cv: int = 5, inner_cv: int = 3,
     }
 
 
+def train_final_model_on_all_data(X, y, aggregated_params, median_n_estimators, run_number):
+    """Train final production model on all available data."""
+    print("\n" + "=" * 60)
+    print(f"  RUN {run_number} | TRAINING FINAL MODEL ON ALL DATA")
+    print("=" * 60)
+
+    final_params = {
+        "objective": "binary:logistic",
+        "tree_method": "hist",
+        "device": "cpu",
+        "enable_categorical": True,
+        "n_estimators": int(median_n_estimators),
+        "eval_metric": ["logloss", "error"],
+        "early_stopping_rounds": None,  # No early stopping for final model
+        **aggregated_params,
+    }
+
+    print(f"\n  Training with aggregated hyperparameters:")
+    for key, value in aggregated_params.items():
+        print(f"    {key}: {value}")
+    print(f"    n_estimators: {median_n_estimators}")
+
+    final_model = xgb.XGBClassifier(**final_params)
+    final_model.fit(X, y, verbose=False)
+
+    # Evaluate on training data (for reference only)
+    train_proba = final_model.predict_proba(X)[:, 1]
+    train_acc = accuracy_score(y, (train_proba > 0.5).astype(int))
+    train_auc = roc_auc_score(y, train_proba)
+
+    print(f"\n  Final Model Training Metrics:")
+    print(f"    Train ACC: {train_acc:.4f}")
+    print(f"    Train AUC: {train_auc:.4f}")
+    print(f"    (Note: These are on training data, not test performance)")
+
+    return final_model, final_params, train_acc, train_auc
+
+
 def train_xgboost_nested(optuna_trials: int = 20, outer_cv: int = 5,
-                          inner_cv: int = 3, save_models: bool = True) -> None:
-    """Entry point for running nested cross-validation."""
-    print("=" * 50)
-    print("XGBoost Training - Nested Cross-Validation")
-    print("=" * 50)
+                          inner_cv: int = 3, save_models: bool = True,
+                          run_number: int = 1) -> dict:
+    """Entry point for running nested cross-validation and training final model."""
+    print("=" * 60)
+    print(f"  RUN {run_number} | XGBoost Training - Nested Cross-Validation")
+    print("=" * 60)
+
     X, y = load_data_for_cv()
+
+    # Run nested cross-validation
     results = nested_cross_validation(
         X,
         y,
@@ -388,11 +475,14 @@ def train_xgboost_nested(optuna_trials: int = 20, outer_cv: int = 5,
         inner_cv=inner_cv,
         optuna_trials=optuna_trials,
         save_models=save_models,
+        run_number=run_number,
     )
 
+    # Save nested CV summary
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    summary_path = SAVE_DIR / f"nested_cv_summary_{timestamp}.json"
+    summary_path = SAVE_DIR / f"run{run_number}_nested_cv_summary_{timestamp}.json"
     summary = {
+        "run_number": run_number,
         "mean_test_acc": float(np.mean(results["outer_accs"])),
         "std_test_acc": float(np.std(results["outer_accs"])),
         "mean_test_auc": float(np.mean(results["outer_aucs"])),
@@ -401,8 +491,141 @@ def train_xgboost_nested(optuna_trials: int = 20, outer_cv: int = 5,
         "best_n_per_fold": results["best_n_per_fold"],
     }
     summary_path.write_text(json.dumps(summary, indent=2))
-    print("✓ Nested CV summary saved")
+    print(f"\n✓ Run {run_number} nested CV summary saved")
+
+    # Aggregate best hyperparameters across all folds
+    aggregated_params = aggregate_best_params(results["best_params_per_fold"])
+    median_n_estimators = int(np.median(results["best_n_per_fold"]))
+
+    # Train final model on all data
+    final_model, final_params, train_acc, train_auc = train_final_model_on_all_data(
+        X, y, aggregated_params, median_n_estimators, run_number
+    )
+
+    # Save final model
+    final_model_path = FINAL_MODEL_DIR / f"run{run_number}_final_model_{timestamp}.json"
+    final_model.save_model(str(final_model_path))
+
+    # Save final model metadata
+    final_metadata = {
+        "run_number": run_number,
+        "timestamp": timestamp,
+        "nested_cv_results": {
+            "mean_test_acc": float(np.mean(results["outer_accs"])),
+            "std_test_acc": float(np.std(results["outer_accs"])),
+            "mean_test_auc": float(np.mean(results["outer_aucs"])),
+            "std_test_auc": float(np.std(results["outer_aucs"])),
+        },
+        "aggregated_params": aggregated_params,
+        "final_params": final_params,
+        "median_n_estimators": median_n_estimators,
+        "best_n_per_fold": results["best_n_per_fold"],
+        "training_metrics": {
+            "train_acc": float(train_acc),
+            "train_auc": float(train_auc),
+        },
+        "training_samples": len(X),
+    }
+
+    final_metadata_path = FINAL_MODEL_DIR / f"run{run_number}_final_model_metadata_{timestamp}.json"
+    final_metadata_path.write_text(json.dumps(final_metadata, indent=2))
+
+    print("\n" + "=" * 60)
+    print(f"  ✓ Run {run_number} final model saved to: {final_model_path}")
+    print(f"  ✓ Metadata saved to: {final_metadata_path}")
+    print("=" * 60)
+    print(f"\n  Expected test performance (from nested CV):")
+    print(f"    Accuracy: {np.mean(results['outer_accs']):.4f} ± {np.std(results['outer_accs']):.4f}")
+    print(f"    AUC:      {np.mean(results['outer_aucs']):.4f} ± {np.std(results['outer_aucs']):.4f}")
+    print("=" * 60)
+
+    return {
+        "run_number": run_number,
+        "model_path": str(final_model_path),
+        "metadata_path": str(final_metadata_path),
+        "mean_test_acc": float(np.mean(results["outer_accs"])),
+        "std_test_acc": float(np.std(results["outer_accs"])),
+        "mean_test_auc": float(np.mean(results["outer_aucs"])),
+        "std_test_auc": float(np.std(results["outer_aucs"])),
+    }
+
+
+def run_multiple_training_sessions(n_runs: int = 5, optuna_trials: int = 20,
+                                   outer_cv: int = 5, inner_cv: int = 3,
+                                   save_models: bool = True):
+    """Run multiple training sessions to generate multiple final models."""
+    print("\n" + "█" * 70)
+    print("█" + " " * 68 + "█")
+    print(f"█  RUNNING {n_runs} COMPLETE TRAINING SESSIONS" + " " * (68 - len(f"  RUNNING {n_runs} COMPLETE TRAINING SESSIONS")) + "█")
+    print("█" + " " * 68 + "█")
+    print("█" * 70 + "\n")
+
+    all_run_results = []
+
+    for run_idx in range(1, n_runs + 1):
+        print(f"\n\n{'█' * 70}")
+        print(f"█  STARTING RUN {run_idx}/{n_runs}")
+        print(f"{'█' * 70}\n")
+
+        run_results = train_xgboost_nested(
+            optuna_trials=optuna_trials,
+            outer_cv=outer_cv,
+            inner_cv=inner_cv,
+            save_models=save_models,
+            run_number=run_idx,
+        )
+
+        all_run_results.append(run_results)
+
+        print(f"\n{'█' * 70}")
+        print(f"█  COMPLETED RUN {run_idx}/{n_runs}")
+        print(f"{'█' * 70}\n")
+
+    # Save aggregate summary of all runs
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    aggregate_summary_path = FINAL_MODEL_DIR / f"all_runs_summary_{timestamp}.json"
+
+    aggregate_summary = {
+        "total_runs": n_runs,
+        "timestamp": timestamp,
+        "all_runs": all_run_results,
+        "aggregate_statistics": {
+            "mean_test_acc": float(np.mean([r["mean_test_acc"] for r in all_run_results])),
+            "std_test_acc": float(np.std([r["mean_test_acc"] for r in all_run_results])),
+            "mean_test_auc": float(np.mean([r["mean_test_auc"] for r in all_run_results])),
+            "std_test_auc": float(np.std([r["mean_test_auc"] for r in all_run_results])),
+        },
+    }
+
+    aggregate_summary_path.write_text(json.dumps(aggregate_summary, indent=2))
+
+    # Print final summary
+    print("\n" + "█" * 70)
+    print("█" + " " * 68 + "█")
+    print("█  ALL TRAINING RUNS COMPLETED" + " " * 38 + "█")
+    print("█" + " " * 68 + "█")
+    print("█" * 70)
+    print(f"\n  Total models trained: {n_runs}")
+    print(f"\n  Aggregate Performance Across All Runs:")
+    print(f"    Mean Test Accuracy: {aggregate_summary['aggregate_statistics']['mean_test_acc']:.4f} ± "
+          f"{aggregate_summary['aggregate_statistics']['std_test_acc']:.4f}")
+    print(f"    Mean Test AUC:      {aggregate_summary['aggregate_statistics']['mean_test_auc']:.4f} ± "
+          f"{aggregate_summary['aggregate_statistics']['std_test_auc']:.4f}")
+    print(f"\n  Individual Run Results:")
+    for run_result in all_run_results:
+        print(f"    Run {run_result['run_number']}: Acc={run_result['mean_test_acc']:.4f} ± "
+              f"{run_result['std_test_acc']:.4f}, AUC={run_result['mean_test_auc']:.4f} ± "
+              f"{run_result['std_test_auc']:.4f}")
+    print(f"\n  ✓ Aggregate summary saved to: {aggregate_summary_path}")
+    print(f"  ✓ All models saved to: {FINAL_MODEL_DIR}")
+    print("\n" + "█" * 70 + "\n")
 
 
 if __name__ == "__main__":
-    train_xgboost_nested(optuna_trials=20, outer_cv=5, inner_cv=3, save_models=True)
+    run_multiple_training_sessions(
+        n_runs=5,
+        optuna_trials=20,
+        outer_cv=5,
+        inner_cv=3,
+        save_models=True
+    )

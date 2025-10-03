@@ -473,7 +473,7 @@ class MatchupProcessor:
 
                     # Critical check: Is this date BEFORE current fight?
                     if latest_past_fight_a['fight_date'] >= current_fight['fight_date']:
-                        warning = f"❌ CRITICAL LEAKAGE: Fighter {fighter_a_name} using future fight data!"
+                        warning = f"CRITICAL LEAKAGE: Fighter {fighter_a_name} using future fight data!"
                         self.leakage_warnings.append(warning)
                         print(warning)
 
@@ -485,7 +485,7 @@ class MatchupProcessor:
 
                     if 'total_fights' in latest_past_fight_a:
                         if latest_past_fight_a['total_fights'] > actual_fight_number:
-                            warning = (f"❌ LEAKAGE: {fighter_a_name} has total_fights="
+                            warning = (f"LEAKAGE: {fighter_a_name} has total_fights="
                                      f"{latest_past_fight_a['total_fights']} but only {actual_fight_number} "
                                      f"fights up to {latest_past_fight_a['fight_date']}")
                             self.leakage_warnings.append(warning)
@@ -495,7 +495,7 @@ class MatchupProcessor:
                     latest_past_fight_b = fighter_b_df.iloc[0]
 
                     if latest_past_fight_b['fight_date'] >= current_fight['fight_date']:
-                        warning = f"❌ CRITICAL LEAKAGE: Fighter {fighter_b_name} using future fight data!"
+                        warning = f"CRITICAL LEAKAGE: Fighter {fighter_b_name} using future fight data!"
                         self.leakage_warnings.append(warning)
                         print(warning)
 
@@ -803,9 +803,18 @@ class MatchupProcessor:
                 correlation_threshold=0.95,
                 protected_columns=[
                     'winner',
+                    'current_fight_open_odds',
+                    'current_fight_open_odds_b',
                     'current_fight_open_odds_diff',
+                    'current_fight_open_odds_ratio',
+                    'current_fight_closing_odds',
+                    'current_fight_closing_odds_b',
+                    'current_fight_closing_odds_diff',
+                    'current_fight_closing_odds_ratio',
+                    'current_fight_closing_range_end',
                     'current_fight_closing_range_end_b',
-                    'current_fight_closing_odds_diff'
+                    'current_fight_closing_open_diff_a',
+                    'current_fight_closing_open_diff_b'
                 ]
             )
 
@@ -834,15 +843,15 @@ class MatchupProcessor:
             if not train_data.empty and not val_data.empty:
                 if train_data['current_fight_date'].max() >= val_data['current_fight_date'].min():
                     overlap_issues.append("Train and validation dates overlap")
-                    print("❌ LEAKAGE: Train and validation dates overlap!")
+                    print("LEAKAGE: Train and validation dates overlap!")
 
             if not val_data.empty and not test_data.empty:
                 if val_data['current_fight_date'].max() >= test_data['current_fight_date'].min():
                     overlap_issues.append("Validation and test dates overlap")
-                    print("❌ LEAKAGE: Validation and test dates overlap!")
+                    print("LEAKAGE: Validation and test dates overlap!")
 
             if not overlap_issues:
-                print("✅ No date overlap between train/val/test sets")
+                print("No date overlap between train/val/test sets")
 
             # Additional check: verify no duplicate dates across sets
             if not train_data.empty and not val_data.empty:
@@ -850,7 +859,7 @@ class MatchupProcessor:
                 val_dates = set(val_data['current_fight_date'].unique())
                 common_dates = train_dates.intersection(val_dates)
                 if common_dates:
-                    print(f"⚠️ WARNING: {len(common_dates)} dates appear in both train and val sets")
+                    print(f"WARNING: {len(common_dates)} dates appear in both train and val sets")
                     print(f"   Common dates: {sorted(list(common_dates))[:5]}")  # Show first 5
 
             print("=" * 60)
@@ -961,7 +970,7 @@ def verify_data_integrity(data_dir: str = "../../../data", sample_size: int = 5)
             # Verify
             if fight.get('total_fights', 0) != i+1:
                 issues_found.append(f"Fighter {test_fighter}: total_fights mismatch in fight {i+1}")
-                print(f"     ❌ LEAKAGE DETECTED!")
+                print(f"LEAKAGE DETECTED!")
 
         # Test 2: Check date ordering
         print("\n2. Checking date ordering in career stats:")
@@ -971,13 +980,13 @@ def verify_data_integrity(data_dir: str = "../../../data", sample_size: int = 5)
             if not all(dates[i] <= dates[i+1] for i in range(len(dates)-1)):
                 date_issues += 1
                 if date_issues <= 3:  # Show first 3 issues
-                    print(f"   ❌ LEAKAGE: Fighter {fighter} has unordered dates!")
+                    print(f"LEAKAGE: Fighter {fighter} has unordered dates!")
                     issues_found.append(f"Fighter {fighter}: unordered dates")
 
         if date_issues > 3:
             print(f"   ... and {date_issues - 3} more fighters with date issues")
         elif date_issues == 0:
-            print("   ✅ All fighters have properly ordered dates")
+            print("All fighters have properly ordered dates")
 
         # Test 3: Check train/test split
         train_data = pd.read_csv(f"{data_dir}/train_test/train_data.csv")
@@ -990,13 +999,13 @@ def verify_data_integrity(data_dir: str = "../../../data", sample_size: int = 5)
         print(f"   Test:  {test_data['current_fight_date'].min()} to {test_data['current_fight_date'].max()}")
 
         if train_data['current_fight_date'].max() >= val_data['current_fight_date'].min():
-            print("   ❌ LEAKAGE: Train and validation dates overlap!")
+            print("LEAKAGE: Train and validation dates overlap!")
             issues_found.append("Train/val date overlap")
         elif val_data['current_fight_date'].max() >= test_data['current_fight_date'].min():
-            print("   ❌ LEAKAGE: Validation and test dates overlap!")
+            print("LEAKAGE: Validation and test dates overlap!")
             issues_found.append("Val/test date overlap")
         else:
-            print("   ✅ No date overlap between train/val/test")
+            print("No date overlap between train/val/test")
 
         # Test 4: Check for future data in features
         print("\n4. Checking for future data in features (sample):")
@@ -1007,10 +1016,10 @@ def verify_data_integrity(data_dir: str = "../../../data", sample_size: int = 5)
                 print(f"   Sample {i+1}: Fighter A has {row.get('total_fights_fighter_a_avg_last_3', 'N/A')} total fights")
 
     except FileNotFoundError as e:
-        print(f"\n❌ Error: Required file not found - {e}")
+        print(f"\nError: Required file not found - {e}")
         issues_found.append(f"Missing file: {e}")
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
+        print(f"\nUnexpected error: {e}")
         issues_found.append(f"Unexpected error: {e}")
 
     # Final summary
@@ -1019,9 +1028,9 @@ def verify_data_integrity(data_dir: str = "../../../data", sample_size: int = 5)
     print("="*80)
 
     if not issues_found:
-        print("✅ ALL CHECKS PASSED - No data leakage detected!")
+        print("ALL CHECKS PASSED - No data leakage detected!")
     else:
-        print(f"❌ ISSUES FOUND ({len(issues_found)} total):")
+        print(f"ISSUES FOUND ({len(issues_found)} total):")
         for issue in issues_found[:10]:  # Show first 10 issues
             print(f"   - {issue}")
         if len(issues_found) > 10:
@@ -1061,9 +1070,9 @@ def main():
     # Split into train/val/test
     matchup_processor.split_train_val_test(
         'matchup data/matchup_data_3_avg_name.csv',
-        '2025-01-01',
+        '2024-01-01',
         '2025-12-31',
-        10
+        20
     )
 
     # Run comprehensive verification
@@ -1071,9 +1080,9 @@ def main():
     integrity_passed = verify_data_integrity()
 
     if integrity_passed:
-        print("\n✅ Data processing completed successfully with no leakage detected!")
+        print("\nData processing completed successfully with no leakage detected!")
     else:
-        print("\n⚠️ Data processing completed but potential leakage issues were detected.")
+        print("\n⚠Data processing completed but potential leakage issues were detected.")
         print("Please review the verification output above.")
 
 
